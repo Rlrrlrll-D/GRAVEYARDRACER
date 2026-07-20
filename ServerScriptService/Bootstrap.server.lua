@@ -7,23 +7,20 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PhysicsService = game:GetService("PhysicsService")
 
+local Net = require(ReplicatedStorage:WaitForChild("Net"))
+
 -- // Remotes -----------------------------------------------------------
 local remotes = Instance.new("Folder")
 remotes.Name = "Remotes"
 remotes.Parent = ReplicatedStorage
 
-local function newRemoteEvent(name: string): RemoteEvent
+-- Создаём по манифесту ReplicatedStorage.Net — единый источник имён событий
+-- (и старые FireWeapon/RaceUpdate/…, и новые PlayerReady/LobbyState/BatScare/…).
+for _, eventName in Net.Events do
 	local event = Instance.new("RemoteEvent")
-	event.Name = name
+	event.Name = eventName
 	event.Parent = remotes
-	return event
 end
-
-newRemoteEvent("FireWeapon")  -- client -> server: (origin: Vector3, direction: Vector3)
-newRemoteEvent("BulletFired") -- server -> clients: (origin: Vector3, hitPosition: Vector3)
-newRemoteEvent("UpdateStats") -- server -> client: (stats table)
-newRemoteEvent("CameraShake") -- server -> client: (intensity: number, duration: number)
-newRemoteEvent("RaceUpdate")  -- server -> clients: (race state table)
 
 -- // Collision Groups ---------------------------------------------------
 local GROUPS = { "Vehicles", "Zombies", "Obstacles", "Environment", "Projectiles" }
