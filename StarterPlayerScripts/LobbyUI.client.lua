@@ -1,0 +1,108 @@
+--!strict
+-- LocalScript: StarterPlayerScripts.LobbyUI  [СКЕЛЕТ — ещё не подключён к Studio]
+-- Экран лобби/меню + экран итогов. Показывается, когда игрок ВНЕ заезда (до
+-- старта и после game over). Прячет геймплейный HUD, пока игрок в лобби.
+-- Вся типографика/цвета — из UITheme (Creepster везде, палитра по кругу).
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Net = require(ReplicatedStorage:WaitForChild("Net"))
+local UITheme = require(ReplicatedStorage:WaitForChild("UITheme"))
+local GameState = require(ReplicatedStorage:WaitForChild("GameState"))
+local SettingsSchema = require(ReplicatedStorage:WaitForChild("SettingsSchema"))
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local playerReady = Net.get(Net.Events.PlayerReady)
+local lobbyState = Net.get(Net.Events.LobbyState)
+local returnToLobby = Net.get(Net.Events.ReturnToLobby)
+local saveSettings = Net.get(Net.Events.SaveSettings)
+
+-- // Каркас экрана ----------------------------------------------------------
+local gui = Instance.new("ScreenGui")
+gui.Name = "LobbyUI"
+gui.ResetOnSpawn = false
+gui.DisplayOrder = 10 -- поверх HUD
+gui.Parent = playerGui
+
+local root = Instance.new("Frame") -- полупрозрачная кладбищенская вуаль
+root.Size = UDim2.fromScale(1, 1)
+root.BackgroundColor3 = UITheme.PanelBg
+root.BackgroundTransparency = 0.15
+root.Visible = true
+root.Parent = gui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 96)
+title.Position = UDim2.new(0, 0, 0.12, 0)
+title.BackgroundTransparency = 1
+title.Text = "GRAVEYARD RACER"
+title.TextScaled = true
+UITheme.applyText(title, { color = UITheme.Palette.Bone })
+title.Parent = root
+
+-- // Кнопка Ready (завязана на MinRacers-гейт MatchManager) ------------------
+local isReady = false
+local readyBtn = Instance.new("TextButton")
+readyBtn.Size = UDim2.new(0, 320, 0, 64)
+readyBtn.Position = UDim2.new(0.5, -160, 0.55, 0)
+readyBtn.BackgroundColor3 = UITheme.Palette.Green
+readyBtn.AutoButtonColor = true
+readyBtn.Text = "READY"
+readyBtn.TextScaled = true
+UITheme.applyText(readyBtn)
+Instance.new("UICorner", readyBtn).CornerRadius = UDim.new(0, 8)
+readyBtn.Parent = root
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(0, 480, 0, 40)
+statusLabel.Position = UDim2.new(0.5, -240, 0.55, 76)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Waiting for racers…"
+statusLabel.TextScaled = true
+UITheme.applyText(statusLabel, { color = UITheme.Palette.Bone })
+statusLabel.Parent = root
+
+readyBtn.Activated:Connect(function()
+	isReady = not isReady
+	readyBtn.Text = isReady and "READY ✓" or "READY"
+	readyBtn.BackgroundColor3 = isReady and UITheme.Palette.Red or UITheme.Palette.Green
+	playerReady:FireServer(isReady)
+end)
+
+lobbyState.OnClientEvent:Connect(function(state)
+	statusLabel.Text = string.format("Racers ready: %d / %d", state.ready or 0, state.needed or 1)
+end)
+
+-- // Панель опций (строится по SettingsSchema) ------------------------------
+-- TODO: сгенерировать тумблеры/слайдеры из SettingsSchema.Options, чередуя фон
+-- строк UITheme.cycleColor(i); по изменению — saveSettings:FireServer(values).
+local function buildOptions() end -- скелет
+buildOptions()
+
+-- // Показ/скрытие лобби ----------------------------------------------------
+local function setLobbyVisible(visible: boolean)
+	root.Visible = visible
+	-- TODO: спрятать/показать геймплейный HUD (GraveyardHUD) — в лобби он не нужен.
+end
+
+-- Приход из мира после game over/финиша: показать итог, затем открыть лобби.
+returnToLobby.OnClientEvent:Connect(function(payload)
+	local result = payload.Result
+	local text =
+		result == "won" and "YOU WIN!"
+		or result == "eliminated" and "GAME OVER — OUT OF LIVES"
+		or result == "finished" and "FINISHED"
+		or (string.upper(tostring(payload.Winner or "GHOST")) .. " WINS")
+	statusLabel.Text = text
+	isReady = false
+	readyBtn.Text = "READY"
+	readyBtn.BackgroundColor3 = UITheme.Palette.Green
+	setLobbyVisible(true) -- ← игрок гарантированно ВНЕ мира, снова в лобби
+end)
+
+-- Старт заезда — спрятать лобби (сервер шлёт Countdown/Racing через RaceUpdate;
+-- TODO: подписаться и скрывать здесь либо в UIController).
+setLobbyVisible(true)
