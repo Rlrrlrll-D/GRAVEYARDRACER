@@ -12,7 +12,7 @@ local player = Players.LocalPlayer
 
 -- "A Beast Inside" — тяжёлый метал, free Creator Store (207с, зациклен).
 local MUSIC_ID = "rbxassetid://130598693233260"
-local TARGET_VOLUME = 0.2 -- фоновый трек тише, чтобы не забивал зомби/эмбиент (баланс 2026-07-20)
+local TARGET_VOLUME = 0.15 -- фоновый трек тише, чтобы не забивал мотор/SFX/эмбиент (баланс 2026-07-20)
 local FADE_SECONDS = 1.5
 
 local music = Instance.new("Sound")
