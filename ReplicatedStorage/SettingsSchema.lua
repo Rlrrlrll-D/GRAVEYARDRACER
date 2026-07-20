@@ -15,10 +15,13 @@ export type Option = {
 
 local SettingsSchema = {}
 
+-- Дефолты громкостей = 1.0: базовый микс уже сбалансирован в самих звуках
+-- (мотор 0.35, метал 0.15, ...), группы лишь умножают под предпочтения игрока.
 SettingsSchema.Options = {
-	{ key = "masterVolume", label = "Общая громкость", kind = "slider", default = 0.8, min = 0, max = 1 },
-	{ key = "musicVolume",  label = "Музыка",          kind = "slider", default = 0.6, min = 0, max = 1 },
-	{ key = "sfxVolume",    label = "Звуки",           kind = "slider", default = 0.9, min = 0, max = 1 },
+	{ key = "masterVolume", label = "Общая",           kind = "slider", default = 1.0, min = 0, max = 1 },
+	{ key = "musicVolume",  label = "Музыка",          kind = "slider", default = 1.0, min = 0, max = 1 },
+	{ key = "engineVolume", label = "Мотор",           kind = "slider", default = 1.0, min = 0, max = 1 },
+	{ key = "sfxVolume",    label = "Звуки",           kind = "slider", default = 1.0, min = 0, max = 1 },
 	{ key = "cameraShake",  label = "Тряска камеры",   kind = "toggle", default = true },
 	{ key = "jumpscares",   label = "Скримеры (мыши)", kind = "toggle", default = true }, -- уважение к пугливым
 	{ key = "aimSens",      label = "Чувствит. турели",kind = "slider", default = 0.5, min = 0.1, max = 1 },

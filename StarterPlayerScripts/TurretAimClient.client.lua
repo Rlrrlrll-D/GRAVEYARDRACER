@@ -18,6 +18,7 @@ local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
+local Audio = require(ReplicatedStorage:WaitForChild("Audio"))
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local fireWeapon = remotes:WaitForChild("FireWeapon") :: RemoteEvent
@@ -127,6 +128,7 @@ local function playGunshot(position: Vector3)
 	local sound = Instance.new("Sound")
 	sound.SoundId = GUNSHOT_SOUND_ID
 	sound.Volume = 0.55
+	sound.SoundGroup = Audio.SFX
 	sound.RollOffMode = Enum.RollOffMode.InverseTapered
 	sound.RollOffMinDistance = 8
 	sound.RollOffMaxDistance = 220
