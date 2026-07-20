@@ -12,7 +12,7 @@ local SoundService = game:GetService("SoundService")
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local batScare = Net.get(Net.Events.BatScare)
 
-local SCREECH_ID = "" -- TODO: писк/шелест крыльев из стора; пусто = без звука
+local SCREECH_ID = "rbxassetid://9113994447" -- залп крыльев (ProSoundEffects «Creature Wings 24», bat flaps 2.1с); пусто = без звука
 
 -- опция «скримеры» (обновляется из PushSettings); по умолчанию включена
 local jumpscaresOn = true
