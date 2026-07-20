@@ -1,13 +1,9 @@
 --!strict
--- LocalScript: StarterPlayerScripts.BatFX  [СКЕЛЕТ — ещё не подключён к Studio]
--- Рисует летучих мышей по команде BatManager. Клиент-онли: модели-мыши живут
--- только у зрителя, CanCollide/CanQuery=false, никакой репликации.
---
--- АССЕТ: готовая мышь из Creator Store / Toolbox. Положить модель в
--- ReplicatedStorage.Assets.Bat (Model с анимацией взмаха крыльев или просто меш).
--- BAT_ASSET_ID — запасной вариант через InsertService, если модели нет в игре.
+-- LocalScript: StarterPlayerScripts.BatFX
+-- Рисует летучих мышей по команде BatManager (BatScare). Клиент-онли: клоны
+-- живут только у зрителя и не реплицируются. Ассет — ReplicatedStorage.Assets.Bat
+-- (одиночный MeshPart "Body", из стора: model 9372173692).
 
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
@@ -16,60 +12,82 @@ local SoundService = game:GetService("SoundService")
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local batScare = Net.get(Net.Events.BatScare)
 
-local player = Players.LocalPlayer
+local SCREECH_ID = "" -- TODO: писк/шелест крыльев из стора; пусто = без звука
 
-local BAT_ASSET_ID = 0 -- TODO: id выбранной мыши из стора (или использовать Assets.Bat)
-local SCREECH_ID = "rbxassetid://0" -- TODO: писк/шелест крыльев из стора
-
--- опция «скримеры» (обновляется из PushSettings — см. LobbyUI/SettingsService)
+-- опция «скримеры» (обновляется из PushSettings); по умолчанию включена
 local jumpscaresOn = true
--- TODO: подписаться на PushSettings и обновлять jumpscaresOn
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+remotes:WaitForChild("PushSettings").OnClientEvent:Connect(function(s)
+	if type(s) == "table" and type(s.jumpscares) == "boolean" then
+		jumpscaresOn = s.jumpscares
+	end
+end)
 
-local batTemplate: Model? = nil
-do
-	local assets = ReplicatedStorage:FindFirstChild("Assets")
-	local b = assets and assets:FindFirstChild("Bat")
-	if b and b:IsA("Model") then batTemplate = b end
-	-- TODO: если nil и BAT_ASSET_ID>0 — InsertService:LoadAsset(BAT_ASSET_ID)
-end
+local template = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Bat")
+
+-- локальная папка для клонов (не реплицируется, легко чистить)
+local folder = Instance.new("Folder")
+folder.Name = "BatFX"
+folder.Parent = workspace.CurrentCamera
 
 local screech = Instance.new("Sound")
 screech.SoundId = SCREECH_ID
-screech.Volume = 0.6
+screech.Volume = 0.7
 screech.Parent = SoundService
 
--- один «вылет»: мышь стартует у origin и по дуге быстро уносится наружу
+-- один вылет: стартует у origin и по дуге быстро уносится наружу, «махая крыльями»
 local function launchOne(origin: Vector3, fast: boolean)
-	if not batTemplate then return end
-	local bat = batTemplate:Clone()
+	local bat = template:Clone()
 	for _, p in bat:GetDescendants() do
 		if p:IsA("BasePart") then
-			p.CanCollide = false; p.CanQuery = false; p.CanTouch = false; p.Anchored = true
+			p.Anchored = true
+			p.CanCollide = false
+			p.CanQuery = false
+			p.CanTouch = false
+			p.CastShadow = false
 		end
 	end
-	-- случайное направление «врассыпную», с уклоном вверх
-	local dir = (Vector3.new(math.random() - 0.5, math.random() * 0.6 + 0.2, math.random() - 0.5)).Unit
-	local speed = fast and math.random(90, 140) or math.random(35, 55) -- swarm резче
-	bat.Parent = workspace.CurrentCamera
+	local start = origin
+		+ Vector3.new((math.random() - 0.5) * 6, (math.random() - 0.5) * 4, (math.random() - 0.5) * 6)
+	local dir
+	if fast then
+		-- рой: взмывает вверх и врассыпную (потревоженная стая)
+		dir = Vector3.new(math.random() - 0.5, math.random() * 0.7 + 0.5, math.random() - 0.5).Unit
+	else
+		-- одиночка: пролёт поперёк, почти горизонтально
+		dir = Vector3.new(math.random() - 0.5, (math.random() - 0.5) * 0.25, math.random() - 0.5).Unit
+	end
+	local speed = fast and math.random(55, 95) or math.random(28, 46)
+	local life = fast and 1.3 or 2.6
+	local phase = math.random() * 6.28
+	bat.Parent = folder
 	local t0 = os.clock()
-	local life = fast and 1.2 or 2.2
 	local conn: RBXScriptConnection
-	conn = RunService.RenderStepped:Connect(function(dt)
+	conn = RunService.RenderStepped:Connect(function()
 		local age = os.clock() - t0
-		if age > life or not bat.Parent then conn:Disconnect(); return end
-		local pos = origin + dir * (speed * age) + Vector3.new(0, math.sin(age * 20) * 1.5, 0) -- взмах
-		bat:PivotTo(CFrame.lookAt(pos, pos + dir))
+		if age > life or not bat.Parent then
+			conn:Disconnect()
+			return
+		end
+		local bob = math.sin(age * 22 + phase) * 1.4 -- взмах вверх-вниз
+		local pos = start + dir * (speed * age) + Vector3.new(0, bob, 0)
+		-- лицом по курсу + «банк» крыльев вокруг оси движения
+		bat:PivotTo(CFrame.lookAt(pos, pos + dir) * CFrame.Angles(0, 0, math.sin(age * 22 + phase) * 0.6))
 	end)
 	Debris:AddItem(bat, life + 0.1)
 end
 
 batScare.OnClientEvent:Connect(function(origin: Vector3, count: number, kind: string)
+	if typeof(origin) ~= "Vector3" then return end
 	if kind == "swarm" then
 		if not jumpscaresOn then return end -- уважаем пугливых
-		screech:Play()
-		-- резкий синхронный разлёт стаи в лицо
-		for _ = 1, count do launchOne(origin, true) end
+		if SCREECH_ID ~= "" then screech:Play() end
+		for _ = 1, count do
+			launchOne(origin, true)
+		end
 	else -- flyby: одна-две неспешные мыши мимо
-		for _ = 1, count do launchOne(origin, false) end
+		for _ = 1, count do
+			launchOne(origin, false)
+		end
 	end
 end)
