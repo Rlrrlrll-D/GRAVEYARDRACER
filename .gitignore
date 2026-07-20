@@ -1,0 +1,12 @@
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Temp / editor
+*.tmp
+*.bak
+*~

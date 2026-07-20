@@ -1,0 +1,203 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" font-family="Georgia, 'Times New Roman', serif">
+  <defs>
+    <!-- Ночной градиент фона -->
+    <radialGradient id="nightGround" cx="50%" cy="45%" r="75%">
+      <stop offset="0%" stop-color="#2e3345"/>
+      <stop offset="55%" stop-color="#232738"/>
+      <stop offset="100%" stop-color="#181b28"/>
+    </radialGradient>
+    <!-- Холмы -->
+    <radialGradient id="hill" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#343a50"/>
+      <stop offset="100%" stop-color="#232738" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Туманные низины -->
+    <radialGradient id="fog" cx="50%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#8fa3c4" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#8fa3c4" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Свечение фонаря -->
+    <radialGradient id="lampGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffd98a" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffd98a" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Луна -->
+    <radialGradient id="moonGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e8ecf7" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#c9d3ea" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#c9d3ea" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ФОН -->
+  <rect width="1200" height="900" fill="url(#nightGround)"/>
+
+  <!-- Луна -->
+  <circle cx="1080" cy="90" r="70" fill="url(#moonGlow)"/>
+  <circle cx="1080" cy="90" r="26" fill="#dfe6f4"/>
+  <circle cx="1071" cy="82" r="5" fill="#c4cde2"/>
+  <circle cx="1090" cy="98" r="7" fill="#c4cde2"/>
+
+  <!-- ХОЛМЫ по периметру (зона Sculpt/Grow террейна) -->
+  <ellipse cx="150" cy="160" rx="190" ry="110" fill="url(#hill)"/>
+  <ellipse cx="1060" cy="720" rx="220" ry="130" fill="url(#hill)"/>
+  <ellipse cx="180" cy="760" rx="200" ry="110" fill="url(#hill)"/>
+  <ellipse cx="1020" cy="300" rx="170" ry="100" fill="url(#hill)"/>
+  <text x="150" y="120" fill="#5d6580" font-size="15" font-style="italic" text-anchor="middle">холмы 5–15 studs</text>
+  <text x="1060" y="800" fill="#5d6580" font-size="15" font-style="italic" text-anchor="middle">холмы 5–15 studs</text>
+
+  <!-- ОГРАДА по периметру -->
+  <rect x="70" y="70" width="1060" height="760" rx="26" fill="none" stroke="#4a4f66" stroke-width="4" stroke-dasharray="14 8"/>
+  <text x="600" y="60" fill="#767d9c" font-size="16" text-anchor="middle" letter-spacing="3">КОВАНАЯ ОГРАДА ПО ПЕРИМЕТРУ</text>
+
+  <!-- ТУМАННЫЕ НИЗИНЫ -->
+  <ellipse cx="420" cy="640" rx="180" ry="90" fill="url(#fog)"/>
+  <ellipse cx="820" cy="260" rx="160" ry="80" fill="url(#fog)"/>
+  <text x="420" y="645" fill="#aebadb" font-size="14" font-style="italic" text-anchor="middle" opacity="0.85">туман (ParticleEmitter)</text>
+  <text x="820" y="265" fill="#aebadb" font-size="14" font-style="italic" text-anchor="middle" opacity="0.85">туман (ParticleEmitter)</text>
+
+  <!-- ТРАССА: восьмёрка -->
+  <!-- внешний контур дороги -->
+  <path id="track" d="M 600 450
+           C 370 450 220 560 220 660
+           C 220 770 400 780 520 700
+           C 590 655 610 560 600 450
+           C 590 340 610 245 680 200
+           C 800 120 980 130 980 240
+           C 980 340 830 450 600 450 Z"
+        fill="none" stroke="#565d78" stroke-width="58" stroke-linejoin="round"/>
+  <path d="M 600 450
+           C 370 450 220 560 220 660
+           C 220 770 400 780 520 700
+           C 590 655 610 560 600 450
+           C 590 340 610 245 680 200
+           C 800 120 980 130 980 240
+           C 980 340 830 450 600 450 Z"
+        fill="none" stroke="#6b7392" stroke-width="46" stroke-linejoin="round"/>
+  <!-- осевая пунктирная линия -->
+  <path d="M 600 450
+           C 370 450 220 560 220 660
+           C 220 770 400 780 520 700
+           C 590 655 610 560 600 450
+           C 590 340 610 245 680 200
+           C 800 120 980 130 980 240
+           C 980 340 830 450 600 450 Z"
+        fill="none" stroke="#c9cede" stroke-width="2.5" stroke-dasharray="16 14" opacity="0.7"/>
+
+  <!-- СТАРТ: ворота-арка -->
+  <g transform="translate(600,450)">
+    <rect x="-14" y="-64" width="10" height="64" fill="#8a91ad"/>
+    <rect x="4" y="-64" width="10" height="64" fill="#8a91ad"/>
+    <path d="M -14 -64 Q 0 -86 14 -64" fill="none" stroke="#8a91ad" stroke-width="9"/>
+  </g>
+  <text x="600" y="512" fill="#e8ecf7" font-size="17" font-weight="bold" text-anchor="middle">СТАРТ · ворота-арка</text>
+  <text x="600" y="533" fill="#9aa2c0" font-size="13" text-anchor="middle">(перекрёсток восьмёрки)</text>
+
+  <!-- МАВЗОЛЕЙ -->
+  <g transform="translate(600,655)">
+    <rect x="-42" y="-30" width="84" height="52" fill="#3d4258" stroke="#8a91ad" stroke-width="2.5"/>
+    <path d="M -50 -30 L 0 -58 L 50 -30 Z" fill="#4a5069" stroke="#8a91ad" stroke-width="2.5"/>
+    <rect x="-11" y="-8" width="22" height="30" fill="#1c1f2c"/>
+  </g>
+  <text x="600" y="716" fill="#c9cede" font-size="15" font-weight="bold" text-anchor="middle">МАВЗОЛЕЙ</text>
+  <text x="600" y="734" fill="#9aa2c0" font-size="12" text-anchor="middle">акцент в центре нижней петли</text>
+
+  <!-- ЧАСОВНЯ -->
+  <g transform="translate(830,180)">
+    <rect x="-26" y="-22" width="52" height="40" fill="#3d4258" stroke="#8a91ad" stroke-width="2"/>
+    <path d="M -32 -22 L 0 -46 L 32 -22 Z" fill="#4a5069" stroke="#8a91ad" stroke-width="2"/>
+    <rect x="-3" y="-62" width="6" height="18" fill="#8a91ad"/>
+  </g>
+  <text x="830" y="150" fill="#c9cede" font-size="14" font-weight="bold" text-anchor="middle">часовня</text>
+
+  <!-- ===== УСЛОВНЫЕ ОБОЗНАЧЕНИЯ (символы, повторяемые по карте) ===== -->
+
+  <!-- МОГИЛЫ (тег Grave) — кресты -->
+  <g fill="none" stroke="#9fd8a8" stroke-width="4" stroke-linecap="round">
+    <!-- вдоль нижней петли -->
+    <g transform="translate(330,570)"><line x1="0" y1="-12" x2="0" y2="12"/><line x1="-8" y1="-4" x2="8" y2="-4"/></g>
+    <g transform="translate(280,690)"><line x1="0" y1="-12" x2="0" y2="12"/><line x1="-8" y1="-4" x2="8" y2="-4"/></g>
+    <g transform="translate(430,760)"><line x1="0" y1="-12" x2="0" y2="12"/><line x1="-8" y1="-4" x2="8" y2="-4"/></g>
+    <g transform="translate(510,610)"><line x1="0" y1="-12" x2="0" y2="12"/><line x1="-8" y1="-4" x2="8" y2="-4"/></g>
+    <g transform="translate(700,690)"><line x1="0" y1="-12" x2="0" y2="12"/><line x1="-8" y1="-4" x2="8" y2="-4"/></g>
+    <!-- вдоль верхней петли -->
+    <g transform="translate(700,300)"><line x1="0" y1="-12" x2="0" y2="12"/><line x1="-8" y1="-4" x2="8" y2="-4"/></g>
+    <g transform="translate(760,140)"><line x1="0" y1="-12" x2="0" y2="12"/><line x1="-8" y1="-4" x2="8" y2="-4"/></g>
+    <g transform="translate(920,330)"><line x1="0" y1="-12" x2="0" y2="12"/><line x1="-8" y1="-4" x2="8" y2="-4"/></g>
+    <g transform="translate(1030,190)"><line x1="0" y1="-12" x2="0" y2="12"/><line x1="-8" y1="-4" x2="8" y2="-4"/></g>
+    <g transform="translate(500,340)"><line x1="0" y1="-12" x2="0" y2="12"/><line x1="-8" y1="-4" x2="8" y2="-4"/></g>
+  </g>
+
+  <!-- ПРЕПЯТСТВИЯ (тег Hazard) — надгробия-плиты у самой дороги -->
+  <g fill="#d98a8a" stroke="#a85f5f" stroke-width="2">
+    <rect x="382" y="428" width="18" height="24" rx="7"/>
+    <rect x="252" y="588" width="18" height="24" rx="7"/>
+    <rect x="466" y="726" width="18" height="24" rx="7"/>
+    <rect x="612" y="368" width="18" height="24" rx="7"/>
+    <rect x="666" y="238" width="18" height="24" rx="7"/>
+    <rect x="906" y="272" width="18" height="24" rx="7"/>
+    <rect x="586" y="588" width="18" height="24" rx="7"/>
+  </g>
+
+  <!-- МЁРТВЫЕ ДЕРЕВЬЯ -->
+  <g stroke="#7d7466" stroke-width="4" fill="none" stroke-linecap="round">
+    <g transform="translate(180,420)"><line x1="0" y1="16" x2="0" y2="-14"/><line x1="0" y1="-8" x2="-12" y2="-22"/><line x1="0" y1="-4" x2="12" y2="-18"/></g>
+    <g transform="translate(320,820)"><line x1="0" y1="16" x2="0" y2="-14"/><line x1="0" y1="-8" x2="-12" y2="-22"/><line x1="0" y1="-4" x2="12" y2="-18"/></g>
+    <g transform="translate(760,780)"><line x1="0" y1="16" x2="0" y2="-14"/><line x1="0" y1="-8" x2="-12" y2="-22"/><line x1="0" y1="-4" x2="12" y2="-18"/></g>
+    <g transform="translate(1080,430)"><line x1="0" y1="16" x2="0" y2="-14"/><line x1="0" y1="-8" x2="-12" y2="-22"/><line x1="0" y1="-4" x2="12" y2="-18"/></g>
+    <g transform="translate(560,120)"><line x1="0" y1="16" x2="0" y2="-14"/><line x1="0" y1="-8" x2="-12" y2="-22"/><line x1="0" y1="-4" x2="12" y2="-18"/></g>
+    <g transform="translate(150,620)"><line x1="0" y1="16" x2="0" y2="-14"/><line x1="0" y1="-8" x2="-12" y2="-22"/><line x1="0" y1="-4" x2="12" y2="-18"/></g>
+  </g>
+
+  <!-- ФОНАРИ (тег FlickerLight) -->
+  <g>
+    <g transform="translate(600,405)"><circle r="26" fill="url(#lampGlow)"/><circle r="5" fill="#ffd98a"/></g>
+    <g transform="translate(232,608)"><circle r="26" fill="url(#lampGlow)"/><circle r="5" fill="#ffd98a"/></g>
+    <g transform="translate(420,772)"><circle r="26" fill="url(#lampGlow)"/><circle r="5" fill="#ffd98a"/></g>
+    <g transform="translate(646,214)"><circle r="26" fill="url(#lampGlow)"/><circle r="5" fill="#ffd98a"/></g>
+    <g transform="translate(968,286)"><circle r="26" fill="url(#lampGlow)"/><circle r="5" fill="#ffd98a"/></g>
+    <g transform="translate(556,660)"><circle r="26" fill="url(#lampGlow)"/><circle r="5" fill="#ffd98a"/></g>
+  </g>
+
+  <!-- Направление движения -->
+  <g fill="#c9cede">
+    <path d="M 300 486 l -18 22 l 26 -2 z" transform="rotate(32 300 486)"/>
+    <path d="M 880 400 l -18 22 l 26 -2 z" transform="rotate(215 880 400)"/>
+  </g>
+
+  <!-- ===== ЛЕГЕНДА ===== -->
+  <g transform="translate(92,96)">
+    <rect x="-6" y="-8" width="252" height="238" rx="10" fill="#141724" opacity="0.88" stroke="#3c4258"/>
+    <text x="8" y="16" fill="#e8ecf7" font-size="16" font-weight="bold" letter-spacing="1">ЛЕГЕНДА</text>
+
+    <g transform="translate(18,44)" fill="none" stroke="#9fd8a8" stroke-width="4" stroke-linecap="round">
+      <line x1="0" y1="-9" x2="0" y2="9"/><line x1="-6" y1="-3" x2="6" y2="-3"/>
+    </g>
+    <text x="40" y="49" fill="#c9cede" font-size="13">могила — тег Grave (спавн зомби)</text>
+
+    <rect x="10" y="66" width="14" height="19" rx="6" fill="#d98a8a" stroke="#a85f5f" stroke-width="1.5"/>
+    <text x="40" y="80" fill="#c9cede" font-size="13">препятствие — тег Hazard</text>
+
+    <g transform="translate(17,110)"><circle r="10" fill="url(#lampGlow)"/><circle r="3.5" fill="#ffd98a"/></g>
+    <text x="40" y="114" fill="#c9cede" font-size="13">фонарь — тег FlickerLight</text>
+
+    <g transform="translate(17,140)" stroke="#7d7466" stroke-width="3" fill="none" stroke-linecap="round">
+      <line x1="0" y1="10" x2="0" y2="-8"/><line x1="0" y1="-4" x2="-7" y2="-13"/><line x1="0" y1="-1" x2="7" y2="-10"/>
+    </g>
+    <text x="40" y="145" fill="#c9cede" font-size="13">мёртвое дерево (декор)</text>
+
+    <ellipse cx="17" cy="172" rx="13" ry="8" fill="url(#fog)"/>
+    <text x="40" y="176" fill="#c9cede" font-size="13">низина с туманом</text>
+
+    <line x1="6" y1="200" x2="28" y2="200" stroke="#6b7392" stroke-width="9"/>
+    <line x1="6" y1="200" x2="28" y2="200" stroke="#c9cede" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="40" y="204" fill="#c9cede" font-size="13">трасса (~40 studs шириной)</text>
+  </g>
+
+  <!-- Заголовок -->
+  <text x="600" y="875" fill="#767d9c" font-size="18" text-anchor="middle" letter-spacing="4">GRAVEYARD RACER · ПЛАН КЛАДБИЩА · ВИД СВЕРХУ</text>
+
+  <!-- Подписи зон -->
+  <text x="380" y="500" fill="#9aa2c0" font-size="13" font-style="italic" text-anchor="middle" transform="rotate(-14 380 500)">нижняя петля: узкие проходы между надгробиями</text>
+  <text x="810" y="345" fill="#9aa2c0" font-size="13" font-style="italic" text-anchor="middle" transform="rotate(-20 810 345)">верхняя петля: открытый участок для разгона</text>
+</svg>
