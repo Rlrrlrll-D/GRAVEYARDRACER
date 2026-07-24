@@ -22,6 +22,20 @@ local mapFolder = Instance.new("Folder")
 mapFolder.Name = "GeneratedMap"
 mapFolder.Parent = workspace
 
+-- // Генерация Terrain-дороги по осевой (форма из Road.svg) -------------------
+local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
+if GameConfig.Map.GenerateRoad and MapLayout.TrackPolyline and #MapLayout.TrackPolyline > 0 then
+	local MapGen = require(script.Parent:WaitForChild("MapGen"))
+	MapGen.paintPolyline(MapLayout.TrackPolyline, {
+		scale = MapLayout.Scale,
+		width = GameConfig.Map.RoadWidth,
+		top = GameConfig.Map.GroundTop,
+		slab = GameConfig.Map.SlabThick,
+		area = Vector2.new(GameConfig.Map.AreaW, GameConfig.Map.AreaH),
+	})
+	task.wait() -- дать террейну примениться перед рейкастами декора
+end
+
 local templates = ServerStorage:FindFirstChild("MapTemplates")
 
 local raycastParams = RaycastParams.new()
@@ -121,11 +135,35 @@ local function place(model: Model, x: number, z: number, rotation: number?)
 	model.Parent = mapFolder
 end
 
+-- Ближайшая точка ТРАВЫ к (x,z) — спиральный поиск (декор не встаёт на дорогу).
+local function grassGround(x: number, z: number): Vector3
+	local g = grassPosition(x, z)
+	if g then
+		return g
+	end
+	for radius = 8, 60, 8 do
+		for a = 0, 315, 45 do
+			local cand = grassPosition(x + radius * math.cos(math.rad(a)), z + radius * math.sin(math.rad(a)))
+			if cand then
+				return cand
+			end
+		end
+	end
+	return groundPosition(x, z) -- крайний случай
+end
+
+-- Как place, но прилипает к ближайшей траве (для hazard/grave/lamp у обочины).
+local function placeOnGrass(model: Model, x: number, z: number, rotation: number?)
+	local scale = MapLayout.Scale
+	dropToGround(model, grassGround(x * scale, z * scale), rotation or 0)
+	model.Parent = mapFolder
+end
+
 -- // Hazards (надгробия-плиты у дороги) ------------------------------------
 for _, data in MapLayout.Hazards do
 	local model = getTemplateVariant("Tombstone")
 	model = model and model:Clone() or makePlaceholder("Tombstone", Vector3.new(3, 4, 1.2), Color3.fromRGB(120, 120, 130))
-	place(model, data.Position.X, data.Position.Y, data.Rotation)
+	placeOnGrass(model, data.Position.X, data.Position.Y, data.Rotation)
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
 			part.Anchored = true
@@ -139,7 +177,7 @@ end
 for _, data in MapLayout.Graves do
 	local model = getTemplate("GraveMarker")
 	model = model and model:Clone() or makePlaceholder("GraveMarker", Vector3.new(4, 0.4, 7), Color3.fromRGB(70, 60, 50))
-	place(model, data.Position.X, data.Position.Y, data.Rotation)
+	placeOnGrass(model, data.Position.X, data.Position.Y, data.Rotation)
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
 			part.Anchored = true
@@ -166,7 +204,7 @@ for _, data in MapLayout.Lamps do
 		bulb.Anchored = true
 		bulb.Parent = model
 	end
-	place(model, data.Position.X, data.Position.Y, data.Rotation)
+	placeOnGrass(model, data.Position.X, data.Position.Y, data.Rotation)
 
 	-- у заглушки поднять лампочку на верхушку столба (в шаблоне она уже на месте)
 	local body = model.PrimaryPart
@@ -197,12 +235,11 @@ local RNG = Random.new(20260717)
 -- быть чисто (никакого «валежника» из чёрных деревьев), сами деревья — по карте.
 local TREE_START_CLEAR = 90
 
--- Лендмарки, вокруг которых декор не ставим (пивот-центр, радиус-запрет).
+-- Зоны, вокруг которых декор не ставим (пивот-центр, радиус-запрет).
+-- Старт/грид новой трассы (StartGate) держим чистым.
+local startPos = MapLayout.Landmarks.StartGate and MapLayout.Landmarks.StartGate.Position or Vector2.new(0, 0)
 local LANDMARKS = {
-	{ pos = Vector2.new(-75, 70), r = 26 }, -- Mausoleum
-	{ pos = Vector2.new(92, -100), r = 30 }, -- Chapel
-	{ pos = Vector2.new(0, 0), r = 48 }, -- перекрёсток / старт (спавн, стрелки) — чисто от деревьев
-	{ pos = Vector2.new(-45, 0), r = 22 }, -- арка ворот
+	{ pos = startPos, r = 48 }, -- старт/грид/спавн-точка — чисто
 }
 local function clearOfLandmarks(x: number, z: number): boolean
 	local p = Vector2.new(x, z)
@@ -275,8 +312,8 @@ local function scatter(name: string, count: number, sMin: number, sMax: number, 
 	local placed, tries = 0, 0
 	while placed < count and tries < count * 40 do
 		tries += 1
-		local x = RNG:NextNumber(-202, 202)
-		local z = RNG:NextNumber(-148, 148)
+		local x = RNG:NextNumber(-330, 330)
+		local z = RNG:NextNumber(-330, 330)
 		if not clearOfLandmarks(x, z) then
 			continue
 		end
@@ -312,7 +349,7 @@ end
 
 local nTomb = scatter("Tombstone", 84, 0.6, 2.3)
 local nGrave = scatter("GraveMarker", 48, 0.9, 2.1)
-local nTree = scatter("DeadTree", 60, 0.4, 2.8, TREE_START_CLEAR)
+local nTree = scatter("DeadTree", 60, 0.4, 2.8)
 
 -- // Трава: пучки-травинки выше terrain-травы, случайные высота/цвет/наклон ----
 -- Terrain-трава короткая; добавляем более высокие пучки — гуще у оснований
@@ -378,8 +415,8 @@ for _, m in decorSnapshot do
 	end
 end
 
--- кольцо травы у зданий/ворот (они в workspace, координаты из MapLayout)
-local buildings = { MapLayout.Landmarks.Mausoleum.Position, MapLayout.Landmarks.Chapel.Position, Vector2.new(-45, 0) }
+-- кольцо травы у старта/ворот (координаты из MapLayout)
+local buildings = { startPos }
 for _, bp in buildings do
 	for _ = 1, 10 do
 		local a = math.rad(RNG:NextNumber(0, 360))
@@ -395,7 +432,7 @@ end
 local fieldTarget, ftries, fieldPlaced = 180, 0, 0
 while fieldPlaced < fieldTarget and ftries < fieldTarget * 12 do
 	ftries += 1
-	local g = grassPosition(RNG:NextNumber(-205, 205), RNG:NextNumber(-150, 150))
+	local g = grassPosition(RNG:NextNumber(-330, 330), RNG:NextNumber(-330, 330))
 	if g then
 		placeGrassTuft(g, RNG:NextNumber(0.9, 1.8))
 		fieldPlaced += 1

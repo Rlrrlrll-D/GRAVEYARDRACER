@@ -38,20 +38,17 @@ for name, build in factoryTemplates do
 	end
 end
 
--- // 2. Мавзолей по координатам из MapLayout -----------------------------------
-if not workspace:FindFirstChild("Mausoleum", true) then
+-- // 2. Мавзолей по координатам из MapLayout (если задан лендмарк) --------------
+if MapLayout.Landmarks.Mausoleum and not workspace:FindFirstChild("Mausoleum", true) then
 	local mausoleum = ModelFactory.Mausoleum()
 	local pos = MapLayout.Landmarks.Mausoleum.Position * MapLayout.Scale
 	mausoleum:PivotTo(CFrame.new(pos.X, 8, pos.Y)) -- Y подгоните под рельеф
 	mausoleum.Parent = workspace
 end
 
--- // 3. Машина на старте --------------------------------------------------------
--- Направление старта — касательная первой кривой Безье трассы в t=0 (C1 - P0):
--- гонка идёт от ворот на запад, и машина должна стоять носом туда же.
-local firstSeg = MapLayout.TrackSegments[1]
-local tangent = firstSeg[2] - firstSeg[1]
-local startDir = Vector3.new(tangent.X, 0, tangent.Y).Unit
+-- // 3. Направление старта (из MapLayout.StartDir, форма Road.svg) --------------
+-- машина/стрелки на старте равняются носом по ходу гонки к первому чекпоинту.
+local startDir = Vector3.new(MapLayout.StartDir.X, 0, MapLayout.StartDir.Y).Unit
 
 local function spawnBuggy(cf: CFrame): Model
 	local buggy = ModelFactory.Buggy()
@@ -107,20 +104,11 @@ local function alignVehicle(model: Model)
 	print(`[BuildTemplates] {model.Name} развёрнут по направлению трассы.`)
 end
 
+-- Преж-размещённую машину на старте НЕ создаём: гридом/спавном машин владеет
+-- PlayerFlow (выдаёт машину игроку на отсчёте, грид считает из MapLayout).
+-- spawnBuggy/alignVehicle оставлены на случай ручной расстановки в .rbxl.
 local startPos = MapLayout.Landmarks.StartGate.Position * MapLayout.Scale
-local existing = CollectionService:GetTagged("PlayerVehicle")
-if #existing == 0 then
-	-- на осевую линию, на 8 studs позади стартовой черты, носом по ходу гонки
-	local spawnAt = Vector3.new(startPos.X, 6, startPos.Y) - startDir * 8
-	spawnBuggy(CFrame.lookAt(spawnAt, spawnAt + startDir))
-	print("[BuildTemplates] Своя машина не найдена — багги создан на старте.")
-else
-	for _, model in existing do
-		if model:IsA("Model") then
-			alignVehicle(model)
-		end
-	end
-end
+local _, _ = spawnBuggy, alignVehicle -- функции сохранены, но здесь не вызываются
 
 -- // 4. Шевроны направления на старте --------------------------------------------
 -- Неоновые стрелки на полотне сразу за стартовой чертой: с места старта

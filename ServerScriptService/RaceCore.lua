@@ -24,11 +24,19 @@ local function bezier(seg: { Vector2 }, t: number): Vector2
 	return p0 * (u * u * u) + p1 * (3 * u * u * t) + p2 * (3 * u * t * t) + p3 * (t * t * t)
 end
 
+-- Осевая: приоритет — TrackPolyline (форма из Road.svg); иначе флатчим
+-- устаревшие безье-сегменты (восьмёрка).
 local points: { Vector3 } = {}
-for _, seg in MapLayout.TrackSegments do
-	for i = 0, 39 do
-		local p = bezier(seg, i / 40)
+if MapLayout.TrackPolyline and #MapLayout.TrackPolyline > 0 then
+	for _, p in MapLayout.TrackPolyline do
 		table.insert(points, Vector3.new(p.X * MapLayout.Scale, GHOST_Y, p.Y * MapLayout.Scale))
+	end
+else
+	for _, seg in MapLayout.TrackSegments do
+		for i = 0, 39 do
+			local p = bezier(seg, i / 40)
+			table.insert(points, Vector3.new(p.X * MapLayout.Scale, GHOST_Y, p.Y * MapLayout.Scale))
+		end
 	end
 end
 local segLengths: { number } = {}

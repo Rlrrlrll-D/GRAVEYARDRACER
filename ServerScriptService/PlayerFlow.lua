@@ -12,6 +12,8 @@ local ServerStorage = game:GetService("ServerStorage")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local VehicleRegistry = require(ReplicatedStorage:WaitForChild("VehicleRegistry"))
+local MapLayout = require(ReplicatedStorage:WaitForChild("MapLayout"))
+local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 
 local PlayerFlow = {}
 
@@ -215,13 +217,42 @@ function PlayerFlow.init()
 	end
 	initialized = true
 
-	-- точка старта = мировая SpawnLocation (чуть выше, чтобы не застрять в полу)
-	local spawn = workspace:FindFirstChildOfClass("SpawnLocation")
-	if spawn then
-		START_CF = spawn.CFrame + Vector3.new(0, 3, 0)
-	end
 	captureGridBase()
 	ensureTemplate()
+
+	-- грид и точка старта — на старте новой трассы (из MapLayout, форма Road.svg).
+	-- Высоту берём РЕЙКАСТОМ по фактической поверхности дороги (террейн рендерится
+	-- выше номинального top), иначе колёса уходят в грунт → машину ломает на спавне.
+	local sg = MapLayout.Landmarks.StartGate
+	local sd = MapLayout.StartDir
+	if sg and sd and (Vector2.new(sd.X, sd.Y).Magnitude > 1e-3) then
+		local top = GameConfig.Map.GroundTop or 2
+		local sx, sz = sg.Position.X * MapLayout.Scale, sg.Position.Y * MapLayout.Scale
+		local dir = Vector3.new(sd.X, 0, sd.Y).Unit
+		-- дефолт до готовности террейна
+		gridBaseSeatCF = CFrame.lookAt(Vector3.new(sx, top + 10, sz), Vector3.new(sx, top + 10, sz) + dir)
+		START_CF = CFrame.new(Vector3.new(sx, top + 8, sz) - dir * 30)
+		task.spawn(function()
+			local rp = RaycastParams.new()
+			rp.FilterType = Enum.RaycastFilterType.Include
+			rp.FilterDescendantsInstances = { workspace.Terrain }
+			for _ = 1, 80 do
+				local r = workspace:Raycast(Vector3.new(sx, 80, sz), Vector3.new(0, -160, 0), rp)
+				if r and r.Material == Enum.Material.Ground then
+					local sy = r.Position.Y
+					gridBaseSeatCF = CFrame.lookAt(Vector3.new(sx, sy + 6, sz), Vector3.new(sx, sy + 6, sz) + dir)
+					START_CF = CFrame.new(Vector3.new(sx, sy + 4, sz) - dir * 30)
+					return
+				end
+				task.wait(0.2)
+			end
+		end)
+	else
+		local spawn = workspace:FindFirstChildOfClass("SpawnLocation")
+		if spawn then
+			START_CF = spawn.CFrame + Vector3.new(0, 3, 0)
+		end
+	end
 
 	local function hook(player: Player)
 		player.CharacterAdded:Connect(function()

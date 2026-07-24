@@ -138,7 +138,19 @@ local function runCountdown(): { Player }
 	end
 	RaceScene.resetGhosts()
 
+	-- машины неуязвимы, пока оседают на террейн и идёт отсчёт (иначе набивают
+	-- урон столкновениями при спавне); снимаем неуязвимость на GO.
+	local function setInvuln(v: boolean)
+		for _, plr in participants do
+			local car = PlayerFlow.getVehicle(plr)
+			if car then
+				car:SetAttribute("Invulnerable", v)
+			end
+		end
+	end
+
 	for c = cfg.CountdownSeconds, 1, -1 do
+		setInvuln(true) -- каждый тик (перебивает setup VehicleController)
 		broadcastLobby()
 		for _, plr in Players:GetPlayers() do
 			local payload: { [string]: any } = { Phase = "Countdown", Countdown = c, Laps = cfg.Laps }
@@ -149,6 +161,7 @@ local function runCountdown(): { Player }
 		end
 		task.wait(1)
 	end
+	setInvuln(false) -- старт: машины снова уязвимы
 	return participants
 end
 

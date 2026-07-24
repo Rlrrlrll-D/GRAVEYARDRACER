@@ -62,6 +62,43 @@ function MapGen.paint(segments: { { Vector2 } }, opts: PaintOpts?)
 	end
 end
 
+-- Покрасить дорогу по ПОЛИЛИНИИ (осевой) — points {Vector2}, замкнутая.
+-- Между точками линейно до-семплим (sub) для гладкости.
+function MapGen.paintPolyline(points: { Vector2 }, opts: PaintOpts?)
+	local o = opts or {}
+	local scale = o.scale or 1
+	local width = o.width or 40
+	local top = o.top or 2
+	local slab = o.slab or 12
+	local origin = o.origin or Vector3.zero
+	local sub = o.samplesPerSeg or 4
+
+	if o.area then
+		-- снести существующий террейн высоким блоком Air, затем травяная плита
+		Terrain:FillBlock(
+			CFrame.new(origin.X, top - 40, origin.Z),
+			Vector3.new(o.area.X, 90, o.area.Y),
+			Enum.Material.Air
+		)
+		Terrain:FillBlock(
+			CFrame.new(origin.X, top - slab / 2, origin.Z),
+			Vector3.new(o.area.X, slab, o.area.Y),
+			Enum.Material.Grass
+		)
+	end
+
+	local n = #points
+	for i = 1, n do
+		local a, b = points[i], points[i % n + 1]
+		for s = 0, sub - 1 do
+			local f = s / sub
+			local x = (a.X + (b.X - a.X) * f) * scale + origin.X
+			local z = (a.Y + (b.Y - a.Y) * f) * scale + origin.Z
+			Terrain:FillCylinder(CFrame.new(x, top - slab / 2, z), slab, width / 2, Enum.Material.Ground)
+		end
+	end
+end
+
 -- Равномерные чекпоинты вдоль трассы (по длине дуги). count — сколько.
 function MapGen.checkpoints(segments: { { Vector2 } }, count: number, scale: number?): { Vector2 }
 	local s = scale or 1

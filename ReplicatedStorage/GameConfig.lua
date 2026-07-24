@@ -46,6 +46,14 @@ export type GameConfigType = {
 		StumbleDuration: number,
 		Ghosts: {{ Name: string, Speed: number, Color: Color3 }}, -- Speed в studs/сек
 	},
+	Map: {
+		GenerateRoad: boolean, -- true = MapBuilder красит Terrain-дорогу по MapLayout.TrackPolyline
+		RoadWidth: number, -- ширина полотна, studs
+		GroundTop: number, -- Y верхней поверхности террейна
+		SlabThick: number, -- толщина грунтовой плиты
+		AreaW: number, -- ширина базовой травяной плиты
+		AreaH: number, -- глубина базовой травяной плиты
+	},
 }
 
 local GameConfig: GameConfigType = {
@@ -95,6 +103,14 @@ local GameConfig: GameConfigType = {
 			{ Name = "Grave Digger", Speed = 34, Color = Color3.fromRGB(150, 200, 255) },
 			{ Name = "Ghost Rider", Speed = 38, Color = Color3.fromRGB(255, 160, 120) },
 		},
+	},
+	Map = {
+		GenerateRoad = true, -- красить Terrain по MapLayout.TrackPolyline (форма из Road.svg)
+		RoadWidth = 44.8, -- ×1.4 от ширины макета (32 SVG-ед.)
+		GroundTop = 2,
+		SlabThick = 12,
+		AreaW = 680,
+		AreaH = 680,
 	},
 }
 
