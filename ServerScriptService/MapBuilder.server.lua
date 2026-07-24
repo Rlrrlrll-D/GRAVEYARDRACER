@@ -439,7 +439,58 @@ while fieldPlaced < fieldTarget and ftries < fieldTarget * 12 do
 	end
 end
 
+-- // Ограда по периметру карты (коллайд — держит машины; заменяет невидимые
+-- стены). Прямоугольник вокруг игровой площади: сплошные тёмные рельсы-барьеры
+-- + декоративные столбы. Генерируется под новую карту (форма из Road.svg).
+local function buildPerimeterFence(half: number, baseY: number)
+	local fence = Instance.new("Model")
+	fence.Name = "PerimeterFence"
+	local IRON = Color3.fromRGB(26, 28, 32)
+	local RAIL_H, POST_H = 8, 14
+	local full = half * 2 + 2
+
+	local function rail(cx: number, cz: number, sx: number, sz: number)
+		local r = Instance.new("Part")
+		r.Anchored = true
+		r.CanCollide = true -- держит машины на площадке
+		r.CanQuery = false
+		r.CanTouch = false
+		r.CastShadow = false
+		r.Material = Enum.Material.Metal
+		r.Color = IRON
+		r.Size = Vector3.new(sx, RAIL_H, sz)
+		r.Position = Vector3.new(cx, baseY + RAIL_H / 2, cz)
+		r.Parent = fence
+	end
+	rail(0, -half, full, 1)
+	rail(0, half, full, 1)
+	rail(-half, 0, 1, full)
+	rail(half, 0, 1, full)
+
+	local function post(x: number, z: number)
+		local p = Instance.new("Part")
+		p.Anchored = true
+		p.CanCollide = false
+		p.CanQuery = false
+		p.CanTouch = false
+		p.CastShadow = false
+		p.Material = Enum.Material.Metal
+		p.Color = IRON
+		p.Size = Vector3.new(1.3, POST_H, 1.3)
+		p.Position = Vector3.new(x, baseY + POST_H / 2, z)
+		p.Parent = fence
+	end
+	for d = -half, half, 10 do
+		post(d, -half)
+		post(d, half)
+		post(-half, d)
+		post(half, d)
+	end
+	fence.Parent = workspace
+end
+buildPerimeterFence(335, GameConfig.Map.GroundTop + 2)
+
 print(
 	`[MapBuilder] Расставлено: {#MapLayout.Hazards} hazard'ов, {#MapLayout.Graves} могил, {#MapLayout.Lamps} фонарей, {#MapLayout.DeadTrees} деревьев (по карте). `
-		.. `Декор-россыпь: {nTomb} надгробий, {nGrave} могил, {nTree} деревьев, {grassCount} пучков травы.`
+		.. `Декор-россыпь: {nTomb} надгробий, {nGrave} могил, {nTree} деревьев, {grassCount} пучков травы. Ограда по периметру ±335.`
 )
