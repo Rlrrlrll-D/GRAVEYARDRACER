@@ -378,11 +378,11 @@ raceUpdate.OnClientEvent:Connect(function(data: RacePayload)
 		local waiting = data.Waiting or 0
 		local needed = data.Needed or 1
 		if needed > 1 and waiting > 0 and waiting < needed then
-			raceLabel.Text = string.format("Waiting for racers… %d/%d — sit in a buggy", waiting, needed)
+			raceLabel.Text = string.format("Waiting for racers… %d/%d — press READY", waiting, needed)
 		elseif needed > 1 then
-			raceLabel.Text = string.format("Sit in a buggy to race — need %d drivers", needed)
+			raceLabel.Text = string.format("Press READY to race — need %d racers", needed)
 		else
-			raceLabel.Text = "Sit in the buggy to join the race"
+			raceLabel.Text = "Press READY to start the race"
 		end
 		raceCenter.Text = ""
 		highlightCheckpoint(nil)

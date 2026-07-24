@@ -1,7 +1,9 @@
 --!strict
--- LocalScript: StarterPlayerScripts.LobbyUI  [СКЕЛЕТ — ещё не подключён к Studio]
--- Экран лобби/меню + экран итогов. Показывается, когда игрок ВНЕ заезда (до
--- старта и после game over). Прячет геймплейный HUD, пока игрок в лобби.
+-- LocalScript: StarterPlayerScripts.LobbyUI
+-- Экран лобби + экран итогов (веха 4). Виден, пока игрок ВНЕ заезда: в лобби
+-- до старта и после эвикта (game over/финиш). Прячется у УЧАСТНИКОВ заезда по
+-- полю Participant=true в персональных RaceUpdate от MatchManager; снова
+-- показывается по ReturnToLobby и в фазе Idle (лобби).
 -- Вся типографика/цвета — из UITheme (Creepster везде, палитра по кругу).
 
 local Players = game:GetService("Players")
@@ -19,6 +21,7 @@ local playerReady = Net.get(Net.Events.PlayerReady)
 local lobbyState = Net.get(Net.Events.LobbyState)
 local returnToLobby = Net.get(Net.Events.ReturnToLobby)
 local saveSettings = Net.get(Net.Events.SaveSettings)
+local raceUpdate = Net.get(Net.Events.RaceUpdate)
 
 -- // Каркас экрана ----------------------------------------------------------
 local gui = Instance.new("ScreenGui")
@@ -73,7 +76,12 @@ readyBtn.Activated:Connect(function()
 end)
 
 lobbyState.OnClientEvent:Connect(function(state)
-	statusLabel.Text = string.format("Racers ready: %d / %d", state.ready or 0, state.needed or 1)
+	if state.phase == GameState.Phase.Lobby then
+		statusLabel.Text = string.format("Racers ready: %d / %d", state.ready or 0, state.needed or 1)
+	elseif state.phase == GameState.Phase.Countdown or state.phase == GameState.Phase.Racing then
+		statusLabel.Text = "Race in progress — press READY for the next one"
+	end
+	-- Results: текст итога уже поставил ReturnToLobby — не перетираем
 end)
 
 -- // Панель опций (строится по SettingsSchema) ------------------------------
@@ -103,6 +111,14 @@ returnToLobby.OnClientEvent:Connect(function(payload)
 	setLobbyVisible(true) -- ← игрок гарантированно ВНЕ мира, снова в лобби
 end)
 
--- Старт заезда — спрятать лобби (сервер шлёт Countdown/Racing через RaceUpdate;
--- TODO: подписаться и скрывать здесь либо в UIController).
+-- Старт заезда: у УЧАСТНИКА (Participant=true в персональном пейлоаде) лобби
+-- прячется; фаза Idle (все в лобби) — показывается у всех.
+raceUpdate.OnClientEvent:Connect(function(data)
+	if data.Participant == true and (data.Phase == "Countdown" or data.Phase == "Racing") then
+		setLobbyVisible(false)
+	elseif data.Phase == "Idle" then
+		setLobbyVisible(true)
+	end
+end)
+
 setLobbyVisible(true)
