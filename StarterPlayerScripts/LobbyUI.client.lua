@@ -140,9 +140,14 @@ end)
 -- из SettingsSchema.Options и доступна из лобби (DisplayOrder выше вуали).
 
 -- // Показ/скрытие лобби ----------------------------------------------------
+-- Пока лобби видно, геймплейный HUD (GraveyardHUD) выключен: телеметрия и
+-- подсказки заезда не просвечивают сквозь вуаль и не дублируют статус лобби.
 local function setLobbyVisible(visible: boolean)
 	root.Visible = visible
-	-- TODO: спрятать/показать геймплейный HUD (GraveyardHUD) — в лобби он не нужен.
+	local hud = playerGui:FindFirstChild("GraveyardHUD")
+	if hud and hud:IsA("ScreenGui") then
+		hud.Enabled = not visible
+	end
 end
 
 -- Приход из мира после game over/финиша: показать итог, затем открыть лобби.

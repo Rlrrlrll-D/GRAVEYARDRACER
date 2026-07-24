@@ -186,6 +186,10 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 	local car = t:Clone()
 	car.Name = "Buggy_" .. player.UserId
 	car:SetAttribute("OwnerUserId", player.UserId)
+	local seat = car:FindFirstChild("DriveSeat")
+	if seat and seat:IsA("VehicleSeat") then
+		seat.HeadsUpDisplay = false -- нативный Roblox-спидометр (CoreGui.VehicleHudFrame) не нужен: свой HUD
+	end
 	car:PivotTo(seatCFrame * pivotFromSeat) -- ДО Parent: VehicleController запомнит «дом»
 	car.Parent = workspace
 	CollectionService:AddTag(car, "PlayerVehicle") -- VehicleController подхватит
