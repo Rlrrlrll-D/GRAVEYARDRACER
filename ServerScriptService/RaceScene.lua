@@ -13,7 +13,7 @@ local ModelFactory = require(script.Parent:WaitForChild("ModelFactory"))
 local RaceCore = require(script.Parent:WaitForChild("RaceCore"))
 
 local cfg = GameConfig.Race
-local MARKER_Y = 5.5 -- высота magic-orb: на уровне проезда, сквозь него едут
+local MARKER_Y = 11 -- над полотном (террейн ~Y6): череп парит, машина проезжает под ним
 
 local RaceScene = {}
 
@@ -123,8 +123,8 @@ local function buildSkull(cp: Vector3, i: number): Model
 
 	local glow = Instance.new("PointLight")
 	glow.Color = ORB_COLOR
-	glow.Brightness = 0.8
-	glow.Range = 8
+	glow.Brightness = 2.5 -- ярче: череп заметно светится над трассой
+	glow.Range = 16
 	glow.Parent = anchor
 
 	-- плоская плашка-череп; клиент кладёт EditableImage в ImageLabel "Img"

@@ -181,6 +181,25 @@ local function runRacing(participants: { Player }): (Player?, string?, RaceCore.
 		raceUpdate:FireClient(plr, payload)
 	end
 
+	-- ГРЕЙС: машины неуязвимы первые секунды заезда — пока трогаются с места
+	-- (A-Chassis раскачивается не мгновенно), иначе зомби у старта успевают
+	-- уничтожить ещё неподвижную машину.
+	local GRACE = 4
+	for _, plr in participants do
+		local car = PlayerFlow.getVehicle(plr)
+		if car then
+			car:SetAttribute("Invulnerable", true)
+		end
+	end
+	task.delay(GRACE, function()
+		for _, plr in participants do
+			local car = PlayerFlow.getVehicle(plr)
+			if car then
+				car:SetAttribute("Invulnerable", false)
+			end
+		end
+	end)
+
 	local startClock = os.clock()
 	local lastTick = os.clock()
 	local lastBroadcast = 0

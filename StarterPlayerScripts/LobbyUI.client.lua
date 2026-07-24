@@ -20,17 +20,17 @@ local GameState = require(ReplicatedStorage:WaitForChild("GameState"))
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local playerReady = Net.get(Net.Events.PlayerReady)
-local lobbyState = Net.get(Net.Events.LobbyState)
-local returnToLobby = Net.get(Net.Events.ReturnToLobby)
-local raceUpdate = Net.get(Net.Events.RaceUpdate)
-
--- // Блюр фона (пока заставка показана) --------------------------------------
+-- // Блюр фона СРАЗУ — до ожидания Remotes (иначе фон мелькает незаблюренным) --
 local BLUR = 10 -- мягкий, но фон читается
 local blur = Instance.new("BlurEffect")
 blur.Name = "MenuBlur"
 blur.Size = BLUR
 blur.Parent = Lighting
+
+local playerReady = Net.get(Net.Events.PlayerReady)
+local lobbyState = Net.get(Net.Events.LobbyState)
+local returnToLobby = Net.get(Net.Events.ReturnToLobby)
+local raceUpdate = Net.get(Net.Events.RaceUpdate)
 
 -- // Каркас ------------------------------------------------------------------
 local gui = Instance.new("ScreenGui")
