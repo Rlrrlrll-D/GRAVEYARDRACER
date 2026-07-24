@@ -6,7 +6,8 @@
 -- тайтл + кнопка PLAY (готовность) + статус + ростер. При старте заезда прячется
 -- у участника (по Participant=true в персональном RaceUpdate), возвращается по
 -- ReturnToLobby / фазе Idle. Пока показана — геймплейный HUD скрыт, фон заблюрен.
--- Опции — отдельная кнопка MENU (OptionsMenu, низ-право). Тема — из UITheme.
+-- Кнопки PLAY и OPTIONS по центру; ростер RACERS слева, панель опций
+-- (OptionsMenu.Panel) справа — симметрично. Тема — из UITheme.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -82,27 +83,36 @@ sub.TextScaled = true
 UITheme.applyText(sub, { color = UITheme.Palette.Red })
 sub.Parent = root
 
--- // Кнопка PLAY (= готовность; заезд стартует, когда готовых ≥ MinRacers) -----
+-- вспомогательная кнопка-плашка меню (PLAY / OPTIONS) в общем стиле
+local function makeButton(text: string, bg: Color3, yOffset: number, h: number): TextButton
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(0, 320, 0, h)
+	b.Position = UDim2.new(0.5, -160, 0.56, yOffset)
+	b.BackgroundColor3 = bg
+	b.AutoButtonColor = true
+	b.Text = text
+	b.TextScaled = true
+	UITheme.applyText(b)
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 10)
+	local st = Instance.new("UIStroke")
+	st.Color = UITheme.Shadow
+	st.Thickness = 2
+	st.Transparency = 0.3
+	st.Parent = b
+	b.Parent = root
+	return b
+end
+
+-- // PLAY (= готовность; заезд стартует, когда готовых ≥ MinRacers) ------------
 local isReady = false
-local playBtn = Instance.new("TextButton")
-playBtn.Size = UDim2.new(0, 320, 0, 66)
-playBtn.Position = UDim2.new(0.5, -160, 0.62, 0)
-playBtn.BackgroundColor3 = UITheme.Palette.Green
-playBtn.AutoButtonColor = true
-playBtn.Text = "PLAY"
-playBtn.TextScaled = true
-UITheme.applyText(playBtn)
-Instance.new("UICorner", playBtn).CornerRadius = UDim.new(0, 10)
-local ps = Instance.new("UIStroke")
-ps.Color = UITheme.Shadow
-ps.Thickness = 2
-ps.Transparency = 0.3
-ps.Parent = playBtn
-playBtn.Parent = root
+local playBtn = makeButton("PLAY", UITheme.Palette.Green, 0, 64)
+
+-- // OPTIONS (открывает компактную панель опций справа — OptionsMenu.Panel) ----
+local optBtn = makeButton("OPTIONS", Color3.fromRGB(22, 33, 27), 74, 50) -- тёмный мох
 
 local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(0, 480, 0, 36)
-statusLabel.Position = UDim2.new(0.5, -240, 0.62, 78)
+statusLabel.Size = UDim2.new(0, 480, 0, 34)
+statusLabel.Position = UDim2.new(0.5, -240, 0.56, 134)
 statusLabel.BackgroundTransparency = 1
 statusLabel.Text = "Press PLAY to race"
 statusLabel.TextScaled = true
@@ -116,15 +126,34 @@ playBtn.Activated:Connect(function()
 	playerReady:FireServer(isReady)
 end)
 
+-- панель опций живёт в отдельном ScreenGui (OptionsMenu); тумблим её Visible
+local function optionsPanel(): GuiObject?
+	local om = playerGui:FindFirstChild("OptionsMenu")
+	local p = om and om:FindFirstChild("Panel")
+	return (p and p:IsA("GuiObject")) and (p :: GuiObject) or nil
+end
+optBtn.Activated:Connect(function()
+	local p = optionsPanel()
+	if p then
+		p.Visible = not p.Visible
+	end
+end)
+
 -- // Ростер: кто на сервере и кто готов ---------------------------------------
+-- симметрично панели опций справа: та же ширина/верх, зеркально слева
 local rosterPanel = Instance.new("Frame")
 rosterPanel.Name = "Roster"
-rosterPanel.Size = UDim2.new(0, 260, 0, 300)
-rosterPanel.Position = UDim2.new(0, 28, 0.32, 0)
+rosterPanel.Size = UDim2.new(0, 280, 0, 404)
+rosterPanel.Position = UDim2.new(0, 28, 0.24, 0)
 rosterPanel.BackgroundColor3 = UITheme.PanelBg
-rosterPanel.BackgroundTransparency = 0.35
+rosterPanel.BackgroundTransparency = 0.2
 rosterPanel.Parent = root
 Instance.new("UICorner", rosterPanel).CornerRadius = UDim.new(0, 10)
+local rosterEdge = Instance.new("UIStroke")
+rosterEdge.Color = UITheme.Palette.Bone
+rosterEdge.Transparency = 0.6
+rosterEdge.Thickness = 2
+rosterEdge.Parent = rosterPanel
 
 local rosterTitle = Instance.new("TextLabel")
 rosterTitle.Size = UDim2.new(1, 0, 0, 40)
@@ -186,6 +215,12 @@ local function setLobbyVisible(visible: boolean)
 	local hud = playerGui:FindFirstChild("GraveyardHUD")
 	if hud and hud:IsA("ScreenGui") then
 		hud.Enabled = not visible
+	end
+	if not visible then
+		local p = optionsPanel()
+		if p then
+			p.Visible = false -- уходя в гонку, закрываем опции
+		end
 	end
 end
 
