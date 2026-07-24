@@ -12,7 +12,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local UITheme = require(ReplicatedStorage:WaitForChild("UITheme"))
 local GameState = require(ReplicatedStorage:WaitForChild("GameState"))
-local SettingsSchema = require(ReplicatedStorage:WaitForChild("SettingsSchema"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -20,7 +19,6 @@ local playerGui = player:WaitForChild("PlayerGui")
 local playerReady = Net.get(Net.Events.PlayerReady)
 local lobbyState = Net.get(Net.Events.LobbyState)
 local returnToLobby = Net.get(Net.Events.ReturnToLobby)
-local saveSettings = Net.get(Net.Events.SaveSettings)
 local raceUpdate = Net.get(Net.Events.RaceUpdate)
 
 -- // Каркас экрана ----------------------------------------------------------
@@ -75,6 +73,57 @@ readyBtn.Activated:Connect(function()
 	playerReady:FireServer(isReady)
 end)
 
+-- // Ростер: кто на сервере и кто готов (веха 5) -----------------------------
+local rosterPanel = Instance.new("Frame")
+rosterPanel.Name = "Roster"
+rosterPanel.Size = UDim2.new(0, 280, 0, 336)
+rosterPanel.Position = UDim2.new(0, 28, 0.28, 0)
+rosterPanel.BackgroundColor3 = UITheme.PanelBg
+rosterPanel.BackgroundTransparency = 0.2
+rosterPanel.Parent = root
+Instance.new("UICorner", rosterPanel).CornerRadius = UDim.new(0, 10)
+
+local rosterTitle = Instance.new("TextLabel")
+rosterTitle.Size = UDim2.new(1, 0, 0, 40)
+rosterTitle.BackgroundTransparency = 1
+rosterTitle.Text = "RACERS"
+rosterTitle.TextScaled = true
+UITheme.applyText(rosterTitle, { color = UITheme.Palette.Bone })
+rosterTitle.Parent = rosterPanel
+
+local rosterList = Instance.new("Frame")
+rosterList.Size = UDim2.new(1, -16, 1, -48)
+rosterList.Position = UDim2.fromOffset(8, 44)
+rosterList.BackgroundTransparency = 1
+rosterList.Parent = rosterPanel
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 4)
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Parent = rosterList
+
+type RosterRow = { name: string, ready: boolean }
+local function renderRoster(roster: { RosterRow })
+	for _, c in rosterList:GetChildren() do
+		if c:IsA("TextLabel") then
+			c:Destroy()
+		end
+	end
+	for i, row in roster do
+		local l = Instance.new("TextLabel")
+		l.LayoutOrder = i
+		l.Size = UDim2.new(1, 0, 0, 32)
+		l.BackgroundColor3 = UITheme.cycleColor(i)
+		l.BackgroundTransparency = 0.15
+		-- кость (каждый 3-й цвет цикла) светлая → тёмный текст, иначе костяной
+		l.TextColor3 = (i % 3 == 0) and UITheme.Shadow or UITheme.Ink
+		l.Font = UITheme.Font
+		l.TextScaled = true
+		l.Text = row.ready and (row.name .. "  ✓") or row.name
+		Instance.new("UICorner", l).CornerRadius = UDim.new(0, 6)
+		l.Parent = rosterList
+	end
+end
+
 lobbyState.OnClientEvent:Connect(function(state)
 	if state.phase == GameState.Phase.Lobby then
 		statusLabel.Text = string.format("Racers ready: %d / %d", state.ready or 0, state.needed or 1)
@@ -82,13 +131,13 @@ lobbyState.OnClientEvent:Connect(function(state)
 		statusLabel.Text = "Race in progress — press READY for the next one"
 	end
 	-- Results: текст итога уже поставил ReturnToLobby — не перетираем
+	if type(state.roster) == "table" then
+		renderRoster(state.roster)
+	end
 end)
 
--- // Панель опций (строится по SettingsSchema) ------------------------------
--- TODO: сгенерировать тумблеры/слайдеры из SettingsSchema.Options, чередуя фон
--- строк UITheme.cycleColor(i); по изменению — saveSettings:FireServer(values).
-local function buildOptions() end -- скелет
-buildOptions()
+-- Опции — в OptionsMenu (надгробие, кнопка MENU внизу-справа): панель строится
+-- из SettingsSchema.Options и доступна из лобби (DisplayOrder выше вуали).
 
 -- // Показ/скрытие лобби ----------------------------------------------------
 local function setLobbyVisible(visible: boolean)

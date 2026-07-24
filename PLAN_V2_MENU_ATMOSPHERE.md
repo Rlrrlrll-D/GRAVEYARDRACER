@@ -158,10 +158,10 @@ Lobby ──(готовых ≥ MinRacers)──▶ Countdown ──▶ Racing �
 | `ServerScriptService/MatchManager.server.lua` | Машина состояний + **эвикт после game over** | ✅ 2026-07-24: подключён, RaceManager/VehicleSpawner удалены (веха 4) |
 | `ServerScriptService/RaceScene.lua` | Визуал трассы: маркеры чекпоинтов + призраки-пейсеры | ✅ 2026-07-24: вынесен из RaceManager (веха 4) |
 | `ServerScriptService/BatManager.server.lua` | Триггеры мышей (flyby/swarm) | ✅ скелет |
-| `StarterPlayerScripts/LobbyUI.client.lua` | Лобби: Ready/опции/итоги, тема | ✅ 2026-07-24: подключён — Ready/итоги/показ-скрытие работают; панель опций — веха 5 |
+| `StarterPlayerScripts/LobbyUI.client.lua` | Лобби: Ready/ростер/итоги, тема | ✅ 2026-07-24: веха 5 — Ready, ростер с готовностью, итоги; опции — в OptionsMenu из схемы |
 | `StarterPlayerScripts/BatFX.client.lua` | Рендер роя/пролётов мышей | ✅ скелет |
 | `ServerScriptService/RaceCore.lua` | Логика чекпоинтов из RaceManager (модуль) | ✅ 2026-07-24: выделен, RaceManager переведён, регресс-тест пройден |
-| `ServerScriptService/SettingsService.server.lua` | DataStore опций+статы | ⬜ TODO |
+| `ServerScriptService/SettingsService.server.lua` | DataStore опций+статы | 🟡 2026-07-24: эхо-версия (SaveSettings→sanitize→PushSettings, in-memory); DataStore+статы — веха 6b |
 | `Bootstrap` доработка | Создавать Remotes по `Net.Events` | ⬜ TODO |
 
 ---

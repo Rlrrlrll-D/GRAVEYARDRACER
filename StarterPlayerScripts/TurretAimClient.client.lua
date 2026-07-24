@@ -231,6 +231,26 @@ end)
 -- на курсор, луч не кривой по вертикали. Опора yaw — "вперёд машины".
 local AIM_SIGN = 1 -- калибровка yaw (проверено)
 local PITCH_SIGN = 1 -- калибровка pitch (если ствол наклоняется в другую сторону — -1)
+
+-- опция «скорость наводки» (веха 5, эхо PushSettings): множитель скорости серво.
+-- 0.5 (дефолт) = заводская скорость шарнира (×1), 0.1 = ×0.2, 1.0 = ×2.
+-- Работает: физику своей машины симулирует клиент-владелец, правка AngularSpeed
+-- локальна и легальна. Заводское значение кэшируем в атрибуте при первой встрече.
+local aimSens = 0.5
+remotes:WaitForChild("PushSettings").OnClientEvent:Connect(function(s)
+	if type(s) == "table" and type(s.aimSens) == "number" then
+		aimSens = math.clamp(s.aimSens, 0.1, 1)
+	end
+end)
+
+local function applyAimSpeed(hinge: HingeConstraint)
+	local base = hinge:GetAttribute("BaseAngularSpeed") :: number?
+	if base == nil then
+		base = hinge.AngularSpeed
+		hinge:SetAttribute("BaseAngularSpeed", base)
+	end
+	hinge.AngularSpeed = (base :: number) * 2 * aimSens
+end
 RunService.RenderStepped:Connect(function()
 	local vehicle = findMyVehicle()
 	if not vehicle then return end
@@ -242,6 +262,7 @@ RunService.RenderStepped:Connect(function()
 
 	local yawHinge = turretBase:FindFirstChild("TurretHinge")
 	if not (yawHinge and yawHinge:IsA("HingeConstraint")) then return end
+	applyAimSpeed(yawHinge)
 
 	local target = getMouseHit(vehicle)
 
@@ -262,6 +283,7 @@ RunService.RenderStepped:Connect(function()
 	-- PITCH: возвышение от центра турели к цели (ствол наклоняется по вертикали)
 	local pitchHinge = turret:FindFirstChild("PitchHinge")
 	if pitchHinge and pitchHinge:IsA("HingeConstraint") then
+		applyAimSpeed(pitchHinge)
 		local aimDir = target - turret.Position
 		local horiz = math.sqrt(aimDir.X * aimDir.X + aimDir.Z * aimDir.Z)
 		local elevation = math.atan2(aimDir.Y, horiz)

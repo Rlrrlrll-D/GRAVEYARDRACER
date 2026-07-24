@@ -61,11 +61,20 @@ local function readyList(): { Player }
 end
 
 local function broadcastLobby()
+	-- ростер: все игроки сервера с флажком готовности (LobbyUI рисует список)
+	local roster: { { name: string, ready: boolean } } = {}
+	for _, plr in Players:GetPlayers() do
+		table.insert(roster, { name = plr.DisplayName, ready = ready[plr] == true })
+	end
+	table.sort(roster, function(a, b)
+		return a.name < b.name
+	end)
 	lobbyState:FireAllClients({
 		phase = phase,
 		ready = #readyList(),
 		needed = cfg.MinRacers,
 		total = #Players:GetPlayers(),
+		roster = roster,
 	})
 end
 

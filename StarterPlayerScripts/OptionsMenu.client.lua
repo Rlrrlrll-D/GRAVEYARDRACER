@@ -3,8 +3,10 @@
 -- Опции на «надгробном камне»: аркой кверху, с подтёками мха, гравировка тёмным
 -- по камню-кости. Шрифт — ТОЛЬКО Creepster. Палитра: кость + мох (зелёный);
 -- красный — единственный акцент того же тона, что плашка «0 MPH» (кнопка закрыть).
--- Текст — только английский. Слайдеры Master/Music/Engine/SFX двигают SoundGroups
--- через Audio (живо). Персистентность (DataStore) — позже (шлём SaveSettings).
+-- Текст — только английский. Панель СТРОИТСЯ ИЗ SettingsSchema.Options (веха 5):
+-- слайдеры и тумблеры. Громкости двигают SoundGroups через Audio сразу; остальное
+-- (тряска/скримеры/сенса) применяется через эхо SaveSettings→PushSettings
+-- (SettingsService). Персистентность (DataStore) — веха 6b.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -73,7 +75,7 @@ stone.Name = "Tombstone"
 stone.Active = true -- перехватывает клики (не стреляем из турели сквозь камень)
 stone.AnchorPoint = Vector2.new(0.5, 0.5)
 stone.Position = UDim2.fromScale(0.5, 0.5)
-stone.Size = UDim2.fromOffset(470, 480)
+stone.Size = UDim2.fromOffset(470, 580) -- 7 строк опций из схемы
 stone.BackgroundColor3 = STONE
 stone.Visible = false
 stone.Parent = gui
@@ -132,24 +134,38 @@ closeBtn.ZIndex = 3
 corner(closeBtn, 6)
 closeBtn.Parent = stone
 
--- // Слайдеры ----------------------------------------------------------------
+-- // Строки опций: генерируются из SettingsSchema.Options ---------------------
 local activeDrag: ((x: number) -> ())? = nil
+local ROW_H = 62
+local function rowY(index: number): number
+	return 116 + (index - 1) * ROW_H
+end
 
-local function makeSlider(key: string, label: string, index: number)
-	local y = 128 + (index - 1) * 76
+local function sendSave()
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local save = remotes and remotes:FindFirstChild("SaveSettings")
+	if save then
+		(save :: RemoteEvent):FireServer(settings) -- SettingsService: sanitize → эхо PushSettings
+	end
+end
 
-	local cap = engrave(label, false)
-	cap.Size = UDim2.new(1, -150, 0, 28)
+local function makeSlider(opt: SettingsSchema.Option, index: number)
+	local y = rowY(index)
+	local minV = opt.min or 0
+	local maxV = opt.max or 1
+
+	local cap = engrave(opt.label, false)
+	cap.Size = UDim2.new(1, -150, 0, 26)
 	cap.Position = UDim2.fromOffset(45, y)
 	cap.TextXAlignment = Enum.TextXAlignment.Left
-	cap.TextSize = 28
+	cap.TextSize = 26
 	cap.ZIndex = 3
 	cap.Parent = stone
 
 	local pct = engrave("100", false)
-	pct.Size = UDim2.fromOffset(72, 28)
+	pct.Size = UDim2.fromOffset(72, 26)
 	pct.Position = UDim2.new(1, -116, 0, y)
-	pct.TextSize = 28
+	pct.TextSize = 26
 	pct.ZIndex = 3
 	pct.Parent = stone
 
@@ -157,7 +173,7 @@ local function makeSlider(key: string, label: string, index: number)
 	track.Text = ""
 	track.AutoButtonColor = false
 	track.Size = UDim2.new(1, -90, 0, 14)
-	track.Position = UDim2.fromOffset(45, y + 38)
+	track.Position = UDim2.fromOffset(45, y + 32)
 	track.BackgroundColor3 = STONE_BOT
 	track.ZIndex = 3
 	corner(track, 7)
@@ -187,17 +203,19 @@ local function makeSlider(key: string, label: string, index: number)
 	hs.Parent = handle
 	handle.Parent = track
 
-	local function set(v: number, fromUser: boolean)
-		v = math.clamp(v, 0, 1)
-		settings[key] = v
-		fill.Size = UDim2.new(v, 0, 1, 0)
-		handle.Position = UDim2.new(v, 0, 0.5, 0)
-		pct.Text = tostring(math.floor(v * 100))
-		if fromUser then
-			Audio.apply(settings)
+	-- t — позиция ползунка 0..1; значение опции = min + t*(max-min)
+	local function set(t: number, fromUser: boolean)
+		t = math.clamp(t, 0, 1)
+		settings[opt.key] = minV + t * (maxV - minV)
+		fill.Size = UDim2.new(t, 0, 1, 0)
+		handle.Position = UDim2.new(t, 0, 0.5, 0)
+		pct.Text = tostring(math.floor(t * 100))
+		if fromUser and string.find(opt.key, "Volume") then
+			Audio.apply(settings) -- громкости слышны сразу; остальное применит эхо PushSettings
 		end
 	end
-	set(tonumber(settings[key]) or 1, false)
+	local v = tonumber(settings[opt.key]) or minV
+	set((v - minV) / math.max(maxV - minV, 1e-6), false)
 
 	local function setFromX(x: number)
 		local rel = (x - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1)
@@ -211,10 +229,55 @@ local function makeSlider(key: string, label: string, index: number)
 	end)
 end
 
-makeSlider("masterVolume", "MASTER", 1)
-makeSlider("musicVolume", "MUSIC", 2)
-makeSlider("engineVolume", "ENGINE", 3)
-makeSlider("sfxVolume", "SFX", 4)
+-- тумблер: камень-кнопка ON (мох) / OFF (тёмный)
+local function makeToggle(opt: SettingsSchema.Option, index: number)
+	local y = rowY(index)
+
+	local cap = engrave(opt.label, false)
+	cap.Size = UDim2.new(1, -190, 0, 26)
+	cap.Position = UDim2.fromOffset(45, y + 8)
+	cap.TextXAlignment = Enum.TextXAlignment.Left
+	cap.TextSize = 26
+	cap.ZIndex = 3
+	cap.Parent = stone
+
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.fromOffset(92, 38)
+	btn.Position = UDim2.new(1, -137, 0, y + 2)
+	btn.Font = UITheme.Font
+	btn.TextScaled = true
+	btn.TextColor3 = ENGRAVE
+	btn.TextStrokeColor3 = UITheme.Shadow
+	btn.TextStrokeTransparency = 0.4
+	btn.ZIndex = 3
+	corner(btn, 8)
+	local bs = Instance.new("UIStroke")
+	bs.Color = ENGRAVE
+	bs.Transparency = 0.45
+	bs.Thickness = 2
+	bs.Parent = btn
+	btn.Parent = stone
+
+	local function render()
+		local on = settings[opt.key] == true
+		btn.Text = on and "ON" or "OFF"
+		btn.BackgroundColor3 = on and MOSS or STONE_BOT
+	end
+	btn.Activated:Connect(function()
+		settings[opt.key] = not (settings[opt.key] == true)
+		render()
+		sendSave()
+	end)
+	render()
+end
+
+for i, opt in SettingsSchema.Options do
+	if opt.kind == "slider" then
+		makeSlider(opt, i)
+	else
+		makeToggle(opt, i)
+	end
+end
 
 UserInputService.InputChanged:Connect(function(input)
 	if activeDrag and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
@@ -225,11 +288,7 @@ UserInputService.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		if activeDrag then
 			activeDrag = nil
-			local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-			local save = remotes and remotes:FindFirstChild("SaveSettings")
-			if save then
-				(save :: RemoteEvent):FireServer(settings) -- SettingsService подхватит позже
-			end
+			sendSave() -- слайдер отпущен → зафиксировать значение на сервере
 		end
 	end
 end)

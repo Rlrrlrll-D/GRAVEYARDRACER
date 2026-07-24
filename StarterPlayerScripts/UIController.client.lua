@@ -512,7 +512,18 @@ updateStats.OnClientEvent:Connect(function(stats: StatsPayload)
 end)
 
 -- // Camera shake on hazard hits ------------------------------------------
+-- опция «тряска камеры» (веха 5): доставляется эхом SaveSettings→PushSettings
+local cameraShakeOn = true
+remotes:WaitForChild("PushSettings").OnClientEvent:Connect(function(s)
+	if type(s) == "table" and type(s.cameraShake) == "boolean" then
+		cameraShakeOn = s.cameraShake
+	end
+end)
+
 cameraShakeEvent.OnClientEvent:Connect(function(intensity: number, duration: number)
+	if not cameraShakeOn then
+		return
+	end
 	task.spawn(function()
 		local camera = workspace.CurrentCamera
 		local startTime = os.clock()

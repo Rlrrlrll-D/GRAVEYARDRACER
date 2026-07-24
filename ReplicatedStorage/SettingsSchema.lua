@@ -17,14 +17,15 @@ local SettingsSchema = {}
 
 -- Дефолты громкостей = 1.0: базовый микс уже сбалансирован в самих звуках
 -- (мотор 0.35, метал 0.15, ...), группы лишь умножают под предпочтения игрока.
+-- Подписи — АНГЛИЙСКИЕ: весь UI на Creepster, у которого нет кириллицы.
 SettingsSchema.Options = {
-	{ key = "masterVolume", label = "Общая",           kind = "slider", default = 1.0, min = 0, max = 1 },
-	{ key = "musicVolume",  label = "Музыка",          kind = "slider", default = 1.0, min = 0, max = 1 },
-	{ key = "engineVolume", label = "Мотор",           kind = "slider", default = 1.0, min = 0, max = 1 },
-	{ key = "sfxVolume",    label = "Звуки",           kind = "slider", default = 1.0, min = 0, max = 1 },
-	{ key = "cameraShake",  label = "Тряска камеры",   kind = "toggle", default = true },
-	{ key = "jumpscares",   label = "Скримеры (мыши)", kind = "toggle", default = true }, -- уважение к пугливым
-	{ key = "aimSens",      label = "Чувствит. турели",kind = "slider", default = 0.5, min = 0.1, max = 1 },
+	{ key = "masterVolume", label = "MASTER",       kind = "slider", default = 1.0, min = 0, max = 1 },
+	{ key = "musicVolume",  label = "MUSIC",        kind = "slider", default = 1.0, min = 0, max = 1 },
+	{ key = "engineVolume", label = "ENGINE",       kind = "slider", default = 1.0, min = 0, max = 1 },
+	{ key = "sfxVolume",    label = "SFX",          kind = "slider", default = 1.0, min = 0, max = 1 },
+	{ key = "cameraShake",  label = "CAMERA SHAKE", kind = "toggle", default = true },
+	{ key = "jumpscares",   label = "BAT SCARES",   kind = "toggle", default = true }, -- уважение к пугливым
+	{ key = "aimSens",      label = "AIM SPEED",    kind = "slider", default = 0.5, min = 0.1, max = 1 },
 } :: { Option }
 
 -- Собрать таблицу дефолтов { key = default }.
