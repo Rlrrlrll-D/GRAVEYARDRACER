@@ -159,7 +159,7 @@ Lobby ──(готовых ≥ MinRacers)──▶ Countdown ──▶ Racing �
 | `ServerScriptService/BatManager.server.lua` | Триггеры мышей (flyby/swarm) | ✅ скелет |
 | `StarterPlayerScripts/LobbyUI.client.lua` | Лобби: Ready/опции/итоги, тема | ✅ скелет |
 | `StarterPlayerScripts/BatFX.client.lua` | Рендер роя/пролётов мышей | ✅ скелет |
-| `ServerScriptService/RaceCore.lua` | Логика чекпоинтов из RaceManager (модуль) | ⬜ TODO |
+| `ServerScriptService/RaceCore.lua` | Логика чекпоинтов из RaceManager (модуль) | ✅ 2026-07-24: выделен, RaceManager переведён, регресс-тест пройден |
 | `ServerScriptService/SettingsService.server.lua` | DataStore опций+статы | ⬜ TODO |
 | `Bootstrap` доработка | Создавать Remotes по `Net.Events` | ⬜ TODO |
 

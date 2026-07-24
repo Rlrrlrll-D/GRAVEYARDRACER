@@ -7,6 +7,9 @@
 -- если GameConfig.Race.GhostsEnabled = true (выключите для чистого PvP).
 -- Старт — по отсчёту, когда первый игрок садится за руль; остальные могут
 -- присоединиться к заезду на ходу. После финиша гонка перезапускается.
+--
+-- Логика заезда (геометрия, чекпоинты, круги, победитель, позиции) — в модуле
+-- RaceCore; здесь остались фазы, визуал маркеров, призраки и трансляции.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
@@ -14,60 +17,20 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
-local MapLayout = require(ReplicatedStorage:WaitForChild("MapLayout"))
 local ModelFactory = require(script.Parent:WaitForChild("ModelFactory"))
+local RaceCore = require(script.Parent:WaitForChild("RaceCore"))
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local raceUpdate = remotes:WaitForChild("RaceUpdate") :: RemoteEvent
 
 local cfg = GameConfig.Race
-local GHOST_Y = 4.3   -- центр шасси призрака: колёса на уровне дороги (Y≈2)
-local MARKER_Y = 5.5  -- высота magic-orb: на уровне проезда, сквозь него едут
+local MARKER_Y = 5.5 -- высота magic-orb: на уровне проезда, сквозь него едут
 
--- // Сэмплирование трассы ---------------------------------------------------
-local function bezier(seg: {Vector2}, t: number): Vector2
-	local p0, p1, p2, p3 = seg[1], seg[2], seg[3], seg[4]
-	local u = 1 - t
-	return p0 * (u * u * u) + p1 * (3 * u * u * t) + p2 * (3 * u * t * t) + p3 * (t * t * t)
-end
+local checkpoints = RaceCore.Checkpoints
 
-local points: {Vector3} = {}
-for _, seg in MapLayout.TrackSegments do
-	for i = 0, 39 do
-		local p = bezier(seg, i / 40)
-		table.insert(points, Vector3.new(p.X * MapLayout.Scale, GHOST_Y, p.Y * MapLayout.Scale))
-	end
-end
-local segLengths: {number} = {}
-local trackLength = 0
-for i = 1, #points do
-	local nextPoint = points[i % #points + 1]
-	segLengths[i] = (nextPoint - points[i]).Magnitude
-	trackLength += segLengths[i]
-end
-
--- Точка и направление на дистанции dist (замкнутый круг)
-local function sampleAt(dist: number): (Vector3, Vector3)
-	local d = dist % trackLength
-	local i = 1
-	while d > segLengths[i] do
-		d -= segLengths[i]
-		i = i % #points + 1
-	end
-	local a = points[i]
-	local b = points[i % #points + 1]
-	local dir = (b - a).Unit
-	return a + dir * d, dir
-end
-
--- // Чекпоинты и маяки --------------------------------------------------------
+-- // Маркеры чекпоинтов -------------------------------------------------------
 -- Подсветку "своего" следующего чекпоинта каждый клиент делает сам
 -- (UIController), сервер держит маяки одинаковыми.
-local checkpoints: {Vector3} = {}
-for _, cp in MapLayout.RaceCheckpoints do
-	table.insert(checkpoints, Vector3.new(cp.X * MapLayout.Scale, 0, cp.Y * MapLayout.Scale))
-end
-
 local markerFolder = Instance.new("Folder")
 markerFolder.Name = "RaceMarkers"
 markerFolder.Parent = workspace
@@ -249,7 +212,7 @@ type Ghost = {
 local ghosts: {Ghost} = {}
 
 local function placeGhost(ghost: Ghost)
-	local pos, dir = sampleAt(ghost.dist)
+	local pos, dir = RaceCore.sampleAt(ghost.dist)
 	ghost.model:PivotTo(CFrame.lookAt(pos, pos + dir))
 end
 
@@ -301,12 +264,6 @@ if cfg.GhostsEnabled then
 end
 
 -- // Гонщики-игроки ---------------------------------------------------------------
-type Racer = {
-	seat: VehicleSeat,
-	cpIndex: number,
-	laps: number,
-}
-
 -- Кто сейчас сидит за рулём машины с тегом PlayerVehicle
 local function occupiedSeats(): {[Player]: VehicleSeat}
 	local result: {[Player]: VehicleSeat} = {}
@@ -326,7 +283,7 @@ local function occupiedSeats(): {[Player]: VehicleSeat}
 end
 
 -- // Главный цикл гонки ----------------------------------------------------------
-print(`[RaceManager] Трасса {math.floor(trackLength)} studs, {#checkpoints} чекпоинтов, {#ghosts} призраков.`)
+print(`[RaceManager] Трасса {math.floor(RaceCore.TrackLength)} studs, {#checkpoints} чекпоинтов, {#ghosts} призраков.`)
 
 while true do
 	-- IDLE: заезд стартует только когда за руль сядет ≥ cfg.MinRacers игроков
@@ -361,12 +318,7 @@ while true do
 		ghost.stumbleUntil = 0
 		placeGhost(ghost)
 	end
-	local racers: {[Player]: Racer} = {}
-	local eliminated: {[Player]: boolean} = {}
-	local everRaced = false
-	local peakRacers = 0 -- пик числа реальных гонщиков (для победы "последнего выжившего")
-	local winnerName: string? = nil
-	local winnerPlayer: Player? = nil
+	local session = RaceCore.newSession()
 
 	raceUpdate:FireAllClients({
 		Phase = "Racing", Go = true,
@@ -375,66 +327,19 @@ while true do
 
 	local lastTick = os.clock()
 	local lastBroadcast = 0
-	while not winnerName do
+	while not session.winnerName do
 		task.wait() -- каждый кадр: призраки двигаются плавно (вероятности уже нормированы на dt)
 		local now = os.clock()
 		local dt = now - lastTick
 		lastTick = now
 
-		-- регистрация гонщиков (присоединиться можно и после старта)
-		for plr, seat in occupiedSeats() do
-			if not eliminated[plr] then
-				local racer = racers[plr]
-				if racer then
-					racer.seat = seat
-				else
-					racers[plr] = { seat = seat, cpIndex = 1, laps = 0 }
-				end
-			end
+		-- вся логика заезда — RaceCore: регистрация, выбывшие, победитель, чекпоинты
+		local frame = session:step(occupiedSeats())
+		for _, plr in frame.newlyEliminated do
+			raceUpdate:FireClient(plr, { Phase = "Finished", Eliminated = true, PlayerWon = false })
 		end
-		for plr, racer in racers do
-			if plr.Parent == nil or racer.seat.Parent == nil then
-				racers[plr] = nil -- игрок вышел или его машину убрали
-			end
-		end
-		-- пик числа реальных гонщиков
-		local before = 0
-		for _ in racers do
-			before += 1
-		end
-		if before > peakRacers then
-			peakRacers = before
-		end
-
-		-- выбывшие (кончились жизни): убрать из заезда, показать GAME OVER
-		for plr, racer in racers do
-			local v = racer.seat.Parent
-			if v and v:GetAttribute("Eliminated") then
-				racers[plr] = nil
-				if not eliminated[plr] then
-					eliminated[plr] = true
-					raceUpdate:FireClient(plr, { Phase = "Finished", Eliminated = true, PlayerWon = false })
-				end
-			end
-		end
-
-		-- итог по реальным гонщикам
-		local active, lastPlr = 0, nil
-		for plr in racers do
-			active += 1
-			lastPlr = plr
-		end
-		if active > 0 then
-			everRaced = true
-		end
-		if not winnerName then
-			if peakRacers >= 2 and active == 1 and lastPlr then
-				-- все соперники выбыли → последний выживший побеждает
-				winnerName = (lastPlr :: Player).DisplayName
-				winnerPlayer = lastPlr
-			elseif everRaced and active == 0 then
-				break -- все выбыли/ушли — заезд окончен без победителя
-			end
+		if frame.allOut then
+			break -- все выбыли/ушли — заезд окончен без победителя
 		end
 
 		-- призраки: движение + случайные спотыкания
@@ -450,52 +355,21 @@ while true do
 			end
 		end
 
-		-- игроки: прохождение чекпоинтов по порядку
-		for plr, racer in racers do
-			local target = checkpoints[racer.cpIndex]
-			local seatPos = racer.seat.Position
-			local dx, dz = seatPos.X - target.X, seatPos.Z - target.Z
-			if math.sqrt(dx * dx + dz * dz) <= cfg.CheckpointRadius then
-				racer.cpIndex += 1
-				if racer.cpIndex > #checkpoints then
-					racer.cpIndex = 1
-					racer.laps += 1
-					if racer.laps >= cfg.Laps then
-						winnerName = plr.DisplayName
-						winnerPlayer = plr
-					end
-				end
-			end
-		end
-
 		-- персональная трансляция каждому гонщику
-		if now - lastBroadcast >= 0.4 and not winnerName then
+		if now - lastBroadcast >= 0.4 and not session.winnerName then
 			lastBroadcast = now
-			local progresses: {number} = {}
-			local playerProgress: {[Player]: number} = {}
-			for plr, racer in racers do
-				local p = racer.laps + (racer.cpIndex - 1) / #checkpoints
-				playerProgress[plr] = p
-				table.insert(progresses, p)
-			end
+			local ghostProgress: {number} = {}
 			for _, ghost in ghosts do
-				table.insert(progresses, (ghost.dist - ghost.startDist) / trackLength)
+				table.insert(ghostProgress, (ghost.dist - ghost.startDist) / RaceCore.TrackLength)
 			end
-			for plr, racer in racers do
-				local mine = playerProgress[plr]
-				local position = 1
-				for _, p in progresses do
-					if p > mine then
-						position += 1
-					end
-				end
+			for plr, row in session:standings(ghostProgress) do
 				raceUpdate:FireClient(plr, {
 					Phase = "Racing",
-					Lap = math.min(racer.laps + 1, cfg.Laps),
-					Laps = cfg.Laps,
-					Position = position,
-					Racers = #progresses,
-					NextCheckpoint = racer.cpIndex,
+					Lap = row.Lap,
+					Laps = row.Laps,
+					Position = row.Position,
+					Racers = row.Racers,
+					NextCheckpoint = row.NextCheckpoint,
 				})
 			end
 		end
@@ -520,11 +394,11 @@ while true do
 
 	-- FINISHED: каждому — его результат (выбывшие уже получили GAME OVER)
 	for _, plr in Players:GetPlayers() do
-		if not eliminated[plr] then
+		if not session:isEliminated(plr) then
 			raceUpdate:FireClient(plr, {
 				Phase = "Finished",
-				PlayerWon = plr == winnerPlayer,
-				Winner = winnerName,
+				PlayerWon = plr == session.winner,
+				Winner = session.winnerName,
 			})
 		end
 	end
