@@ -1,92 +1,40 @@
 --!strict
 -- ModuleScript: ServerScriptService.PlayerFlow
--- Жизненный цикл игрока в сессионной модели (веха 4 плана V2): спавн ВСЕГДА в
--- лобби, выдача/уборка машины с владельцем (OwnerUserId), возврат в лобби между
--- заездами. Чинит старый баг накопления клонов багги: машина игрока
--- уничтожается на PlayerRemoving и при эвикте.
---
--- Лобби — платформа-обзор высоко над кладбищем (строится здесь кодом, имя
--- платформы = GameState.LobbyZoneName). Зомби не достают: они спавнятся только
--- у занятых машин внизу. Оформление площадки — позже.
+-- Жизненный цикл игрока в упрощённой модели «заставка → отсчёт → гонка»:
+-- игрок стоит у СТАРТА (без лобби-платформы и диорам), заморожен пока не гонка;
+-- на старте ему выдаётся своя машина с владельцем (OwnerUserId) и он в неё
+-- садится; после заезда возвращается к старту. Машина уничтожается при эвикте и
+-- на PlayerRemoving — чинит старый баг накопления клонов багги.
 
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ServerStorage = game:GetService("ServerStorage")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local GameState = require(ReplicatedStorage:WaitForChild("GameState"))
 local VehicleRegistry = require(ReplicatedStorage:WaitForChild("VehicleRegistry"))
 
 local PlayerFlow = {}
 
 local vehicleOfPlayer: { [Player]: Model } = {}
 
--- // Лобби-платформа ----------------------------------------------------------
-local LOBBY_CENTER = Vector3.new(28, 150, 28) -- высоко над стартом: вид на трассу
-local PLATFORM_SIZE = Vector3.new(56, 3, 56)
-local WALL_HEIGHT = 24
+-- // Точка старта (где игрок стоит под заставкой/отсчётом) --------------------
+-- Захватывается в init из мировой SpawnLocation; игрок телепортируется сюда и
+-- замораживается, пока не сядет в машину. Никакой платформы/диорамы.
+local START_CF = CFrame.new(28, 5, 28)
 
-local lobbyPlatform: BasePart? = nil
-
-local function buildLobbyZone()
-	local existing = workspace:FindFirstChild(GameState.LobbyZoneName)
-	if existing and existing:IsA("BasePart") then
-		lobbyPlatform = existing
-		return
-	end
-
-	local rig = Instance.new("Model")
-	rig.Name = "Lobby"
-
-	local platform = Instance.new("Part")
-	platform.Name = GameState.LobbyZoneName
-	platform.Size = PLATFORM_SIZE
-	platform.Position = LOBBY_CENTER
-	platform.Anchored = true
-	platform.Material = Enum.Material.Slate
-	platform.Color = Color3.fromRGB(44, 50, 46) -- тёмный замшелый камень
-	platform.Parent = rig
-
-	-- невидимые стены по периметру: с площадки не упасть
-	for _, spec in {
-		{ off = Vector3.new(0, 0, -PLATFORM_SIZE.Z / 2), size = Vector3.new(PLATFORM_SIZE.X, WALL_HEIGHT, 1) },
-		{ off = Vector3.new(0, 0, PLATFORM_SIZE.Z / 2), size = Vector3.new(PLATFORM_SIZE.X, WALL_HEIGHT, 1) },
-		{ off = Vector3.new(-PLATFORM_SIZE.X / 2, 0, 0), size = Vector3.new(1, WALL_HEIGHT, PLATFORM_SIZE.Z) },
-		{ off = Vector3.new(PLATFORM_SIZE.X / 2, 0, 0), size = Vector3.new(1, WALL_HEIGHT, PLATFORM_SIZE.Z) },
-	} do
-		local wall = Instance.new("Part")
-		wall.Name = "LobbyWall"
-		wall.Size = spec.size
-		wall.Position = LOBBY_CENTER + spec.off + Vector3.new(0, WALL_HEIGHT / 2 + PLATFORM_SIZE.Y / 2, 0)
-		wall.Anchored = true
-		wall.Transparency = 1
-		wall.CanQuery = false
-		wall.Parent = rig
-	end
-
-	-- родной спавн Roblox на платформе; старые точки в мире выключаем
-	local pad = Instance.new("SpawnLocation")
-	pad.Name = "LobbySpawn"
-	pad.Size = Vector3.new(12, 1, 12)
-	pad.Position = LOBBY_CENTER + Vector3.new(0, PLATFORM_SIZE.Y / 2 + 0.5, 0)
-	pad.Anchored = true
-	pad.Neutral = true
-	pad.Duration = 0 -- без форс-филда
-	pad.Transparency = 1
-	pad.Enabled = true
-	pad.Parent = rig
-
-	for _, d in workspace:GetChildren() do
-		if d:IsA("SpawnLocation") then
-			d.Enabled = false
-		end
-	end
-
-	rig.Parent = workspace
-	lobbyPlatform = platform
+local function freeze(hum: Humanoid)
+	hum.WalkSpeed = 0
+	hum.JumpPower = 0
+	hum.JumpHeight = 0
+end
+local function unfreeze(hum: Humanoid)
+	hum.WalkSpeed = 16
+	hum.JumpPower = 50
+	hum.JumpHeight = 7.2
 end
 
--- Телепорт персонажа в лобби (между заездами и после game over).
+-- Вернуть персонажа к старту (под заставку) и заморозить. Имя sendToLobby
+-- сохранено — им пользуется MatchManager.evict/onCharacterAdded.
 function PlayerFlow.sendToLobby(player: Player)
 	local char = player.Character
 	if not char then
@@ -105,17 +53,18 @@ function PlayerFlow.sendToLobby(player: Player)
 		hum.Sit = false
 	end
 	task.wait() -- дать физике отпустить персонажа
-	local base = lobbyPlatform and lobbyPlatform.Position or LOBBY_CENTER
-	local scatter = Vector3.new(math.random(-12, 12), 0, math.random(-12, 12))
-	char:PivotTo(CFrame.new(base + scatter + Vector3.new(0, PLATFORM_SIZE.Y / 2 + 4, 0)))
+	local scatter = Vector3.new(math.random(-6, 6), 0, math.random(-6, 6))
+	char:PivotTo(START_CF + scatter)
+	if hum then
+		freeze(hum) -- под заставкой не бродим
+	end
 end
 
 -- // Стартовая решётка --------------------------------------------------------
 -- База — CFrame сиденья преж-установленного багги (записываем при init и УБИРАЕМ
 -- машину: свободных машин в мире больше нет, они выдаются на отсчёте).
 local FALLBACK_SEAT_CF = CFrame.lookAt(Vector3.new(10.05, 7.21, 5.19), Vector3.new(9.05, 7.21, 5.19))
--- смещения мест 2..8 от сиденья первого места (решётка 2 колонны) — как у
--- старого VehicleSpawner
+-- смещения мест 2..8 от сиденья первого места (решётка 2 колонны)
 local GRID_OFFSETS = {
 	Vector3.new(-10, 0, 0),
 	Vector3.new(10, 0, 8),
@@ -202,7 +151,7 @@ function PlayerFlow.getVehicle(player: Player): Model?
 	return (car and car.Parent) and car or nil
 end
 
--- Посадить владельца за руль его машины (персонаж может быть в лобби — телепортим).
+-- Посадить владельца за руль его машины (персонаж стоит у старта — телепортим).
 function PlayerFlow.seatDriver(player: Player)
 	local car = PlayerFlow.getVehicle(player)
 	local seat = car and car:FindFirstChild("DriveSeat")
@@ -211,6 +160,7 @@ function PlayerFlow.seatDriver(player: Player)
 	if not (car and seat and seat:IsA("VehicleSeat") and char and hum and hum.Health > 0) then
 		return
 	end
+	unfreeze(hum :: Humanoid); -- разморозить перед посадкой
 	(seat :: VehicleSeat).Disabled = false;
 	(char :: Model):PivotTo((seat :: VehicleSeat).CFrame * CFrame.new(0, 5, 0))
 	task.wait()
@@ -254,7 +204,7 @@ local function onCharacterAdded(player: Player)
 		-- гонщик погиб посреди заезда → назад за руль, гонка продолжается
 		PlayerFlow.seatDriver(player)
 	else
-		PlayerFlow.sendToLobby(player)
+		PlayerFlow.sendToLobby(player) -- к старту + заморозка
 	end
 end
 
@@ -265,7 +215,11 @@ function PlayerFlow.init()
 	end
 	initialized = true
 
-	buildLobbyZone()
+	-- точка старта = мировая SpawnLocation (чуть выше, чтобы не застрять в полу)
+	local spawn = workspace:FindFirstChildOfClass("SpawnLocation")
+	if spawn then
+		START_CF = spawn.CFrame + Vector3.new(0, 3, 0)
+	end
 	captureGridBase()
 	ensureTemplate()
 
@@ -283,7 +237,7 @@ function PlayerFlow.init()
 	end
 	Players.PlayerRemoving:Connect(PlayerFlow.releaseVehicle)
 
-	print("[PlayerFlow] Лобби построено, решётка записана, свободные машины убраны.")
+	print("[PlayerFlow] Старт у грида, решётка записана, свободные машины убраны (без платформы).")
 end
 
 return PlayerFlow
