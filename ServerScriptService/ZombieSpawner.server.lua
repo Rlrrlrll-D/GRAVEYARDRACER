@@ -25,7 +25,9 @@ local ZombieAI = require(script.Parent:WaitForChild("ZombieAI"))
 
 local template = ServerStorage:WaitForChild("ZombieTemplate") :: Model
 
--- // Лидерборд: убитые зомби (leaderstats.Zombies в списке игроков) ------------
+-- // Лидерборд: зомби и победы (leaderstats в списке игроков) ------------------
+-- Значения зеркалят атрибуты игрока: ZombiesDefeated растит onZombieDied, Wins —
+-- MatchManager; PlayerData сидирует оба из DataStore при входе (веха 6b).
 local function setupLeaderstats(player: Player)
 	local ls = Instance.new("Folder")
 	ls.Name = "leaderstats"
@@ -33,10 +35,16 @@ local function setupLeaderstats(player: Player)
 	zombies.Name = "Zombies"
 	zombies.Value = (player:GetAttribute("ZombiesDefeated") :: number?) or 0
 	zombies.Parent = ls
+	local wins = Instance.new("IntValue")
+	wins.Name = "Wins"
+	wins.Value = (player:GetAttribute("Wins") :: number?) or 0
+	wins.Parent = ls
 	ls.Parent = player
-	-- держим в синхроне со счётчиком-атрибутом (его растит onZombieDied)
 	player:GetAttributeChangedSignal("ZombiesDefeated"):Connect(function()
 		zombies.Value = (player:GetAttribute("ZombiesDefeated") :: number?) or 0
+	end)
+	player:GetAttributeChangedSignal("Wins"):Connect(function()
+		wins.Value = (player:GetAttribute("Wins") :: number?) or 0
 	end)
 end
 for _, p in Players:GetPlayers() do

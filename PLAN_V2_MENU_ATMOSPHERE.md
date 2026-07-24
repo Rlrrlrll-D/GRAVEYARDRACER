@@ -161,7 +161,8 @@ Lobby ──(готовых ≥ MinRacers)──▶ Countdown ──▶ Racing �
 | `StarterPlayerScripts/LobbyUI.client.lua` | Лобби: Ready/ростер/итоги, тема | ✅ 2026-07-24: веха 5 — Ready, ростер с готовностью, итоги; опции — в OptionsMenu из схемы |
 | `StarterPlayerScripts/BatFX.client.lua` | Рендер роя/пролётов мышей | ✅ скелет |
 | `ServerScriptService/RaceCore.lua` | Логика чекпоинтов из RaceManager (модуль) | ✅ 2026-07-24: выделен, RaceManager переведён, регресс-тест пройден |
-| `ServerScriptService/SettingsService.server.lua` | DataStore опций+статы | 🟡 2026-07-24: эхо-версия (SaveSettings→sanitize→PushSettings, in-memory); DataStore+статы — веха 6b |
+| `ServerScriptService/SettingsService.server.lua` | Опции: sanitize→PlayerData→PushSettings | ✅ 2026-07-24: веха 6b |
+| `ServerScriptService/PlayerData.lua` | DataStore: запись {settings, stats{zombies,wins}} на игрока | ✅ 2026-07-24: веха 6b — сидирует атрибуты, save на выходе+BindToClose, тест перезапуском пройден |
 | `Bootstrap` доработка | Создавать Remotes по `Net.Events` | ⬜ TODO |
 
 ---

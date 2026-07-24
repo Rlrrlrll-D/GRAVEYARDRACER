@@ -81,6 +81,10 @@ end
 -- // Эвикт --------------------------------------------------------------------
 -- Единая точка «убрать игрока из мира»: и выбывание, и финиш, и победа.
 local function evict(player: Player, resultKind: string, winnerName: string?)
+	if resultKind == "won" then
+		-- атрибут Wins: leaderstats зеркалит, PlayerData сохраняет в DataStore
+		player:SetAttribute("Wins", ((player:GetAttribute("Wins") :: number?) or 0) + 1)
+	end
 	ready[player] = false
 	PlayerFlow.unseat(player)
 	PlayerFlow.sendToLobby(player) -- ← мир для «мёртвых» закрыт

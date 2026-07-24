@@ -141,6 +141,9 @@ local function rowY(index: number): number
 	return 116 + (index - 1) * ROW_H
 end
 
+-- обновление строки извне (PushSettings: сохранённые опции пришли с сервера)
+local applyExternal: { [string]: (value: any) -> () } = {}
+
 local function sendSave()
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	local save = remotes and remotes:FindFirstChild("SaveSettings")
@@ -216,6 +219,11 @@ local function makeSlider(opt: SettingsSchema.Option, index: number)
 	end
 	local v = tonumber(settings[opt.key]) or minV
 	set((v - minV) / math.max(maxV - minV, 1e-6), false)
+	applyExternal[opt.key] = function(value: any)
+		if type(value) == "number" then
+			set((value - minV) / math.max(maxV - minV, 1e-6), false)
+		end
+	end
 
 	local function setFromX(x: number)
 		local rel = (x - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1)
@@ -269,6 +277,12 @@ local function makeToggle(opt: SettingsSchema.Option, index: number)
 		sendSave()
 	end)
 	render()
+	applyExternal[opt.key] = function(value: any)
+		if type(value) == "boolean" then
+			settings[opt.key] = value
+			render()
+		end
+	end
 end
 
 for i, opt in SettingsSchema.Options do
@@ -278,6 +292,18 @@ for i, opt in SettingsSchema.Options do
 		makeToggle(opt, i)
 	end
 end
+
+-- сохранённые опции пришли с сервера (вход в игру / эхо) → обновить строки UI
+ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("PushSettings").OnClientEvent:Connect(function(s)
+	if type(s) ~= "table" then
+		return
+	end
+	for key, fn in applyExternal do
+		if s[key] ~= nil then
+			fn(s[key])
+		end
+	end
+end)
 
 UserInputService.InputChanged:Connect(function(input)
 	if activeDrag and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
