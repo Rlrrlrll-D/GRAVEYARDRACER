@@ -1,30 +1,21 @@
 --!strict
--- Script: ServerScriptService.RaceManager
--- Гонка на GameConfig.Race.Laps кругов по восьмёрке MapLayout.TrackSegments.
--- Соперники — ДРУГИЕ ИГРОКИ: каждому VehicleSpawner выдаёт свою машину,
--- прогресс (чекпоинты/круги) считается отдельно на каждого. Победитель —
--- первый, кто закроет все круги. Призраки-пейсеры добавляются к заезду,
--- если GameConfig.Race.GhostsEnabled = true (выключите для чистого PvP).
--- Старт — по отсчёту, когда первый игрок садится за руль; остальные могут
--- присоединиться к заезду на ходу. После финиша гонка перезапускается.
---
--- Логика заезда (геометрия, чекпоинты, круги, победитель, позиции) — в модуле
--- RaceCore; здесь остались фазы, визуал маркеров, призраки и трансляции.
+-- ModuleScript: ServerScriptService.RaceScene
+-- Визуальная сцена заезда, вынесена из старого RaceManager (веха 4): маркеры
+-- чекпоинтов (орбы/черепа) строятся при загрузке; призраки-пейсеры создаются
+-- по GameConfig.Race.GhostsEnabled и двигаются шагами stepGhosts, которые
+-- дёргает MatchManager в фазе Racing. Никакой логики фаз/победителя здесь нет.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local CollectionService = game:GetService("CollectionService")
-local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local ModelFactory = require(script.Parent:WaitForChild("ModelFactory"))
 local RaceCore = require(script.Parent:WaitForChild("RaceCore"))
 
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local raceUpdate = remotes:WaitForChild("RaceUpdate") :: RemoteEvent
-
 local cfg = GameConfig.Race
 local MARKER_Y = 5.5 -- высота magic-orb: на уровне проезда, сквозь него едут
+
+local RaceScene = {}
 
 local checkpoints = RaceCore.Checkpoints
 
@@ -199,7 +190,7 @@ for i, cp in checkpoints do
 	end
 end
 
--- // Призраки-пейсеры -----------------------------------------------------------
+-- // Призраки-пейсеры ---------------------------------------------------------
 type Ghost = {
 	model: Model,
 	speed: number,
@@ -209,7 +200,7 @@ type Ghost = {
 	name: string,
 }
 
-local ghosts: {Ghost} = {}
+local ghosts: { Ghost } = {}
 
 local function placeGhost(ghost: Ghost)
 	local pos, dir = RaceCore.sampleAt(ghost.dist)
@@ -263,144 +254,39 @@ if cfg.GhostsEnabled then
 	end
 end
 
--- // Гонщики-игроки ---------------------------------------------------------------
--- Кто сейчас сидит за рулём машины с тегом PlayerVehicle
-local function occupiedSeats(): {[Player]: VehicleSeat}
-	local result: {[Player]: VehicleSeat} = {}
-	for _, v in CollectionService:GetTagged("PlayerVehicle") do
-		if v:IsA("Model") then
-			local seat = v:FindFirstChild("DriveSeat")
-			if seat and seat:IsA("VehicleSeat") and seat.Occupant then
-				local character = seat.Occupant.Parent
-				local plr = character and Players:GetPlayerFromCharacter(character)
-				if plr then
-					result[plr] = seat
-				end
-			end
-		end
-	end
-	return result
-end
+RaceScene.GhostCount = #ghosts
 
--- // Главный цикл гонки ----------------------------------------------------------
-print(`[RaceManager] Трасса {math.floor(RaceCore.TrackLength)} studs, {#checkpoints} чекпоинтов, {#ghosts} призраков.`)
-
-while true do
-	-- IDLE: заезд стартует только когда за руль сядет ≥ cfg.MinRacers игроков
-	repeat
-		local seated = 0
-		for _ in occupiedSeats() do
-			seated += 1
-		end
-		raceUpdate:FireAllClients({ Phase = "Idle", Waiting = seated, Needed = cfg.MinRacers })
-		if seated >= cfg.MinRacers then
-			break
-		end
-		task.wait(0.5)
-	until false
-
-	-- сброс всех машин к старту нового заезда (жизни, ремонт, позиция на грид)
-	for _, v in CollectionService:GetTagged("PlayerVehicle") do
-		if v:IsA("Model") then
-			v:SetAttribute("FullReset", os.clock())
-		end
-	end
-
-	-- COUNTDOWN
-	for c = cfg.CountdownSeconds, 1, -1 do
-		raceUpdate:FireAllClients({ Phase = "Countdown", Countdown = c, Laps = cfg.Laps })
-		task.wait(1)
-	end
-
-	-- RACING
+-- Вернуть призраков на стартовые позиции (перед отсчётом).
+function RaceScene.resetGhosts()
 	for _, ghost in ghosts do
 		ghost.dist = ghost.startDist
 		ghost.stumbleUntil = 0
 		placeGhost(ghost)
 	end
-	local session = RaceCore.newSession()
-
-	raceUpdate:FireAllClients({
-		Phase = "Racing", Go = true,
-		Lap = 1, Laps = cfg.Laps, Position = 1, Racers = 1, NextCheckpoint = 1,
-	})
-
-	local lastTick = os.clock()
-	local lastBroadcast = 0
-	while not session.winnerName do
-		task.wait() -- каждый кадр: призраки двигаются плавно (вероятности уже нормированы на dt)
-		local now = os.clock()
-		local dt = now - lastTick
-		lastTick = now
-
-		-- вся логика заезда — RaceCore: регистрация, выбывшие, победитель, чекпоинты
-		local frame = session:step(occupiedSeats())
-		for _, plr in frame.newlyEliminated do
-			raceUpdate:FireClient(plr, { Phase = "Finished", Eliminated = true, PlayerWon = false })
-		end
-		if frame.allOut then
-			break -- все выбыли/ушли — заезд окончен без победителя
-		end
-
-		-- призраки: движение + случайные спотыкания
-		for _, ghost in ghosts do
-			if now >= ghost.stumbleUntil then
-				if math.random() < cfg.StumbleChancePerSecond * dt then
-					ghost.stumbleUntil = now + cfg.StumbleDuration
-				else
-					ghost.dist += ghost.speed * dt
-					placeGhost(ghost)
-					-- призраки — тренажёр-пейсеры, НЕ побеждают (исход — только реальные игроки)
-				end
-			end
-		end
-
-		-- персональная трансляция каждому гонщику
-		if now - lastBroadcast >= 0.4 and not session.winnerName then
-			lastBroadcast = now
-			local ghostProgress: {number} = {}
-			for _, ghost in ghosts do
-				table.insert(ghostProgress, (ghost.dist - ghost.startDist) / RaceCore.TrackLength)
-			end
-			for plr, row in session:standings(ghostProgress) do
-				raceUpdate:FireClient(plr, {
-					Phase = "Racing",
-					Lap = row.Lap,
-					Laps = row.Laps,
-					Position = row.Position,
-					Racers = row.Racers,
-					NextCheckpoint = row.NextCheckpoint,
-				})
-			end
-		end
-	end
-
-	-- СТОП после финиша: замораживаем все машины на время экрана победы
-	-- (сиденья снова включатся на старте следующего заезда через FullReset)
-	for _, v in CollectionService:GetTagged("PlayerVehicle") do
-		if v:IsA("Model") then
-			local vseat = v:FindFirstChild("DriveSeat")
-			if vseat and vseat:IsA("VehicleSeat") then
-				vseat.Disabled = true
-			end
-			for _, p in v:GetDescendants() do
-				if p:IsA("BasePart") then
-					p.AssemblyLinearVelocity = Vector3.zero
-					p.AssemblyAngularVelocity = Vector3.zero
-				end
-			end
-		end
-	end
-
-	-- FINISHED: каждому — его результат (выбывшие уже получили GAME OVER)
-	for _, plr in Players:GetPlayers() do
-		if not session:isEliminated(plr) then
-			raceUpdate:FireClient(plr, {
-				Phase = "Finished",
-				PlayerWon = plr == session.winner,
-				Winner = session.winnerName,
-			})
-		end
-	end
-	task.wait(8)
 end
+
+-- Один кадр движения призраков: скорость + случайные «спотыкания».
+function RaceScene.stepGhosts(now: number, dt: number)
+	for _, ghost in ghosts do
+		if now >= ghost.stumbleUntil then
+			if math.random() < cfg.StumbleChancePerSecond * dt then
+				ghost.stumbleUntil = now + cfg.StumbleDuration
+			else
+				ghost.dist += ghost.speed * dt
+				placeGhost(ghost)
+				-- призраки — тренажёр-пейсеры, НЕ побеждают (исход — только реальные игроки)
+			end
+		end
+	end
+end
+
+-- Прогресс призраков в кругах (для standings RaceCore).
+function RaceScene.ghostProgresses(): { number }
+	local out: { number } = {}
+	for _, ghost in ghosts do
+		table.insert(out, (ghost.dist - ghost.startDist) / RaceCore.TrackLength)
+	end
+	return out
+end
+
+return RaceScene

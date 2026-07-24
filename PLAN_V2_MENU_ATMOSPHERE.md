@@ -154,10 +154,11 @@ Lobby ──(готовых ≥ MinRacers)──▶ Countdown ──▶ Racing �
 | `ReplicatedStorage/Net.lua` | Манифест всех remotes (старые+новые) | ✅ скелет |
 | `ReplicatedStorage/GameState.lua` | Имена фаз матча + LobbyZone | ✅ скелет |
 | `ReplicatedStorage/SettingsSchema.lua` | Опции: дефолты/валидация | ✅ скелет |
-| `ServerScriptService/PlayerFlow.server.lua` | Спавн в лобби, владение машиной, cleanup, `sendToLobby` | ✅ скелет |
-| `ServerScriptService/MatchManager.server.lua` | Машина состояний + **эвикт после game over** | ✅ скелет |
+| `ServerScriptService/PlayerFlow.lua` | Спавн в лобби, владение машиной, cleanup, `sendToLobby` | ✅ 2026-07-24: модуль, подключён (веха 4) |
+| `ServerScriptService/MatchManager.server.lua` | Машина состояний + **эвикт после game over** | ✅ 2026-07-24: подключён, RaceManager/VehicleSpawner удалены (веха 4) |
+| `ServerScriptService/RaceScene.lua` | Визуал трассы: маркеры чекпоинтов + призраки-пейсеры | ✅ 2026-07-24: вынесен из RaceManager (веха 4) |
 | `ServerScriptService/BatManager.server.lua` | Триггеры мышей (flyby/swarm) | ✅ скелет |
-| `StarterPlayerScripts/LobbyUI.client.lua` | Лобби: Ready/опции/итоги, тема | ✅ скелет |
+| `StarterPlayerScripts/LobbyUI.client.lua` | Лобби: Ready/опции/итоги, тема | ✅ 2026-07-24: подключён — Ready/итоги/показ-скрытие работают; панель опций — веха 5 |
 | `StarterPlayerScripts/BatFX.client.lua` | Рендер роя/пролётов мышей | ✅ скелет |
 | `ServerScriptService/RaceCore.lua` | Логика чекпоинтов из RaceManager (модуль) | ✅ 2026-07-24: выделен, RaceManager переведён, регресс-тест пройден |
 | `ServerScriptService/SettingsService.server.lua` | DataStore опций+статы | ⬜ TODO |

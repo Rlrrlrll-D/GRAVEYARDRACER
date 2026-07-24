@@ -1,15 +1,21 @@
 --!strict
--- Script: ServerScriptService.MatchManager  [СКЕЛЕТ — ещё не подключён к Studio]
--- Машина состояний матча промышленного вида. ЗАМЕНЯЕТ вечный while-цикл
--- RaceManager: тот надо распилить на модуль RaceCore (чистая логика чекпоинтов/
--- кругов, без управления фазами) — MatchManager дёргает его каждый кадр в фазе
--- Racing и получает победителя/выбывших.
+-- Script: ServerScriptService.MatchManager
+-- Сессионная машина состояний матча (веха 4 плана V2). ЗАМЕНЯЕТ старый
+-- RaceManager и VehicleSpawner — их скрипты удалены, фазами владеет только он.
 --
 --   Lobby ──(готовых ≥ MinRacers)──▶ Countdown ──▶ Racing ──▶ Results ──▶ Lobby
 --
--- КЛЮЧЕВОЕ ТРЕБОВАНИЕ: после game over (кончились жизни ИЛИ финиш) игрок НЕ
--- остаётся в игровом мире — его сразу выкидывает в лобби (PlayerFlow.sendToLobby),
--- машина глохнет/убирается, показывается экран итогов. Мир для «мёртвых» закрыт.
+-- Разделение труда: RaceCore — логика заезда (чекпоинты/круги/победитель),
+-- RaceScene — визуал (маркеры, призраки), PlayerFlow — игрок/машины/лобби.
+--
+-- КЛЮЧЕВОЕ: после game over (кончились жизни ИЛИ финиш) игрок НЕ остаётся в
+-- мире — evict() сразу возвращает его в лобби, машина исчезает. Свободных машин
+-- в мире нет: их выдаёт отсчёт и забирает эвикт.
+--
+-- Совместимость с клиентом: RaceUpdate шлёт те же фазы, что и старый RaceManager
+-- («Idle»/«Countdown»/«Racing»/«Finished») — HUD (UIController) не переписывался.
+-- Новое поле Participant=true в персональных пейлоадах гонщиков — по нему
+-- LobbyUI прячет экран лобби только у участников заезда.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -17,112 +23,207 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local GameState = require(ReplicatedStorage:WaitForChild("GameState"))
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
--- local RaceCore = require(script.Parent.RaceCore) -- TODO: выделить из RaceManager
-local PlayerFlow = _G.PlayerFlow -- TODO: заменить на require(ModuleScript)
+local RaceCore = require(script.Parent:WaitForChild("RaceCore"))
+local RaceScene = require(script.Parent:WaitForChild("RaceScene"))
+local PlayerFlow = require(script.Parent:WaitForChild("PlayerFlow"))
 
+local cfg = GameConfig.Race
 local Phase = GameState.Phase
+local RESULTS_SECONDS = 8 -- пауза на экран итогов (как у старого RaceManager)
+local RACE_ABORT_SECONDS = 30 -- никто так и не сел за руль → отменить заезд
+
 local raceUpdate = Net.get(Net.Events.RaceUpdate)
 local lobbyState = Net.get(Net.Events.LobbyState)
 local playerReady = Net.get(Net.Events.PlayerReady)
 local returnToLobby = Net.get(Net.Events.ReturnToLobby)
 
--- // Готовность игроков в лобби ---------------------------------------------
+PlayerFlow.init()
+
+-- // Готовность игроков -------------------------------------------------------
 local ready: { [Player]: boolean } = {}
+local phase = Phase.Lobby
 
 playerReady.OnServerEvent:Connect(function(player, isReady)
 	ready[player] = isReady == true
 end)
-Players.PlayerRemoving:Connect(function(p) ready[p] = nil end)
+Players.PlayerRemoving:Connect(function(p)
+	ready[p] = nil
+end)
 
-local function countReady(): number
-	local n = 0
+local function readyList(): { Player }
+	local list: { Player } = {}
 	for p, r in ready do
-		if r and p.Parent then n += 1 end
+		if r and p.Parent then
+			table.insert(list, p)
+		end
 	end
-	return n
+	return list
 end
 
 local function broadcastLobby()
 	lobbyState:FireAllClients({
-		ready = countReady(),
-		needed = GameConfig.Race.MinRacers,
+		phase = phase,
+		ready = #readyList(),
+		needed = cfg.MinRacers,
 		total = #Players:GetPlayers(),
 	})
 end
 
--- // Эвикт из мира ----------------------------------------------------------
--- Единая точка «убрать игрока из заезда»: и при выбывании (нет жизней), и на
--- финише. Персонаж — в лобби, машина заглушена, клиенту — экран итогов.
-local function evict(player: Player, resultKind: string, extra: { [string]: any }?)
+-- // Эвикт --------------------------------------------------------------------
+-- Единая точка «убрать игрока из мира»: и выбывание, и финиш, и победа.
+local function evict(player: Player, resultKind: string, winnerName: string?)
 	ready[player] = false
-	local car = PlayerFlow and PlayerFlow.getVehicle(player)
-	if car then
-		local seat = car:FindFirstChild("DriveSeat")
-		if seat and seat:IsA("VehicleSeat") then seat.Disabled = true end
-	end
-	if PlayerFlow then PlayerFlow.sendToLobby(player) end -- ← НЕ оставляем в мире
-	local payload = { Phase = Phase.Results, Result = resultKind }
-	if extra then for k, v in extra do payload[k] = v end end
-	returnToLobby:FireClient(player, payload) -- клиент: показать итог, открыть лобби
+	PlayerFlow.unseat(player)
+	PlayerFlow.sendToLobby(player) -- ← мир для «мёртвых» закрыт
+	PlayerFlow.releaseVehicle(player) -- машина исчезает из мира
+	returnToLobby:FireClient(player, { Result = resultKind, Winner = winnerName })
 end
 
--- // Фазы -------------------------------------------------------------------
+-- // Кто за рулём (только машины, выданные PlayerFlow) ------------------------
+local function occupiedSeats(): { [Player]: VehicleSeat }
+	local result: { [Player]: VehicleSeat } = {}
+	for _, car in PlayerFlow.vehicles() do
+		if car.Parent then
+			local seat = car:FindFirstChild("DriveSeat")
+			if seat and seat:IsA("VehicleSeat") and seat.Occupant then
+				local character = seat.Occupant.Parent
+				local plr = character and Players:GetPlayerFromCharacter(character)
+				if plr then
+					result[plr] = seat
+				end
+			end
+		end
+	end
+	return result
+end
+
+-- // Фазы ---------------------------------------------------------------------
 local function runLobby()
+	phase = Phase.Lobby
 	repeat
 		broadcastLobby()
-		raceUpdate:FireAllClients({ Phase = Phase.Lobby, Waiting = countReady(), Needed = GameConfig.Race.MinRacers })
+		raceUpdate:FireAllClients({ Phase = "Idle", Waiting = #readyList(), Needed = cfg.MinRacers })
 		task.wait(0.5)
-	until countReady() >= GameConfig.Race.MinRacers
+	until #readyList() >= cfg.MinRacers
 end
 
-local function runCountdown()
-	-- TODO: выпустить готовых игроков на грид (PlayerFlow.assignVehicle + посадить),
-	-- FullReset машинам, разморозить управление.
-	for c = GameConfig.Race.CountdownSeconds, 1, -1 do
-		raceUpdate:FireAllClients({ Phase = Phase.Countdown, Countdown = c, Laps = GameConfig.Race.Laps })
+local function runCountdown(): { Player }
+	phase = Phase.Countdown
+	local participants = readyList()
+	-- мест на решётке может быть меньше, чем готовых
+	while #participants > PlayerFlow.MaxSlots do
+		table.remove(participants)
+	end
+
+	-- выпуск на грид: своя машина каждому + посадка
+	for i, plr in participants do
+		local car = PlayerFlow.assignVehicle(plr, PlayerFlow.gridSlot(i))
+		if car then
+			car:SetAttribute("FullReset", os.clock())
+			PlayerFlow.seatDriver(plr)
+		end
+	end
+	RaceScene.resetGhosts()
+
+	for c = cfg.CountdownSeconds, 1, -1 do
+		broadcastLobby()
+		for _, plr in Players:GetPlayers() do
+			local payload: { [string]: any } = { Phase = "Countdown", Countdown = c, Laps = cfg.Laps }
+			if table.find(participants, plr) then
+				payload.Participant = true
+			end
+			raceUpdate:FireClient(plr, payload)
+		end
 		task.wait(1)
 	end
+	return participants
 end
 
-local function runRacing()
-	raceUpdate:FireAllClients({ Phase = Phase.Racing, Go = true, Laps = GameConfig.Race.Laps })
-	local winner: Player? = nil
-	while not winner do
+local function runRacing(participants: { Player }): (Player?, string?, RaceCore.Session)
+	phase = Phase.Racing
+	local session = RaceCore.newSession()
+
+	for _, plr in Players:GetPlayers() do
+		local payload: { [string]: any } = {
+			Phase = "Racing", Go = true,
+			Lap = 1, Laps = cfg.Laps, Position = 1,
+			Racers = math.max(#participants, 1), NextCheckpoint = 1,
+		}
+		if table.find(participants, plr) then
+			payload.Participant = true
+		end
+		raceUpdate:FireClient(plr, payload)
+	end
+
+	local startClock = os.clock()
+	local lastTick = os.clock()
+	local lastBroadcast = 0
+	while not session.winnerName do
 		task.wait()
-		-- TODO: local frame = RaceCore.step(dt) → прогресс/позиции/победитель.
-		-- Скелет показывает ТОЛЬКО контур эвикта — самое важное для этого этапа:
-		for _, player in Players:GetPlayers() do
-			local car = PlayerFlow and PlayerFlow.getVehicle(player)
-			if car and car:GetAttribute("Eliminated") and ready[player] then
-				evict(player, "eliminated") -- кончились жизни → сразу в лобби
+		local now = os.clock()
+		local dt = now - lastTick
+		lastTick = now
+
+		local frame = session:step(occupiedSeats())
+		for _, plr in frame.newlyEliminated do
+			raceUpdate:FireClient(plr, { Phase = "Finished", Eliminated = true, PlayerWon = false })
+			evict(plr, "eliminated", nil) -- жизни кончились → сразу в лобби
+		end
+		if frame.allOut then
+			break -- гонщиков не осталось — заезд окончен без победителя
+		end
+		if not session.everRaced and now - startClock > RACE_ABORT_SECONDS then
+			break -- никто так и не сел за руль (все ушли на отсчёте)
+		end
+
+		RaceScene.stepGhosts(now, dt)
+
+		if now - lastBroadcast >= 0.4 and not session.winnerName then
+			lastBroadcast = now
+			broadcastLobby()
+			for plr, row in session:standings(RaceScene.ghostProgresses()) do
+				raceUpdate:FireClient(plr, {
+					Phase = "Racing",
+					Participant = true,
+					Lap = row.Lap,
+					Laps = row.Laps,
+					Position = row.Position,
+					Racers = row.Racers,
+					NextCheckpoint = row.NextCheckpoint,
+				})
 			end
-			-- if RaceCore.finished(player) then winner = winner or player;
-			--     evict(player, player == winner and "won" or "finished", { Winner = winner.DisplayName }) end
-		end
-		-- if RaceCore.everyoneOut() then break end
-	end
-	return winner
-end
-
-local function runResults(winner: Player?)
-	-- Победителя тоже эвиктим — после заезда в мире не остаётся никто.
-	for _, player in Players:GetPlayers() do
-		if ready[player] then
-			evict(player, player == winner and "won" or "lost",
-				{ Winner = winner and winner.DisplayName or nil })
 		end
 	end
-	task.wait(GameConfig.Race.CountdownSeconds) -- пауза на экран итогов
+	return session.winner, session.winnerName, session
 end
 
--- // Главный цикл матча -----------------------------------------------------
-task.spawn(function()
-	while true do
-		runLobby()
-		runCountdown()
-		local winner = runRacing()
-		runResults(winner)
+local function runResults(winner: Player?, winnerName: string?, session: RaceCore.Session)
+	phase = Phase.Results
+	broadcastLobby()
+	for _, plr in Players:GetPlayers() do
+		if session:isEliminated(plr) then
+			continue -- уже получил GAME OVER и эвикт в ходе заезда
+		end
+		raceUpdate:FireClient(plr, {
+			Phase = "Finished",
+			PlayerWon = plr == winner,
+			Winner = winnerName,
+		})
+		if PlayerFlow.getVehicle(plr) then
+			-- участник, доживший до конца заезда: победителя тоже эвиктим —
+			-- после заезда в мире не остаётся никто
+			evict(plr, plr == winner and "won" or (winnerName and "lost" or "finished"), winnerName)
+		end
 	end
-end)
+	task.wait(RESULTS_SECONDS)
+end
 
-print("[MatchManager] СКЕЛЕТ загружен (не активируйте вместе со старым RaceManager).")
+-- // Главный цикл матча -------------------------------------------------------
+print(`[MatchManager] Сессии включены: трасса {math.floor(RaceCore.TrackLength)} studs, {#RaceCore.Checkpoints} чекпоинтов, {RaceScene.GhostCount} призраков.`)
+
+while true do
+	runLobby()
+	local participants = runCountdown()
+	local winner, winnerName, session = runRacing(participants)
+	runResults(winner, winnerName, session)
+end
