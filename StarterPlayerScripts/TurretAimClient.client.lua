@@ -88,7 +88,7 @@ local function createTracer(origin: Vector3, hitPosition: Vector3)
 	tracer.CanCollide = false
 	tracer.CanQuery = false
 	tracer.Material = Enum.Material.Neon
-	tracer.Color = Color3.fromRGB(255, 200, 80)
+	tracer.Color = Color3.fromRGB(224, 214, 170) -- кость (был янтарный)
 	tracer.Size = Vector3.new(0.15, 0.15, distance)
 	tracer.CFrame = CFrame.new(origin:Lerp(hitPosition, 0.5), hitPosition)
 	tracer.Parent = workspace
@@ -163,7 +163,7 @@ reticle.BackgroundTransparency = 1
 reticle.Size = UDim2.fromOffset(30, 30)
 reticle.Parent = crossGui
 
-local CROSS_IDLE = Color3.fromRGB(255, 110, 80) -- тёплый, в тон трассеру/вспышке
+local CROSS_IDLE = Color3.fromRGB(224, 214, 170) -- кость (покой); зелёный остаётся на цели
 local CROSS_TARGET = Color3.fromRGB(120, 255, 130) -- зелёный: навёлся на зомби
 local crossLines: { Frame } = {}
 local function makeCrossLine(name: string): Frame
@@ -172,7 +172,7 @@ local function makeCrossLine(name: string): Frame
 	f.BorderSizePixel = 0
 	f.BackgroundColor3 = CROSS_IDLE
 	local stroke = Instance.new("UIStroke") -- тёмная обводка: читается на любом фоне
-	stroke.Color = Color3.fromRGB(0, 0, 0)
+	stroke.Color = Color3.fromRGB(12, 19, 14) -- тёмный мох (была чистая чернота)
 	stroke.Thickness = 1
 	stroke.Transparency = 0.3
 	stroke.Parent = f

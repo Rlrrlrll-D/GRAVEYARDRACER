@@ -70,7 +70,7 @@ local speedLabel = Instance.new("TextLabel")
 speedLabel.Name = "Speedometer"
 speedLabel.Size = UDim2.new(0, 220, 0, 30)
 speedLabel.Position = UDim2.new(0, 20, 0, 52)
-speedLabel.BackgroundTransparency = 0.2
+speedLabel.BackgroundTransparency = 0 -- непрозрачно: красный читается ровно как HealthFill
 speedLabel.BackgroundColor3 = UITheme.cycleColor(1) -- красный
 speedLabel.TextColor3 = UITheme.Ink
 speedLabel.Font = UITheme.Font
@@ -82,7 +82,7 @@ local zombieLabel = Instance.new("TextLabel")
 zombieLabel.Name = "ZombiesDefeated"
 zombieLabel.Size = UDim2.new(0, 220, 0, 30)
 zombieLabel.Position = UDim2.new(0, 20, 0, 90)
-zombieLabel.BackgroundTransparency = 0.2
+zombieLabel.BackgroundTransparency = 0
 zombieLabel.BackgroundColor3 = UITheme.cycleColor(2) -- тёмно-зелёный
 zombieLabel.TextColor3 = UITheme.Ink
 zombieLabel.Font = UITheme.Font
@@ -94,7 +94,7 @@ local livesLabel = Instance.new("TextLabel")
 livesLabel.Name = "Lives"
 livesLabel.Size = UDim2.new(0, 220, 0, 30)
 livesLabel.Position = UDim2.new(0, 20, 0, 128)
-livesLabel.BackgroundTransparency = 0.1
+livesLabel.BackgroundTransparency = 0
 livesLabel.BackgroundColor3 = UITheme.cycleColor(3) -- кость (светлая) → тёмный текст
 livesLabel.TextColor3 = UITheme.Palette.Red
 livesLabel.Font = UITheme.Font
@@ -106,9 +106,9 @@ local wreckedLabel = Instance.new("TextLabel")
 wreckedLabel.Name = "WreckedBanner"
 wreckedLabel.Size = UDim2.new(0, 420, 0, 60)
 wreckedLabel.Position = UDim2.new(0.5, -210, 0.35, 0)
-wreckedLabel.BackgroundTransparency = 0.35
-wreckedLabel.BackgroundColor3 = Color3.fromRGB(60, 10, 10)
-wreckedLabel.TextColor3 = Color3.fromRGB(255, 90, 60)
+wreckedLabel.BackgroundTransparency = 0
+wreckedLabel.BackgroundColor3 = UITheme.Palette.Red
+wreckedLabel.TextColor3 = UITheme.Ink
 wreckedLabel.Font = UITheme.Font
 wreckedLabel.TextScaled = true
 wreckedLabel.Text = "VEHICLE DESTROYED"
@@ -157,7 +157,7 @@ for _, side in { -1, 1 } do -- шеврон "∧" из двух планок
 	wing.Size = UDim2.new(0, 7, 0, 30)
 	wing.Position = UDim2.new(0.5, side * 9, 0.5, 6)
 	wing.Rotation = side * 40
-	wing.BackgroundColor3 = Color3.fromRGB(110, 255, 170) -- в цвет маяков
+	wing.BackgroundColor3 = Color3.fromRGB(224, 214, 170) -- кость (был мятный)
 	wing.BorderSizePixel = 0
 	wing.Parent = arrowFrame
 	local corner = Instance.new("UICorner")
@@ -171,7 +171,7 @@ arrowDistance.AnchorPoint = Vector2.new(0.5, 0)
 arrowDistance.Size = UDim2.new(0, 120, 0, 20)
 arrowDistance.Position = UDim2.new(0.5, 0, 0.72, 34)
 arrowDistance.BackgroundTransparency = 1
-arrowDistance.TextColor3 = Color3.fromRGB(110, 255, 170)
+arrowDistance.TextColor3 = Color3.fromRGB(224, 214, 170)
 arrowDistance.TextStrokeTransparency = 0.6
 arrowDistance.Font = UITheme.Font
 arrowDistance.TextScaled = true
@@ -423,13 +423,13 @@ raceUpdate.OnClientEvent:Connect(function(data: RacePayload)
 		popCenter()
 		finishSound:Play()
 		if data.Eliminated then
-			raceCenter.TextColor3 = Color3.fromRGB(255, 70, 60)
+			raceCenter.TextColor3 = UITheme.Palette.Red
 			raceCenter.Text = "GAME OVER — OUT OF LIVES"
 		elseif data.PlayerWon then
 			raceCenter.TextColor3 = Color3.fromRGB(255, 210, 70) -- золото
 			raceCenter.Text = "YOU WIN!"
 		else
-			raceCenter.TextColor3 = Color3.fromRGB(255, 110, 90)
+			raceCenter.TextColor3 = UITheme.Palette.Red
 			raceCenter.Text = string.upper(data.Winner or "GHOST") .. " WINS"
 		end
 	end
@@ -499,10 +499,10 @@ updateStats.OnClientEvent:Connect(function(stats: StatsPayload)
 	if stats.Health <= 0 then
 		if lives > 0 then
 			wreckedLabel.Text = string.format("VEHICLE DESTROYED — %d left", lives)
-			wreckedLabel.TextColor3 = Color3.fromRGB(255, 90, 60)
+			wreckedLabel.TextColor3 = UITheme.Ink
 		else
 			wreckedLabel.Text = "GAME OVER"
-			wreckedLabel.TextColor3 = Color3.fromRGB(255, 60, 50)
+			wreckedLabel.TextColor3 = UITheme.Ink
 		end
 		wreckedLabel.Visible = true
 		task.delay(4.5, function()

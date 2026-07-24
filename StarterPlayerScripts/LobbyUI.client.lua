@@ -68,7 +68,7 @@ statusLabel.Parent = root
 readyBtn.Activated:Connect(function()
 	isReady = not isReady
 	readyBtn.Text = isReady and "READY ✓" or "READY"
-	readyBtn.BackgroundColor3 = isReady and UITheme.Palette.Red or UITheme.Palette.Green
+	readyBtn.BackgroundColor3 = isReady and Color3.fromRGB(52, 90, 64) or UITheme.Palette.Green
 	playerReady:FireServer(isReady)
 end)
 

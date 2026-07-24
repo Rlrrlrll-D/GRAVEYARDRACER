@@ -26,9 +26,9 @@ UITheme.Palette = {
 	Green = Color3.fromRGB(34, 64, 44),    -- замшелый тёмно-зелёный (фон панелей)
 	Bone  = Color3.fromRGB(224, 214, 170), -- жёлтый ближе к кости (тёплый костяной)
 }
-UITheme.Ink = Color3.fromRGB(232, 226, 205)  -- костяной текст по умолчанию
-UITheme.Shadow = Color3.fromRGB(12, 10, 9)   -- почти чёрная подложка/обводка
-UITheme.PanelBg = Color3.fromRGB(18, 20, 17) -- тёмная база под панели
+UITheme.Ink = Color3.fromRGB(224, 214, 170)  -- костяной текст по умолчанию (= Bone)
+UITheme.Shadow = Color3.fromRGB(12, 19, 14)  -- тёмно-мховая обводка/подложка (был почти чёрный)
+UITheme.PanelBg = Color3.fromRGB(22, 33, 27) -- тёмно-мховая база под панели
 
 -- Порядок чередования: красный → тёмно-зелёный → кость, по кругу.
 UITheme.Cycle = { UITheme.Palette.Red, UITheme.Palette.Green, UITheme.Palette.Bone }
