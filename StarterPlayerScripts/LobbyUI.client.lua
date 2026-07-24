@@ -26,9 +26,10 @@ local returnToLobby = Net.get(Net.Events.ReturnToLobby)
 local raceUpdate = Net.get(Net.Events.RaceUpdate)
 
 -- // Блюр фона (пока заставка показана) --------------------------------------
+local BLUR = 10 -- мягкий, но фон читается
 local blur = Instance.new("BlurEffect")
 blur.Name = "MenuBlur"
-blur.Size = 18
+blur.Size = BLUR
 blur.Parent = Lighting
 
 -- // Каркас ------------------------------------------------------------------
@@ -70,7 +71,7 @@ title.Position = UDim2.new(0.05, 0, 0.1, 0)
 title.BackgroundTransparency = 1
 title.Text = "GRAVEYARD RACER"
 title.TextScaled = true
-UITheme.applyText(title, { color = UITheme.Palette.Bone })
+UITheme.applyText(title, { color = UITheme.Palette.Red }) -- тайтл красный (кровь)
 title.TextStrokeTransparency = 0.2
 title.Parent = root
 
@@ -80,7 +81,7 @@ sub.Position = UDim2.new(0.15, 0, 0.1, 122)
 sub.BackgroundTransparency = 1
 sub.Text = "the dead don't brake"
 sub.TextScaled = true
-UITheme.applyText(sub, { color = UITheme.Palette.Red })
+UITheme.applyText(sub, { color = UITheme.Palette.Bone }) -- кость (контраст к красному тайтлу)
 sub.Parent = root
 
 -- вспомогательная кнопка-плашка меню (PLAY / OPTIONS) в общем стиле
@@ -211,7 +212,7 @@ end)
 -- Пока заставка видна: блюр фона включён, геймплейный HUD скрыт.
 local function setLobbyVisible(visible: boolean)
 	root.Visible = visible
-	blur.Size = visible and 18 or 0
+	blur.Size = visible and BLUR or 0
 	local hud = playerGui:FindFirstChild("GraveyardHUD")
 	if hud and hud:IsA("ScreenGui") then
 		hud.Enabled = not visible
