@@ -8,17 +8,18 @@
 -- Разделение труда: RaceCore — логика заезда (чекпоинты/круги/победитель),
 -- RaceScene — визуал (маркеры, призраки), PlayerFlow — игрок/машины/лобби.
 --
--- КЛЮЧЕВОЕ: после game over (кончились жизни ИЛИ финиш) игрок НЕ остаётся в
--- мире — evict() сразу возвращает его в лобби, машина исчезает. Свободных машин
--- в мире нет: их выдаёт отсчёт и забирает эвикт.
+-- КЛЮЧЕВОЕ: выбывший (кончились жизни) НЕ выкидывается сразу — он остаётся
+-- ЗРИТЕЛЕМ (spectate) и досматривает гонку; в лобби все возвращаются ВМЕСТЕ
+-- после полноэкранного экрана итогов (runResults).
 --
--- Совместимость с клиентом: RaceUpdate шлёт те же фазы, что и старый RaceManager
--- («Idle»/«Countdown»/«Racing»/«Finished») — HUD (UIController) не переписывался.
+-- Совместимость с клиентом: RaceUpdate шлёт фазы «Idle»/«Countdown»/«Racing».
+-- Итог заезда — отдельным MatchResult (полноэкранный), выбывание — Spectate.
 -- Новое поле Participant=true в персональных пейлоадах гонщиков — по нему
 -- LobbyUI прячет экран лобби только у участников заезда.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local GameState = require(ReplicatedStorage:WaitForChild("GameState"))
@@ -29,13 +30,15 @@ local PlayerFlow = require(script.Parent:WaitForChild("PlayerFlow"))
 
 local cfg = GameConfig.Race
 local Phase = GameState.Phase
-local RESULTS_SECONDS = 8 -- пауза на экран итогов (как у старого RaceManager)
+local RESULTS_SECONDS = 6 -- держим полноэкранный экран итогов, затем всех в лобби
 local RACE_ABORT_SECONDS = 30 -- никто так и не сел за руль → отменить заезд
 
 local raceUpdate = Net.get(Net.Events.RaceUpdate)
 local lobbyState = Net.get(Net.Events.LobbyState)
 local playerReady = Net.get(Net.Events.PlayerReady)
 local returnToLobby = Net.get(Net.Events.ReturnToLobby)
+local spectateRemote = Net.get(Net.Events.Spectate)
+local matchResult = Net.get(Net.Events.MatchResult)
 
 PlayerFlow.init()
 
@@ -78,17 +81,25 @@ local function broadcastLobby()
 	})
 end
 
--- // Эвикт --------------------------------------------------------------------
--- Единая точка «убрать игрока из мира»: и выбывание, и финиш, и победа.
-local function evict(player: Player, resultKind: string, winnerName: string?)
-	if resultKind == "won" then
-		-- атрибут Wins: leaderstats зеркалит, PlayerData сохраняет в DataStore
-		player:SetAttribute("Wins", ((player:GetAttribute("Wins") :: number?) or 0) + 1)
-	end
+-- // Выбывание / возврат ------------------------------------------------------
+-- spectate: игрок потратил все жизни В ХОДЕ заезда. Машину убираем, персонажа
+-- прячем у старта (без UI лобби), но игрока НЕ выкидываем — он остаётся ЗРИТЕЛЕМ:
+-- клиент по Spectate ставит камеру на лидера и досматривает финиш. Возврат в
+-- лобби происходит ВСЕМ разом в runResults (после экрана итогов).
+local function spectate(player: Player, leaderUserId: number)
 	ready[player] = false
 	PlayerFlow.unseat(player)
-	PlayerFlow.sendToLobby(player) -- ← мир для «мёртвых» закрыт
-	PlayerFlow.releaseVehicle(player) -- машина исчезает из мира
+	PlayerFlow.sendToLobby(player) -- безопасно у старта + фриз; ReturnToLobby НЕ шлём → заставка лобби не всплывает
+	PlayerFlow.releaseVehicle(player)
+	spectateRemote:FireClient(player, { LeaderUserId = leaderUserId })
+end
+
+-- returnPlayerToLobby: финальный возврат в лобби ПОСЛЕ экрана итогов (всем участникам).
+local function returnPlayerToLobby(player: Player, resultKind: string, winnerName: string?)
+	ready[player] = false
+	PlayerFlow.unseat(player)
+	PlayerFlow.sendToLobby(player)
+	PlayerFlow.releaseVehicle(player)
 	returnToLobby:FireClient(player, { Result = resultKind, Winner = winnerName })
 end
 
@@ -128,29 +139,38 @@ local function runCountdown(): { Player }
 		table.remove(participants)
 	end
 
-	-- выпуск на грид: своя машина каждому + посадка
+	-- свежий старт: сносим зомби с прошлого заезда, чтобы они не роились у грида
+	-- на отсчёте (новые не заспавнятся, пока машины неуязвимы — см. ZombieSpawner).
+	for _, z in CollectionService:GetTagged("Zombie") do
+		z:Destroy()
+	end
+
+	-- выпуск на грид: СПЕРВА все машины, затем пауза, затем посадка. Порядок важен:
+	-- у каждой машины свой серверный «A-Chassis Tune.Initialize», который на
+	-- ChildAdded «SeatWeld» копирует клиентский интерфейс AC6 в PlayerGui водителя.
+	-- Если посадить сразу после спавна (на 2-м+ заезде персонаж уже есть → посадка
+	-- мгновенная), SeatWeld появляется РАНЬШЕ, чем Initialize успевает подключить
+	-- свой хендлер → копия интерфейса теряется → машина «не едет». Пауза даёт
+	-- Initialize подключиться (и машине осесть на террейн перед посадкой).
 	for i, plr in participants do
 		local car = PlayerFlow.assignVehicle(plr, PlayerFlow.gridSlot(i))
 		if car then
 			car:SetAttribute("FullReset", os.clock())
-			PlayerFlow.seatDriver(plr)
+			-- Защита на всю подготовку+отсчёт+грейс ОДНИМ timestamp'ом (без мерцания
+			-- атрибута): держит иммунитет к урону И не даёт зомби спавниться у грида
+			-- (onPartTouched/ZombieSpawner смотрят ProtectedUntil). ≈ wait2+отсчёт5+грейс4.
+			car:SetAttribute("ProtectedUntil", os.clock() + 12)
+			car:SetAttribute("Invulnerable", true)
 		end
+	end
+
+	task.wait(2)
+	for _, plr in participants do
+		PlayerFlow.seatDriver(plr)
 	end
 	RaceScene.resetGhosts()
 
-	-- машины неуязвимы, пока оседают на террейн и идёт отсчёт (иначе набивают
-	-- урон столкновениями при спавне); снимаем неуязвимость на GO.
-	local function setInvuln(v: boolean)
-		for _, plr in participants do
-			local car = PlayerFlow.getVehicle(plr)
-			if car then
-				car:SetAttribute("Invulnerable", v)
-			end
-		end
-	end
-
 	for c = cfg.CountdownSeconds, 1, -1 do
-		setInvuln(true) -- каждый тик (перебивает setup VehicleController)
 		broadcastLobby()
 		for _, plr in Players:GetPlayers() do
 			local payload: { [string]: any } = { Phase = "Countdown", Countdown = c, Laps = cfg.Laps }
@@ -161,7 +181,6 @@ local function runCountdown(): { Player }
 		end
 		task.wait(1)
 	end
-	setInvuln(false) -- старт: машины снова уязвимы
 	return participants
 end
 
@@ -191,6 +210,22 @@ local function runRacing(participants: { Player }): (Player?, string?, RaceCore.
 			car:SetAttribute("Invulnerable", true)
 		end
 	end
+	-- ЧИСТЫЙ ЗАПУСК: сносим зомби у грида на GO (респавнятся по мере движения). Гарантия,
+	-- что старт не забит зомби, даже если кто-то заспавнился на стыке отсчёт↔гонка.
+	for _, plr in participants do
+		local car = PlayerFlow.getVehicle(plr)
+		local seat = car and car:FindFirstChild("DriveSeat")
+		if seat and seat:IsA("BasePart") then
+			for _, z in CollectionService:GetTagged("Zombie") do
+				local ok, p = pcall(function()
+					return z:GetPivot().Position
+				end)
+				if ok and (p - (seat :: BasePart).Position).Magnitude < 90 then
+					z:Destroy()
+				end
+			end
+		end
+	end
 	task.delay(GRACE, function()
 		for _, plr in participants do
 			local car = PlayerFlow.getVehicle(plr)
@@ -203,6 +238,8 @@ local function runRacing(participants: { Player }): (Player?, string?, RaceCore.
 	local startClock = os.clock()
 	local lastTick = os.clock()
 	local lastBroadcast = 0
+	local spectators: { [Player]: boolean } = {} -- выбывшие: досматривают гонку
+	local leaderUserId = 0 -- текущий лидер (кого показывать зрителям)
 	while not session.winnerName do
 		task.wait()
 		local now = os.clock()
@@ -211,8 +248,8 @@ local function runRacing(participants: { Player }): (Player?, string?, RaceCore.
 
 		local frame = session:step(occupiedSeats())
 		for _, plr in frame.newlyEliminated do
-			raceUpdate:FireClient(plr, { Phase = "Finished", Eliminated = true, PlayerWon = false })
-			evict(plr, "eliminated", nil) -- жизни кончились → сразу в лобби
+			spectate(plr, leaderUserId) -- НЕ в лобби: зритель до конца заезда
+			spectators[plr] = true
 		end
 		if frame.allOut then
 			break -- гонщиков не осталось — заезд окончен без победителя
@@ -226,7 +263,11 @@ local function runRacing(participants: { Player }): (Player?, string?, RaceCore.
 		if now - lastBroadcast >= 0.4 and not session.winnerName then
 			lastBroadcast = now
 			broadcastLobby()
+			local leaderId = 0
 			for plr, row in session:standings(RaceScene.ghostProgresses()) do
+				if row.Position == 1 then
+					leaderId = plr.UserId
+				end
 				raceUpdate:FireClient(plr, {
 					Phase = "Racing",
 					Participant = true,
@@ -237,30 +278,55 @@ local function runRacing(participants: { Player }): (Player?, string?, RaceCore.
 					NextCheckpoint = row.NextCheckpoint,
 				})
 			end
+			leaderUserId = leaderId
+			for plr in spectators do
+				if plr.Parent then
+					spectateRemote:FireClient(plr, { LeaderUserId = leaderId })
+				end
+			end
 		end
 	end
 	return session.winner, session.winnerName, session
 end
 
-local function runResults(winner: Player?, winnerName: string?, session: RaceCore.Session)
+local function outcomeFor(plr: Player, winner: Player?, winnerName: string?, session: RaceCore.Session): string
+	if session:isEliminated(plr) then
+		return "eliminated"
+	elseif plr == winner then
+		return "won"
+	elseif winnerName then
+		return "lost" -- доехал, но первым финишировал другой
+	else
+		return "finished" -- заезд без победителя (все сошли/отмена)
+	end
+end
+
+local function runResults(winner: Player?, winnerName: string?, session: RaceCore.Session, participants: { Player })
 	phase = Phase.Results
 	broadcastLobby()
-	for _, plr in Players:GetPlayers() do
-		if session:isEliminated(plr) then
-			continue -- уже получил GAME OVER и эвикт в ходе заезда
+	-- 1) полноэкранный экран итогов ВСЕМ участникам — и выжившим, и зрителям-выбывшим
+	for _, plr in participants do
+		if not plr.Parent then
+			continue
 		end
-		raceUpdate:FireClient(plr, {
-			Phase = "Finished",
-			PlayerWon = plr == winner,
+		local outcome = outcomeFor(plr, winner, winnerName, session)
+		if outcome == "won" then
+			-- атрибут Wins: leaderstats зеркалит, PlayerData сохраняет в DataStore
+			plr:SetAttribute("Wins", ((plr:GetAttribute("Wins") :: number?) or 0) + 1)
+		end
+		matchResult:FireClient(plr, {
+			Outcome = outcome,
 			Winner = winnerName,
+			Zombies = (plr:GetAttribute("ZombiesDefeated") :: number?) or 0,
 		})
-		if PlayerFlow.getVehicle(plr) then
-			-- участник, доживший до конца заезда: победителя тоже эвиктим —
-			-- после заезда в мире не остаётся никто
-			evict(plr, plr == winner and "won" or (winnerName and "lost" or "finished"), winnerName)
+	end
+	-- 2) держим экран итогов, затем ВСЕХ участников разом в лобби
+	task.wait(RESULTS_SECONDS)
+	for _, plr in participants do
+		if plr.Parent then
+			returnPlayerToLobby(plr, outcomeFor(plr, winner, winnerName, session), winnerName)
 		end
 	end
-	task.wait(RESULTS_SECONDS)
 end
 
 -- // Главный цикл матча -------------------------------------------------------
@@ -270,5 +336,5 @@ while true do
 	runLobby()
 	local participants = runCountdown()
 	local winner, winnerName, session = runRacing(participants)
-	runResults(winner, winnerName, session)
+	runResults(winner, winnerName, session, participants)
 end

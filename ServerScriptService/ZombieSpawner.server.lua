@@ -78,10 +78,14 @@ local function pickGrave(): BasePart?
 	end
 	if #graves == 0 then return nil end
 
+	-- ВАЖНО: не считаем ЗАЩИЩЁННЫЕ машины (отсчёт+грейс на старте, ProtectedUntil в
+	-- будущем) — иначе зомби вылезают у грида и роятся ещё до GO, стартовать невозможно.
+	-- Спавним только вокруг реально едущих (незащищённых) машин.
 	local occupiedSeats: {BasePart} = {}
 	for _, vehicle in CollectionService:GetTagged("PlayerVehicle") do
 		local seat = vehicle:FindFirstChild("DriveSeat")
-		if seat and seat:IsA("BasePart") and seat.Occupant then
+		local protected = os.clock() < ((vehicle:GetAttribute("ProtectedUntil") :: number?) or 0)
+		if seat and seat:IsA("BasePart") and seat.Occupant and not protected then
 			table.insert(occupiedSeats, seat)
 		end
 	end

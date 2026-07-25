@@ -20,6 +20,8 @@ Net.Events = {
 	PlayerReady   = "PlayerReady",   -- client→server: (ready: boolean)
 	LobbyState    = "LobbyState",    -- server→clients: { ready = n, needed = MinRacers, roster = {...} }
 	ReturnToLobby = "ReturnToLobby", -- server→client: «ты выбыл/финишировал — уходишь из мира в лобби»
+	Spectate      = "Spectate",      -- server→client: «ты выбыл, смотришь гонку» { LeaderUserId = n }
+	MatchResult   = "MatchResult",   -- server→client: полноэкранный итог заезда { Outcome, Winner, Zombies }
 	SaveSettings  = "SaveSettings",  -- client→server: применить+сохранить опции
 	PushSettings  = "PushSettings",  -- server→client: настройки, загруженные из DataStore при входе
 	BatScare      = "BatScare",      -- server→clients: (origin: Vector3, count: number, kind: "swarm"|"flyby")

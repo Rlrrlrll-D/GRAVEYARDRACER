@@ -64,7 +64,7 @@ local GameConfig: GameConfigType = {
 		CrushSpeedThreshold = 25,
 		LowSpeedCollisionDamage = 8,
 		CrushDamageToZombie = 100,
-		RespawnDelay = 5,
+		RespawnDelay = 2, -- коротко «горим» в кресле, затем сброс на старт (без выброса пешком)
 	},
 	Zombie = {
 		MaxHealth = 50,

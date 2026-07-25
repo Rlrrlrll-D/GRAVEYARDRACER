@@ -119,6 +119,7 @@ local function setupVehicle(vehicle: Model)
 		vehicle:SetAttribute("Destroyed", false)
 		-- грейс-неуязвимость + отодвигаем зомби от точки респавна (чтобы не
 		-- попадать сразу под атаку того же зомби после возрождения)
+		vehicle:SetAttribute("ProtectedUntil", os.clock() + 3) -- грейс после респавна (авторитет)
 		vehicle:SetAttribute("Invulnerable", true)
 		task.delay(3, function()
 			vehicle:SetAttribute("Invulnerable", false)
@@ -140,27 +141,17 @@ local function setupVehicle(vehicle: Model)
 		end
 	end
 
-	-- Есть ещё жизни: горим RespawnDelay секунд, затем ремонт на старте.
-	local function burnAndRespawn(livesLeft: number)
-		local driver = VehicleRegistry.GetPlayerForVehicle(vehicle) -- запомнить ДО выброса
+	-- Есть ещё жизни: водителя НЕ выбрасываем на дорогу — он остаётся в кресле,
+	-- машина коротко «горит» (неуязвима, чтобы не добили), затем телепортируется на
+	-- старт и чинится. Игрок всё это время в машине (по просьбе: без выброса пешком).
+	local function burnAndRespawn(_livesLeft: number)
 		local smoke, fire = igniteWreck()
-		pushFinalStats(livesLeft)
-		ejectDriver()
+		pushFinalStats(_livesLeft)
+		vehicle:SetAttribute("Invulnerable", true) -- пока горит — не добить
 		task.wait(GameConfig.Vehicle.RespawnDelay)
 		smoke:Destroy()
 		fire:Destroy()
-		repairAtHome()
-		-- вернуть водителя в починенную машину (не бросать на месте аварии)
-		if driver and driver.Parent then
-			local char = driver.Character
-			local hum = char and char:FindFirstChildOfClass("Humanoid")
-			if hum and hum.Health > 0 then
-				task.wait(0.15) -- дать сиденью включиться после ремонта
-				pcall(function()
-					(driveSeat :: VehicleSeat):Sit(hum)
-				end)
-			end
-		end
+		repairAtHome() -- телепорт машины (с сидящим водителем) на старт + починка + грейс
 	end
 
 	-- Жизни кончились: машина остаётся разбитой, игрок выбывает. Оживёт
@@ -241,6 +232,9 @@ local function setupVehicle(vehicle: Model)
 
 	local function onPartTouched(hit: BasePart)
 		if vehicle:GetAttribute("Destroyed") or vehicle:GetAttribute("Invulnerable") then return end
+		-- ProtectedUntil — единый авторитет неуязвимости (timestamp, без мерцания
+		-- атрибута): держит иммунитет на отсчёт+грейс и после респавна.
+		if os.clock() < ((vehicle:GetAttribute("ProtectedUntil") :: number?) or 0) then return end
 
 		local zombieModel = hit:FindFirstAncestorOfClass("Model")
 		if not zombieModel or not CollectionService:HasTag(zombieModel, "Zombie") then

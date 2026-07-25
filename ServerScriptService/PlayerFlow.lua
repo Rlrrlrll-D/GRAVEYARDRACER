@@ -142,7 +142,18 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 		seat.HeadsUpDisplay = false -- нативный Roblox-спидометр (CoreGui.VehicleHudFrame) не нужен: свой HUD
 	end
 	car:PivotTo(seatCFrame * pivotFromSeat) -- ДО Parent: VehicleController запомнит «дом»
+	-- A-Chassis + StreamingEnabled: под ModelStreamingMode.Default машину клиенту
+	-- реплицирует ПО ЧАСТЯМ, и скопированный в PlayerGui Drive рвётся на
+	-- car.DriveSeat/car.Wheels («not a valid member») → движок не заводится, машина
+	-- не едет. Держим машину ЦЕЛИКОМ у всех клиентов (Persistent + persistent-игроки),
+	-- чтобы AC6 всегда видел все детали сразу. (Машин мало — стриминг тут не нужен.)
+	car.ModelStreamingMode = Enum.ModelStreamingMode.Persistent
 	car.Parent = workspace
+	for _, p in Players:GetPlayers() do
+		pcall(function()
+			car:AddPersistentPlayer(p)
+		end)
+	end
 	CollectionService:AddTag(car, "PlayerVehicle") -- VehicleController подхватит
 	vehicleOfPlayer[player] = car
 	return car
@@ -163,12 +174,30 @@ function PlayerFlow.seatDriver(player: Player)
 		return
 	end
 	unfreeze(hum :: Humanoid); -- разморозить перед посадкой
-	(seat :: VehicleSeat).Disabled = false;
-	(char :: Model):PivotTo((seat :: VehicleSeat).CFrame * CFrame.new(0, 5, 0))
-	task.wait()
-	pcall(function()
-		(seat :: VehicleSeat):Sit(hum :: Humanoid)
-	end)
+	(seat :: VehicleSeat).Disabled = false
+	-- Надёжная посадка: под StreamingEnabled одиночный Sit сразу после спавна (машина
+	-- ещё оседает на террейн) часто НЕ регистрирует Occupant на сервере — а пока
+	-- Occupant нет, сервер не отдаёт клиенту сетевое владение, и клиентский движок
+	-- AC6 не может двигать машину («не едет»). Повторяем Sit, пока не сядет, затем
+	-- ЯВНО отдаём владение водителю (не ждём хендлера SeatWeld в A-Chassis Initialize).
+	local seated = false
+	for _ = 1, 14 do
+		if (seat :: VehicleSeat).Occupant == hum then
+			seated = true
+			break
+		end
+		(char :: Model):PivotTo((seat :: VehicleSeat).CFrame * CFrame.new(0, 3.5, 0))
+		task.wait()
+		pcall(function()
+			(seat :: VehicleSeat):Sit(hum :: Humanoid)
+		end)
+		task.wait(0.1)
+	end
+	if seated then
+		pcall(function()
+			(seat :: VehicleSeat):SetNetworkOwner(player) -- клиент рулит физикой сразу
+		end)
+	end
 end
 
 function PlayerFlow.unseat(player: Player)

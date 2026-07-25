@@ -397,98 +397,118 @@ local function placeGrassTuft(ground: Vector3, scale: number)
 	grassCount += 1
 end
 
--- гуще и выше у оснований уже расставленного декора
-local decorSnapshot = mapFolder:GetChildren()
-for _, m in decorSnapshot do
-	local ok, piv = pcall(function()
-		return m:GetPivot().Position
-	end)
-	if ok then
-		for _ = 1, RNG:NextInteger(1, 2) do -- меньше пучков = легче рендер
-			local a = math.rad(RNG:NextNumber(0, 360))
-			local r = RNG:NextNumber(0.6, 3.4)
-			local g = grassPosition(piv.X + math.cos(a) * r, piv.Z + math.sin(a) * r)
-			if g then
-				placeGrassTuft(g, RNG:NextNumber(1.2, 2.3))
-			end
-		end
-	end
-end
-
--- кольцо травы у старта/ворот (координаты из MapLayout)
-local buildings = { startPos }
-for _, bp in buildings do
-	for _ = 1, 10 do
-		local a = math.rad(RNG:NextNumber(0, 360))
-		local r = RNG:NextNumber(8, 17)
-		local g = grassPosition(bp.X * MapLayout.Scale + math.cos(a) * r, bp.Y * MapLayout.Scale + math.sin(a) * r)
-		if g then
-			placeGrassTuft(g, RNG:NextNumber(1.3, 2.4))
-		end
-	end
-end
-
--- по всей площади (случайно)
-local fieldTarget, ftries, fieldPlaced = 180, 0, 0
+-- ОПТИМИЗАЦИЯ (2026-07-25): пучки-травинки дорогие — каждый 2-4 WedgePart. Раньше
+-- их было ~490 (=~1500 деталей, БОЛЬШЕ ПОЛОВИНЫ всей сцены) → просадки/фризы,
+-- кулеры. Оставляем лёгкую россыпь для переднего плана; фон держит terrain-материал
+-- Grass (при желании — включить грасс-декорацию Terrain в свойствах, она бесплатна).
+local fieldTarget, ftries, fieldPlaced = 45, 0, 0
 while fieldPlaced < fieldTarget and ftries < fieldTarget * 12 do
 	ftries += 1
 	local g = grassPosition(RNG:NextNumber(-330, 330), RNG:NextNumber(-330, 330))
 	if g then
-		placeGrassTuft(g, RNG:NextNumber(0.9, 1.8))
+		placeGrassTuft(g, RNG:NextNumber(1.0, 2.0))
 		fieldPlaced += 1
 	end
 end
 
--- // Ограда по периметру карты (коллайд — держит машины; заменяет невидимые
--- стены). Прямоугольник вокруг игровой площади: сплошные тёмные рельсы-барьеры
--- + декоративные столбы. Генерируется под новую карту (форма из Road.svg).
+-- // ЧИСТКА ДОРОГИ (2026-07-25): убираем ЛЮБОЙ декор, чей центр ближе
+-- (RoadWidth/2 + запас) к осевой трассы — плиты/деревья у обочины иногда нависают
+-- на полотно и бьют машину. Черепа-чекпоинты живут в RaceMarkers (не тут) — целы.
+do
+	local poly = MapLayout.TrackPolyline
+	local scale = MapLayout.Scale
+	local clearR = GameConfig.Map.RoadWidth / 2 + 6 -- половина дороги + буфер
+	local clearR2 = clearR * clearR
+	local removed = 0
+	for _, m in mapFolder:GetChildren() do
+		local ok, piv = pcall(function()
+			return m:GetPivot().Position
+		end)
+		if ok then
+			local best = math.huge
+			for _, p in poly do
+				local dx = piv.X - p.X * scale
+				local dz = piv.Z - p.Y * scale
+				local d2 = dx * dx + dz * dz
+				if d2 < best then
+					best = d2
+				end
+			end
+			if best < clearR2 then
+				m:Destroy()
+				removed += 1
+			end
+		end
+	end
+	print(("[MapBuilder] Дорога очищена: снято %d объектов с полотна."):format(removed))
+end
+
+-- // ОПТИМИЗАЦИЯ теней (2026-07-25): под Future каждый CastShadow-part дорог
+-- (были сотни casters → фризы). Тени оставляем ТОЛЬКО деревьям (атмосферные
+-- силуэты); весь прочий декор — без теней.
+for _, m in mapFolder:GetChildren() do
+	local keepShadow = m.Name:match("^DeadTree") ~= nil
+	for _, d in m:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.CastShadow = keepShadow
+		end
+	end
+end
+
+-- // Ограда по периметру карты. Кованый забор из стора (шаблон MapTemplates.Fence)
+-- тайлится по периметру; под ним — тёмный каменный цоколь (ВИДИМЫЙ, коллайд —
+-- держит машины; заменяет прежние невидимые стены). Прямоугольник вокруг площади.
 local function buildPerimeterFence(half: number, baseY: number)
 	local fence = Instance.new("Model")
 	fence.Name = "PerimeterFence"
-	local IRON = Color3.fromRGB(26, 28, 32)
-	local RAIL_H, POST_H = 8, 14
+	local STONE = Color3.fromRGB(30, 30, 34)
 	local full = half * 2 + 2
 
-	local function rail(cx: number, cz: number, sx: number, sz: number)
-		local r = Instance.new("Part")
-		r.Anchored = true
-		r.CanCollide = true -- держит машины на площадке
-		r.CanQuery = false
-		r.CanTouch = false
-		r.CastShadow = false
-		r.Material = Enum.Material.Metal
-		r.Color = IRON
-		r.Size = Vector3.new(sx, RAIL_H, sz)
-		r.Position = Vector3.new(cx, baseY + RAIL_H / 2, cz)
-		r.Parent = fence
+	-- каменный цоколь (коллайд, видимый) — барьер для машин
+	local function curb(cx: number, cz: number, sx: number, sz: number)
+		local c = Instance.new("Part")
+		c.Anchored = true
+		c.CanCollide = true
+		c.CanQuery = false
+		c.CanTouch = false
+		c.CastShadow = false
+		c.Material = Enum.Material.Slate
+		c.Color = STONE
+		c.Size = Vector3.new(sx, 5, sz) -- ниже: не чёрная стена, но держит машины
+		c.Position = Vector3.new(cx, baseY + 2.5, cz)
+		c.Parent = fence
 	end
-	rail(0, -half, full, 1)
-	rail(0, half, full, 1)
-	rail(-half, 0, 1, full)
-	rail(half, 0, 1, full)
+	curb(0, -half, full, 1.5)
+	curb(0, half, full, 1.5)
+	curb(-half, 0, 1.5, full)
+	curb(half, 0, 1.5, full)
 
-	local function post(x: number, z: number)
-		local p = Instance.new("Part")
-		p.Anchored = true
-		p.CanCollide = false
-		p.CanQuery = false
-		p.CanTouch = false
-		p.CastShadow = false
-		p.Material = Enum.Material.Metal
-		p.Color = IRON
-		p.Size = Vector3.new(1.3, POST_H, 1.3)
-		p.Position = Vector3.new(x, baseY + POST_H / 2, z)
-		p.Parent = fence
-	end
-	for d = -half, half, 10 do
-		post(d, -half)
-		post(d, half)
-		post(-half, d)
-		post(half, d)
+	-- кованый забор (декор) поверх цоколя — тайлим шаблон
+	local tmpl = templates and templates:FindFirstChild("Fence")
+	if tmpl then
+		local _, size = tmpl:GetBoundingBox()
+		local seg = math.max(size.X, 4)
+		local function tileSide(fx: number, fz: number, tx: number, tz: number, rotY: number)
+			local dx, dz = tx - fx, tz - fz
+			local len = math.sqrt(dx * dx + dz * dz)
+			local n = math.max(1, math.floor(len / seg))
+			for i = 0, n - 1 do
+				local t = (i + 0.5) / n
+				-- юнионы шаблона уже RenderFidelity=Performance (задано в Studio: рантайм-
+				-- скрипт НЕ может писать RenderFidelity — capability Plugin); клон наследует.
+				local piece = tmpl:Clone()
+				piece:PivotTo(CFrame.new(fx + dx * t, baseY, fz + dz * t) * CFrame.Angles(0, rotY, 0))
+				piece.Parent = fence
+			end
+		end
+		tileSide(-half, -half, half, -half, 0)
+		tileSide(-half, half, half, half, 0)
+		tileSide(-half, -half, -half, half, math.rad(90))
+		tileSide(half, -half, half, half, math.rad(90))
 	end
 	fence.Parent = workspace
 end
-buildPerimeterFence(335, GameConfig.Map.GroundTop + 2)
+buildPerimeterFence(335, GameConfig.Map.GroundTop + 2) -- ниже: утоплен в землю, без зазора
 
 print(
 	`[MapBuilder] Расставлено: {#MapLayout.Hazards} hazard'ов, {#MapLayout.Graves} могил, {#MapLayout.Lamps} фонарей, {#MapLayout.DeadTrees} деревьев (по карте). `
