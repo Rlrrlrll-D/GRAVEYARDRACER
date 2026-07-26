@@ -3,44 +3,28 @@
 -- показе камерой — отсюда рывки «на участках трассы» (въехал в новую зону с
 -- надгробиями/деревьями → кадр грузит их меши → фриз). Прогреваем всё разом в
 -- начале, пока игрок под заставкой, чтобы в заезде дороги не спотыкались.
--- Дёшево: PreloadAsync дедуплицирует по ассету; в списке — только уникальные ID.
+--
+-- Список ассетов даёт СЕРВЕР (ReplicatedStorage.DecorAssets, собирает MapBuilder):
+-- под StreamingEnabled в клиентском workspace лежит только ближний кусок карты,
+-- так что собрать список по workspace нельзя — прогрелся бы только старт, а
+-- фризы остались бы ровно там, где они и были: при въезде в новый участок.
 
 local ContentProvider = game:GetService("ContentProvider")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 task.spawn(function()
-	local gm = workspace:WaitForChild("GeneratedMap", 45)
-	if not gm then
+	local holder = ReplicatedStorage:WaitForChild("DecorAssets", 60)
+	if not holder or not holder:IsA("StringValue") then
 		return
 	end
-	task.wait(1) -- дать декору догенериться
 
-	local seen: { [string]: boolean } = {}
 	local urls: { string } = {}
-	local function collect(root: Instance?)
-		if not root then
-			return
-		end
-		for _, d in root:GetDescendants() do
-			if d:IsA("MeshPart") then
-				for _, id in { d.MeshId, d.TextureID } do
-					if id ~= "" and not seen[id] then
-						seen[id] = true
-						table.insert(urls, id)
-					end
-				end
-			elseif d:IsA("Decal") or d:IsA("Texture") then
-				local id = d.Texture
-				if id ~= "" and not seen[id] then
-					seen[id] = true
-					table.insert(urls, id)
-				end
-			end
-		end
+	for id in holder.Value:gmatch("[^\n]+") do
+		table.insert(urls, id)
 	end
-	collect(gm)
-	collect(workspace:FindFirstChild("PerimeterFence"))
-	collect(workspace:FindFirstChild("StartGate"))
-	collect(workspace:FindFirstChild("GateSign"))
+	if #urls == 0 then
+		return
+	end
 
 	pcall(function()
 		ContentProvider:PreloadAsync(urls)

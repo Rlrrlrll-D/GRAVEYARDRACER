@@ -510,6 +510,43 @@ local function buildPerimeterFence(half: number, baseY: number)
 end
 buildPerimeterFence(335, GameConfig.Map.GroundTop + 2) -- ниже: утоплен в землю, без зазора
 
+-- // Список ассетов декора для клиентского прелоада ---------------------------
+-- Под StreamingEnabled клиент НЕ видит дальний декор, поэтому DecorPreload не может
+-- собрать список мешей сам (в его workspace лежит только ближний кусок) — а без
+-- прогрева меши грузятся в момент въезда в новый участок, это и есть фризы на
+-- трассе. Сервер видит карту целиком, поэтому список собираем здесь и кладём в
+-- ReplicatedStorage строкой (уникальные ID, по одному на строку).
+do
+	local seen: { [string]: boolean } = {}
+	local ids: { string } = {}
+	local function add(id: string)
+		if id ~= "" and not seen[id] then
+			seen[id] = true
+			table.insert(ids, id)
+		end
+	end
+	for _, root in { mapFolder, workspace:FindFirstChild("PerimeterFence"), workspace:FindFirstChild("StartGate"), workspace:FindFirstChild("GateSign") } do
+		if root then
+			for _, d in root:GetDescendants() do
+				if d:IsA("MeshPart") then
+					add(d.MeshId)
+					add(d.TextureID)
+				elseif d:IsA("Decal") or d:IsA("Texture") then
+					add(d.Texture)
+				elseif d:IsA("SpecialMesh") then
+					add(d.MeshId)
+					add(d.TextureId)
+				end
+			end
+		end
+	end
+	local holder = Instance.new("StringValue")
+	holder.Name = "DecorAssets"
+	holder.Value = table.concat(ids, "\n")
+	holder.Parent = ReplicatedStorage
+	print(("[MapBuilder] Список ассетов для прелоада: %d уникальных."):format(#ids))
+end
+
 print(
 	`[MapBuilder] Расставлено: {#MapLayout.Hazards} hazard'ов, {#MapLayout.Graves} могил, {#MapLayout.Lamps} фонарей, {#MapLayout.DeadTrees} деревьев (по карте). `
 		.. `Декор-россыпь: {nTomb} надгробий, {nGrave} могил, {nTree} деревьев, {grassCount} пучков травы. Ограда по периметру ±335.`

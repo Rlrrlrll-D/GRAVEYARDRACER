@@ -251,6 +251,21 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 			car:AddPersistentPlayer(p)
 		end)
 	end
+	-- Зашедшим ПОЗЖЕ (зритель посреди заезда) машину тоже отдаём целиком, иначе
+	-- у них она приедет по частям — та же поломка AC6, только у наблюдателя.
+	local joined: RBXScriptConnection
+	joined = Players.PlayerAdded:Connect(function(p)
+		if car.Parent then
+			pcall(function()
+				car:AddPersistentPlayer(p)
+			end)
+		else
+			joined:Disconnect()
+		end
+	end)
+	car.Destroying:Connect(function()
+		joined:Disconnect()
+	end)
 	CollectionService:AddTag(car, "PlayerVehicle") -- VehicleController подхватит
 	vehicleOfPlayer[player] = car
 	return car
