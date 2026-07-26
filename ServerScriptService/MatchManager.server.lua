@@ -185,6 +185,12 @@ local function runCountdown(): { Player }
 	for _, plr in participants do
 		PlayerFlow.seatDriver(plr)
 	end
+	-- ФАЛЬСТАРТ ЗАПРЕЩЁН: машины держим на месте весь отсчёт. Держать надо ПОСЛЕ
+	-- посадки — holdVehicle якорит машину, а якорь снимает владение, которое
+	-- seatDriver только что выдал (снова отдадим на GO, в releaseVehicleHold).
+	for _, plr in participants do
+		PlayerFlow.holdVehicle(plr)
+	end
 	RaceScene.resetGhosts()
 
 	for c = cfg.CountdownSeconds, 1, -1 do
@@ -204,6 +210,12 @@ end
 local function runRacing(participants: { Player }): (Player?, string?, RaceCore.Session)
 	phase = Phase.Racing
 	local session = RaceCore.newSession()
+
+	-- GO: отпускаем машины ДО рассылки «Go», чтобы газ работал ровно с того кадра,
+	-- в котором игрок увидел старт (и ни одним раньше).
+	for _, plr in participants do
+		PlayerFlow.releaseVehicleHold(plr)
+	end
 
 	for _, plr in Players:GetPlayers() do
 		local payload: { [string]: any } = {

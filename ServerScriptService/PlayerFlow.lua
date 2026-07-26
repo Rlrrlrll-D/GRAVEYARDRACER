@@ -327,6 +327,69 @@ function PlayerFlow.seatDriver(player: Player)
 	end
 end
 
+-- // Удержание машины на отсчёте ----------------------------------------------
+-- Газ на отсчёте — читерство: A-Chassis живёт у КЛИЕНТА, сервер его команды не
+-- фильтрует, поэтому единственный надёжный тормоз со стороны сервера — якорь.
+-- Якорим ВСЕ детали (только шасси мало: колёса на хинджах докрутились бы и машину
+-- сорвало бы с места на разякоривании), запомнив прежнее состояние.
+--
+-- ВАЖНО: Anchored=true СБРАСЫВАЕТ сетевое владение (у якоря владельца нет). Если
+-- на GO просто разякорить, машина останется за сервером и клиентский AC6 не сможет
+-- её двигать — это ровно тот баг «машина не едет», который мы долго ловили. Поэтому
+-- на отпускании владение отдаётся водителю заново, с проверкой (как в seatDriver).
+local heldCars: { [Model]: { [BasePart]: boolean } } = setmetatable({}, { __mode = "k" }) :: any
+
+function PlayerFlow.holdVehicle(player: Player)
+	local car = PlayerFlow.getVehicle(player)
+	if not car or heldCars[car] then
+		return
+	end
+	local prev: { [BasePart]: boolean } = {}
+	for _, p in car:GetDescendants() do
+		if p:IsA("BasePart") then
+			prev[p] = p.Anchored
+			p.Anchored = true
+		end
+	end
+	heldCars[car] = prev
+end
+
+function PlayerFlow.releaseVehicleHold(player: Player)
+	local car = PlayerFlow.getVehicle(player)
+	local prev = car and heldCars[car]
+	if not (car and prev) then
+		return
+	end
+	heldCars[car] = nil
+	for p, wasAnchored in prev do
+		if p.Parent then
+			p.Anchored = wasAnchored
+		end
+	end
+	local seat = car:FindFirstChild("DriveSeat")
+	if not (seat and seat:IsA("VehicleSeat")) then
+		return
+	end
+	pcall(function()
+		(seat :: VehicleSeat):SetNetworkOwner(player)
+	end)
+	task.spawn(function()
+		local owner: Player? = nil
+		for _ = 1, 12 do
+			pcall(function()
+				owner = (seat :: VehicleSeat):GetNetworkOwner()
+			end)
+			if owner == player then
+				return
+			end
+			pcall(function()
+				(seat :: VehicleSeat):SetNetworkOwner(player)
+			end)
+			task.wait(0.1)
+		end
+	end)
+end
+
 function PlayerFlow.unseat(player: Player)
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
