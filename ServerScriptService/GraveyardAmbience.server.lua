@@ -32,12 +32,22 @@ thunderSound.SoundId = "rbxassetid://4961240438" -- Thunder Rumble, близки
 thunderSound.Volume = 0.5
 thunderSound.Parent = SoundService
 
+-- Вспышку рисует КЛИЕНТ (DayNightCycle), сервер только объявляет момент.
+-- Раньше сервер писал Lighting.Brightness напрямую — и затирал сумерки: он читал
+-- СВОЮ яркость (всегда ночную, переход-то клиентский), умножал её и возвращал
+-- ночное значение обратно, а это реплицировалось всем. Итог: первая же молния
+-- гасила сумерки в ночь. Метка — тот же приём, что NightAnchor.
+local flashSignal = ReplicatedStorage:FindFirstChild("ThunderFlash")
+if not flashSignal then
+	flashSignal = Instance.new("NumberValue")
+	flashSignal.Name = "ThunderFlash"
+	flashSignal.Parent = ReplicatedStorage
+end
+
 local function lightningFlash()
-	local base = Lighting.Brightness -- актуальная яркость (уважаем переход день→ночь)
-	Lighting.Brightness = base * thunderCfg.FlashBrightnessBoost
+	local signal = flashSignal :: NumberValue
+	signal.Value = workspace:GetServerTimeNow()
 	thunderSound:Play()
-	task.wait(thunderCfg.FlashDuration)
-	Lighting.Brightness = base
 end
 
 task.spawn(function()

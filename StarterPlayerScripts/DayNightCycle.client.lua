@@ -47,10 +47,13 @@ local function ease(t: number): number
 	return t ^ 1.6
 end
 
+-- Молния множит текущую яркость на время вспышки (см. блок ThunderFlash ниже).
+local flashBoost = 1
+
 local function apply(t: number)
 	local k = ease(math.clamp(t, 0, 1))
 	Lighting.ClockTime = (dusk.ClockTime + (NIGHT_CLOCK - dusk.ClockTime) * k) % 24
-	Lighting.Brightness = dusk.Brightness + (night.Brightness - dusk.Brightness) * k
+	Lighting.Brightness = (dusk.Brightness + (night.Brightness - dusk.Brightness) * k) * flashBoost
 	Lighting.OutdoorAmbient = dusk.OutdoorAmbient:Lerp(night.OutdoorAmbient, k)
 	Lighting.Ambient = Lighting.OutdoorAmbient
 	Lighting.FogColor = dusk.FogColor:Lerp(night.FogColor, k)
@@ -61,26 +64,30 @@ local function apply(t: number)
 	colorCorrection.TintColor = dusk.ColorCorrectionTintColor:Lerp(night.ColorCorrectionTintColor, k)
 end
 
+-- Насколько далеко зашёл переход прямо сейчас. nil = метки нет, свет держит сервер.
+local function progress(): number?
+	local startedAt = anchor.Value
+	if startedAt == 0 then
+		return nil -- сервер ещё не провёл ни одного заезда: остаёмся на ночи
+	end
+	if startedAt < 0 then
+		return 0 -- лобби: сумерки, чтобы на старте отсчёта небо не прыгнуло из ночи
+	end
+	local elapsed = workspace:GetServerTimeNow() - startedAt
+	return math.clamp(elapsed / math.max(dusk.NightFallSeconds, 1), 0, 1)
+end
+
 local running = false
 
 local function tick()
-	local startedAt = anchor.Value
-	if startedAt == 0 then
-		return true -- сервер ещё не провёл ни одного заезда: остаёмся на ночи
-	end
-	if startedAt < 0 then
-		-- лобби: держим сумерки, чтобы на старте отсчёта небо не прыгнуло из ночи
-		apply(0)
+	local t = progress()
+	if not t then
 		return true
 	end
-	local elapsed = workspace:GetServerTimeNow() - startedAt
-	local dur = math.max(dusk.NightFallSeconds, 1)
-	if elapsed >= dur then
-		apply(1) -- дошли до ночи — доводим точно и выходим из цикла
-		return true
-	end
-	apply(elapsed / dur)
-	return false
+	apply(t)
+	-- Выходим из цикла, когда двигаться больше некуда: дошли до ночи либо стоим
+	-- на сумерках в лобби. Обратно разбудит anchor.Changed.
+	return t >= 1 or anchor.Value < 0
 end
 
 local function run()
@@ -99,3 +106,27 @@ end
 
 anchor.Changed:Connect(run)
 run() -- на случай, если метка уже стоит (зашли посреди заезда)
+
+-- // Молния ------------------------------------------------------------------
+-- Сервер (GraveyardAmbience) только объявляет момент, саму вспышку рисуем у себя —
+-- УМНОЖЕНИЕМ текущей яркости, а не записью абсолютного значения. Пока флэш жил на
+-- сервере, он читал серверную (всегда ночную) яркость и возвращал её всем — первая
+-- же молния гасила сумерки в ночь.
+local thunder = EnvironmentConfig.Thunder
+local flashSignal = ReplicatedStorage:WaitForChild("ThunderFlash", 30)
+if flashSignal and flashSignal:IsA("NumberValue") then
+	flashSignal.Changed:Connect(function()
+		local t = progress()
+		if not t then
+			return -- светом заведует сервер, не вмешиваемся
+		end
+		flashBoost = thunder.FlashBrightnessBoost
+		apply(t)
+		task.wait(thunder.FlashDuration)
+		flashBoost = 1
+		local after = progress()
+		if after then
+			apply(after)
+		end
+	end)
+end
