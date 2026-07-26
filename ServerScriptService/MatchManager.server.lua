@@ -178,6 +178,8 @@ local function runCountdown(): { Player }
 			-- (onPartTouched/ZombieSpawner смотрят ProtectedUntil). ≈ wait2+отсчёт5+грейс4.
 			car:SetAttribute("ProtectedUntil", os.clock() + 12)
 			car:SetAttribute("Invulnerable", true)
+		else
+			warn(`[MatchManager] {plr.Name}: assignVehicle не выдал машину (место {i}).`)
 		end
 	end
 
@@ -185,6 +187,38 @@ local function runCountdown(): { Player }
 	for _, plr in participants do
 		PlayerFlow.seatDriver(plr)
 	end
+
+	-- СТРАХОВКА «участник без машины». Раньше это был молчаливый тупик: если машина
+	-- не выдалась или посадка не прижилась, игрок просто оставался стоять у старта —
+	-- в заезде он не участвует (RaceCore берёт гонщиков из ЗАНЯТЫХ кресел), но при
+	-- этом числится участником, из-за чего перекашивается счёт гонщиков и «последний
+	-- выживший». Пробуем починить один раз, и только потом снимаем с заезда — громко.
+	for i = #participants, 1, -1 do
+		local plr = participants[i]
+		local function seatedNow(): boolean
+			local car = PlayerFlow.getVehicle(plr)
+			local s = car and car:FindFirstChild("DriveSeat")
+			return s ~= nil and s:IsA("VehicleSeat") and (s :: VehicleSeat).Occupant ~= nil
+		end
+		if not seatedNow() then
+			warn(`[MatchManager] {plr.Name}: машины на гриде нет (место {i}) — вторая попытка.`)
+			local car = PlayerFlow.assignVehicle(plr, PlayerFlow.gridSlot(i))
+			if car then
+				car:SetAttribute("FullReset", os.clock())
+				car:SetAttribute("ProtectedUntil", os.clock() + 12)
+				car:SetAttribute("Invulnerable", true)
+				task.wait(1) -- дать «A-Chassis Tune.Initialize» подцепиться, как и на первом заходе
+				PlayerFlow.seatDriver(plr)
+			end
+			if not seatedNow() then
+				warn(`[MatchManager] {plr.Name}: машину выдать не удалось — снят с заезда.`)
+				PlayerFlow.releaseVehicle(plr)
+				table.remove(participants, i)
+			end
+		end
+	end
+	print(`[MatchManager] На гриде {#participants} машин(ы).`)
+
 	-- ФАЛЬСТАРТ ЗАПРЕЩЁН: машины держим на месте весь отсчёт. Держать надо ПОСЛЕ
 	-- посадки — holdVehicle якорит машину, а якорь снимает владение, которое
 	-- seatDriver только что выдал (снова отдадим на GO, в releaseVehicleHold).
