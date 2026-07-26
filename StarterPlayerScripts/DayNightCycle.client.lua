@@ -41,7 +41,7 @@ local colorCorrection: ColorCorrectionEffect = waitForEffect("ColorCorrectionEff
 -- Иначе интерполяция 17.9 → 0.7 отмотала бы сутки назад, через полдень.
 local NIGHT_CLOCK = night.ClockTime + 24
 
--- Темнеет не линейно: первые секунды держим светлее (на старте толчея и надо
+-- Темнеет не линейно: первые секунды держим светлее (на старте толкотня и надо
 -- видеть соседей), к концу перехода ускоряемся. t^1.6 даёт именно такую кривую.
 local function ease(t: number): number
 	return t ^ 1.6
