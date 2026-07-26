@@ -221,6 +221,12 @@ end
 
 -- Внешний вид плашки-черепа: «свой» следующий (active) — чуть крупнее и плотнее,
 -- свет ярче; прочие — сильно полупрозрачные (призрачные), свет спокойный.
+-- Прозрачность плашки. Череп — призрак, а не белая наклейка: сквозь него видно
+-- трассу. Билборд стоит с LightInfluence=0, поэтому он «светится сам» и одинаково
+-- читается и в сумерках, и в глубокой ночи; PointLight добавляет ореол вокруг.
+local SKULL_ALPHA_IDLE = 0.90 -- чужие чекпоинты — еле различимая дымка
+local SKULL_ALPHA_ACTIVE = 0.78 -- свой следующий — плотнее, но всё ещё сквозной
+
 local skullBaseSize: { [Instance]: UDim2 } = {} -- исходный размер билборда каждого черепа
 local skullHome: { [Model]: CFrame } = {} -- «дом» каждого черепа (парение + сброс после сбора)
 local collecting: { [Model]: boolean } = {} -- череп сейчас «улетает» вверх → парение его не трогает
@@ -228,7 +234,7 @@ local function applySkullState(model: Model, active: boolean)
 	if collecting[model] then return end -- «улетающий» череп не трогаем (иначе перебьёт растворение)
 	local img = skullFaceImage(model)
 	if img then
-		img.ImageTransparency = active and 0.70 or 0.87 -- почти прозрачный призрак
+		img.ImageTransparency = active and SKULL_ALPHA_ACTIVE or SKULL_ALPHA_IDLE
 	end
 	local anchor = model.PrimaryPart
 	if anchor then
@@ -244,8 +250,11 @@ local function applySkullState(model: Model, active: boolean)
 		end
 		local light = anchor:FindFirstChildOfClass("PointLight")
 		if light and light:IsA("PointLight") then
-			light.Brightness = active and 2.2 or 0.7
-			light.Range = active and 12 or 7
+			-- Ореол виден и днём, и ночью: в сумерках слабый свет тонул, поэтому
+			-- яркость поднята, а радиус оставлен небольшим (12 черепов × PointLight —
+			-- заметная статья расходов, раздувать Range нельзя).
+			light.Brightness = active and 3.0 or 1.2
+			light.Range = active and 13 or 8
 		end
 	end
 end
@@ -281,30 +290,47 @@ local function collectSkull(index: number)
 	ghost.Parent = workspace -- вне RaceMarkers → цикл парения его не трогает; клиент-локально
 	local gAnchor = ghost.PrimaryPart
 
+	local RISE = 0.95 -- длительность улёта: чуть дольше прежнего, чтобы читалась струйка
+
 	if gAnchor then
 		local spirit = gAnchor:FindFirstChild("Spirit")
 		if spirit and spirit:IsA("ParticleEmitter") then
-			spirit:Emit(30)
+			spirit:Emit(26)
 		end
 		local light = gAnchor:FindFirstChildOfClass("PointLight")
 		if light and light:IsA("PointLight") then
-			light.Brightness = 6
-			TweenService:Create(light, TweenInfo.new(0.75), { Brightness = 0 }):Play()
+			-- было 6 — вспышка выбеливала кадр и читалась как «белое пятно»
+			light.Brightness = 3.2
+			TweenService:Create(light, TweenInfo.new(RISE), { Brightness = 0 }):Play()
 		end
 		-- вверх с ускорением (в мировом Y)
-		TweenService:Create(gAnchor, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-			{ Position = home.Position + Vector3.new(0, 18, 0) }):Play()
-	end
-	local gImg = skullFaceImage(ghost)
-	if gImg then
-		gImg.ImageTransparency = 0.1 -- проявляем, чтобы растворение было видно
-		TweenService:Create(gImg, TweenInfo.new(0.75), { ImageTransparency = 1 }):Play() -- растворение
+		TweenService:Create(gAnchor, TweenInfo.new(RISE, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ Position = home.Position + Vector3.new(0, 22, 0) }):Play()
 	end
 
-	task.delay(1.1, function()
+	-- РАСТВОРЕНИЕ СТРУЙКОЙ. Раньше клон на старте улёта делался почти НЕпрозрачным
+	-- (0.1) — из-за этого череп вспыхивал белым пятном и только потом таял. Теперь
+	-- он уходит вверх ровно таким же призрачным, каким висел, и по дороге
+	-- ВЫТЯГИВАЕТСЯ: ширина сходится почти в ноль, высота растёт — плашка на глазах
+	-- превращается в тонкую струйку дыма и гаснет.
+	local gImg = skullFaceImage(ghost)
+	if gImg then
+		gImg.ImageTransparency = SKULL_ALPHA_ACTIVE
+		TweenService:Create(gImg, TweenInfo.new(RISE, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ ImageTransparency = 1 }):Play()
+		local gFace = gImg.Parent
+		if gFace and gFace:IsA("BillboardGui") then
+			local base = gFace.Size -- клон: стартуем с того размера, каким череп висел
+			TweenService:Create(gFace, TweenInfo.new(RISE, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Size = UDim2.fromScale(base.X.Scale * 0.18, base.Y.Scale * 1.9),
+			}):Play()
+		end
+	end
+
+	task.delay(RISE + 0.35, function()
 		ghost:Destroy()
 		if sharedImg then
-			sharedImg.ImageTransparency = 0.87 -- общий череп снова призрачно виден к след. кругу
+			sharedImg.ImageTransparency = SKULL_ALPHA_IDLE -- снова призрачно виден к след. кругу
 		end
 		collecting[model] = nil
 	end)

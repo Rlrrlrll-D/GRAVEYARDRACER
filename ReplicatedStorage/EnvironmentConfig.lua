@@ -22,6 +22,19 @@ export type EnvironmentConfigType = {
 		BloomIntensity: number,
 		StarCount: number,
 	},
+	-- Сумерки: то, ОТКУДА заезд стартует. Ночь (Atmosphere выше) — то, КУДА он
+	-- приходит. Значения тех же свойств, между ними клиент плавно интерполирует.
+	Dusk: {
+		ClockTime: number, -- ClockTime растёт до Atmosphere.ClockTime + 24 (через полночь)
+		Density: number,
+		FogColor: Color3,
+		FogEnd: number,
+		Brightness: number,
+		OutdoorAmbient: Color3,
+		ColorCorrectionSaturation: number,
+		ColorCorrectionTintColor: Color3,
+		NightFallSeconds: number, -- за сколько секунд от старта отсчёта наступает полная ночь
+	},
 	Thunder: {
 		MinInterval: number,
 		MaxInterval: number,
@@ -55,6 +68,17 @@ local EnvironmentConfig: EnvironmentConfigType = {
 		ColorCorrectionTintColor = Color3.fromRGB(210, 225, 255), -- лёгкий холодный оттенок
 		BloomIntensity = 0.4,
 		StarCount = 4000,
+	},
+	Dusk = {
+		ClockTime = 17.9,            -- солнце у горизонта: густые сумерки, трассу видно
+		Density = 0.28,              -- дымка реже, чем ночью — дальше видно
+		FogColor = Color3.fromRGB(78, 68, 78),   -- тёплый закатный сумрак
+		FogEnd = 900,                -- туман отодвинут: видно, кто где застрял
+		Brightness = 2.1,
+		OutdoorAmbient = Color3.fromRGB(105, 98, 110),
+		ColorCorrectionSaturation = -0.12,
+		ColorCorrectionTintColor = Color3.fromRGB(255, 236, 214), -- тёплый, к ночи уходит в холод
+		NightFallSeconds = 80,       -- полная ночь примерно к середине заезда
 	},
 	Thunder = {
 		MinInterval = 18,

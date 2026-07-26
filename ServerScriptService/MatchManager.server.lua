@@ -123,8 +123,18 @@ local function occupiedSeats(): { [Player]: VehicleSeat }
 end
 
 -- // Фазы ---------------------------------------------------------------------
+-- Метка «сумерки → ночь» для клиентского DayNightCycle:
+-- < 0 — держим сумерки (лобби), > 0 — идёт переход (значение = время его начала).
+local function setNightAnchor(value: number)
+	local v = ReplicatedStorage:FindFirstChild("NightAnchor")
+	if v and v:IsA("NumberValue") then
+		v.Value = value
+	end
+end
+
 local function runLobby()
 	phase = Phase.Lobby
+	setNightAnchor(-1) -- в лобби светло: небо не должно прыгать на старте отсчёта
 	while true do
 		broadcastLobby()
 		raceUpdate:FireAllClients({ Phase = "Idle", Waiting = #readyList(), Needed = cfg.MinRacers })
@@ -150,6 +160,12 @@ end
 
 local function runCountdown(): { Player }
 	phase = Phase.Countdown
+
+	-- Заезд начинается в сумерках и темнеет по ходу (DayNightCycle у клиента):
+	-- в темноте с первой секунды не разобрать, где трасса и кто застрял. Пишем
+	-- ОДНУ метку времени на заезд — дальше каждый клиент считает переход сам.
+	setNightAnchor(workspace:GetServerTimeNow())
+
 	local participants = readyList()
 	-- мест на решётке может быть меньше, чем готовых
 	while #participants > PlayerFlow.MaxSlots do
