@@ -194,9 +194,24 @@ function PlayerFlow.seatDriver(player: Player)
 		task.wait(0.1)
 	end
 	if seated then
-		pcall(function()
-			(seat :: VehicleSeat):SetNetworkOwner(player) -- клиент рулит физикой сразу
-		end)
+		-- Отдаём владение водителю И ПРОВЕРЯЕМ, что прижилось. На 2-й+ машине в
+		-- мультиплеере одиночный SetNetworkOwner иногда не срабатывает (ассамблея
+		-- ещё оседает / владение перехватывает автопил) → «стреляет, но не едет»:
+		-- турель на ремоутах и от владения не зависит, а физику AC6 двигает ТОЛЬКО
+		-- владелец-клиент. Ретраим, пока GetNetworkOwner не станет игроком.
+		local owner: Player? = nil
+		for _ = 1, 12 do
+			pcall(function()
+				(seat :: VehicleSeat):SetNetworkOwner(player)
+			end)
+			task.wait(0.1)
+			pcall(function()
+				owner = (seat :: VehicleSeat):GetNetworkOwner()
+			end)
+			if owner == player then
+				break
+			end
+		end
 	end
 end
 
@@ -219,6 +234,18 @@ function PlayerFlow.releaseVehicle(player: Player)
 	VehicleRegistry.ClearPlayer(player)
 	if car and car.Parent then
 		car:Destroy() -- ← чинит накопление машин
+	end
+	-- Гасим клиентский интерфейс AC6. Без машины его Drive/Burnout/Smoke (все живут
+	-- ВНУТРИ "A-Chassis Interface" в PlayerGui) продолжают крутиться на уничтоженной
+	-- модели и спамят «DriveSeat/Wheels not a valid member». Свежий интерфейс
+	-- копируется заново при следующей посадке (Initialize на SeatWeld).
+	local pg = player:FindFirstChildOfClass("PlayerGui")
+	if pg then
+		for _, iface in pg:GetChildren() do
+			if iface.Name == "A-Chassis Interface" then
+				iface:Destroy()
+			end
+		end
 	end
 end
 

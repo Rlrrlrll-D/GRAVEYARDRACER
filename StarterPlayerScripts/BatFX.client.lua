@@ -73,6 +73,18 @@ local function launchOne(origin: Vector3, fast: boolean)
 		local pos = start + dir * (speed * age) + Vector3.new(0, bob, 0)
 		-- лицом по курсу + «банк» крыльев вокруг оси движения
 		bat:PivotTo(CFrame.lookAt(pos, pos + dir) * CFrame.Angles(0, 0, math.sin(age * 22 + phase) * 0.6))
+		-- Гасим к концу полёта: вдали меш ловит низкополи-LOD/теряет текстуру и
+		-- выглядит «костляво». Растворяем на последних ~40% жизни, пока он далеко —
+		-- уродливый дальний кадр не виден.
+		local fadeStart = life * 0.6
+		if age > fadeStart then
+			local a = math.clamp((age - fadeStart) / (life - fadeStart), 0, 1)
+			for _, p in bat:GetDescendants() do
+				if p:IsA("BasePart") then
+					p.LocalTransparencyModifier = a
+				end
+			end
+		end
 	end)
 	Debris:AddItem(bat, life + 0.1)
 end

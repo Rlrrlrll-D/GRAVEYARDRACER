@@ -259,34 +259,52 @@ local function collectSkull(index: number)
 	local anchor = model.PrimaryPart
 	if not anchor then return end
 	local home = skullHome[model] or model:GetPivot()
-	collecting[model] = true -- пауза парению на время «улёта»
 
-	local spirit = anchor:FindFirstChild("Spirit")
-	if spirit and spirit:IsA("ParticleEmitter") then
-		spirit:Emit(30)
+	-- «Улёт» анимируем на КЛИЕНТ-ЛОКАЛЬНОМ КЛОНЕ, а общий череп прячем локально.
+	-- Общий череп — сетевой инстанс: в Team Test окно-хост = сервер, его парение
+	-- реплицируется и перебивало твин улёта у второго игрока (у него анимация «не
+	-- срабатывала»). Клон сервер не знает — его никто не перебьёт; у каждого одинаково.
+	collecting[model] = true -- локальное парение общий череп не трогает (applySkullState тоже пропустит)
+	local sharedImg = skullFaceImage(model)
+	if sharedImg then
+		sharedImg.ImageTransparency = 1 -- спрятать общий череп локально на время улёта
 	end
-	local light = anchor:FindFirstChildOfClass("PointLight")
-	if light and light:IsA("PointLight") then
-		local restore = light.Brightness
-		light.Brightness = 6
-		TweenService:Create(light, TweenInfo.new(0.6), { Brightness = restore }):Play()
+
+	local ghost = model:Clone()
+	for _, d in ghost:GetDescendants() do
+		if d:IsA("LuaSourceContainer") then
+			d:Destroy() -- клон чисто визуальный, скрипты не нужны
+		end
 	end
-	local img = skullFaceImage(model)
-	if img then
-		img.ImageTransparency = 0.1 -- на «улёте» череп проявляется, чтобы растворение было видно
+	ghost.Name = "GhostSkull"
+	ghost:PivotTo(home)
+	ghost.Parent = workspace -- вне RaceMarkers → цикл парения его не трогает; клиент-локально
+	local gAnchor = ghost.PrimaryPart
+
+	if gAnchor then
+		local spirit = gAnchor:FindFirstChild("Spirit")
+		if spirit and spirit:IsA("ParticleEmitter") then
+			spirit:Emit(30)
+		end
+		local light = gAnchor:FindFirstChildOfClass("PointLight")
+		if light and light:IsA("PointLight") then
+			light.Brightness = 6
+			TweenService:Create(light, TweenInfo.new(0.75), { Brightness = 0 }):Play()
+		end
+		-- вверх с ускорением (в мировом Y)
+		TweenService:Create(gAnchor, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ Position = home.Position + Vector3.new(0, 18, 0) }):Play()
 	end
-	-- вверх с ускорением (в мировом Y) + растворение
-	TweenService:Create(anchor, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-		{ Position = home.Position + Vector3.new(0, 18, 0) }):Play()
-	if img then
-		TweenService:Create(img, TweenInfo.new(0.75), { ImageTransparency = 1 }):Play()
+	local gImg = skullFaceImage(ghost)
+	if gImg then
+		gImg.ImageTransparency = 0.1 -- проявляем, чтобы растворение было видно
+		TweenService:Create(gImg, TweenInfo.new(0.75), { ImageTransparency = 1 }):Play() -- растворение
 	end
+
 	task.delay(1.1, function()
-		if anchor.Parent then
-			anchor.CFrame = home -- вернуть на место к следующему кругу
-			if img then
-				img.ImageTransparency = 0.87
-			end
+		ghost:Destroy()
+		if sharedImg then
+			sharedImg.ImageTransparency = 0.87 -- общий череп снова призрачно виден к след. кругу
 		end
 		collecting[model] = nil
 	end)

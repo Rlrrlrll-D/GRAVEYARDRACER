@@ -93,7 +93,7 @@ local GameConfig: GameConfigType = {
 		Lives = 3,
 		MinRacers = 3, -- заезд стартует только когда за рулём ≥ этого числа игроков (для соло-теста снизьте до 1)
 		CountdownSeconds = 5,
-		CheckpointRadius = 26,
+		CheckpointRadius = 40, -- ≥ полуширины дороги (22.4) + запас на широкую траекторию в поворотах, чтобы никто не «промахивался» мимо чекпоинта и не застревал
 		GhostsEnabled = false, -- фокус на реальных игроках; true = призраки-пейсеры для тренировки (но НЕ побеждают)
 		CheckpointStyle = "skull", -- "orb" (магический шар) или "skull" (череп-Каспер)
 		StumbleChancePerSecond = 0.06,

@@ -32,6 +32,7 @@ local cfg = GameConfig.Race
 local Phase = GameState.Phase
 local RESULTS_SECONDS = 6 -- держим полноэкранный экран итогов, затем всех в лобби
 local RACE_ABORT_SECONDS = 30 -- никто так и не сел за руль → отменить заезд
+local LOBBY_GATHER_SECONDS = 4 -- после набора MinRacers ждём ещё столько, чтобы в заезд вошли ВСЕ готовые (MinRacers — порог СТАРТА, не лимит участников; мест MaxSlots=8)
 
 local raceUpdate = Net.get(Net.Events.RaceUpdate)
 local lobbyState = Net.get(Net.Events.LobbyState)
@@ -124,11 +125,27 @@ end
 -- // Фазы ---------------------------------------------------------------------
 local function runLobby()
 	phase = Phase.Lobby
-	repeat
+	while true do
 		broadcastLobby()
 		raceUpdate:FireAllClients({ Phase = "Idle", Waiting = #readyList(), Needed = cfg.MinRacers })
 		task.wait(0.5)
-	until #readyList() >= cfg.MinRacers
+		if #readyList() >= cfg.MinRacers then
+			-- Порог набран. Держим короткое окно СБОРА: заезд стартует не по «первым,
+			-- кто добрал минимум», а со ВСЕМИ готовыми. MinRacers — условие НАЧАЛА, а
+			-- НЕ лимит мест (мест MaxSlots=8) — опоздавшие на PLAY успевают войти.
+			local held = 0
+			while held < LOBBY_GATHER_SECONDS do
+				broadcastLobby()
+				raceUpdate:FireAllClients({ Phase = "Idle", Waiting = #readyList(), Needed = cfg.MinRacers })
+				task.wait(0.5)
+				held += 0.5
+			end
+			if #readyList() >= cfg.MinRacers then
+				return -- стартуем со всеми, кто готов
+			end
+			-- за время сбора кто-то передумал и упал ниже минимума → снова ждём
+		end
+	end
 end
 
 local function runCountdown(): { Player }

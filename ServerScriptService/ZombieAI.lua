@@ -204,7 +204,10 @@ function ZombieAI.Run(zombie: Model)
 					local seatNow = vehicle:FindFirstChild("DriveSeat") :: BasePart?
 					local stillClose = seatNow ~= nil
 						and (seatNow.Position - rootPart.Position).Magnitude <= GameConfig.Zombie.AttackRange
-					if stillClose and not vehicle:GetAttribute("Destroyed") and not vehicle:GetAttribute("Invulnerable") then
+					-- ProtectedUntil — тот же авторитет неуязвимости, что и в onPartTouched:
+					-- на отсчёт+грейс (и после респавна) укус зомби не проходит.
+					local protected = os.clock() < ((vehicle:GetAttribute("ProtectedUntil") :: number?) or 0)
+					if stillClose and not vehicle:GetAttribute("Destroyed") and not vehicle:GetAttribute("Invulnerable") and not protected then
 						local health = (vehicle:GetAttribute("Health") :: number?) or GameConfig.Vehicle.MaxHealth
 						health = math.max(0, health - GameConfig.Zombie.AttackDamage)
 						vehicle:SetAttribute("Health", health)
