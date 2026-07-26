@@ -12,6 +12,15 @@ export type PlacedObject = {
 	Rotation: number?,
 }
 
+-- Участок трассы, где на игрока может сорваться стая мышей (BatManager следит
+-- за машинами; клиент рисует и чтит опцию «скримеры»).
+export type ScareZone = {
+	Position: Vector2, -- центр зоны (X, Z в studs)
+	Radius: number, -- радиус срабатывания
+	Kind: string, -- "swarm" — скример в лицо; "flyby" — редкий эмбиентный пролёт
+	Chance: number, -- вероятность сработать при въезде (рандом: не каждый круг)
+}
+
 export type MapLayoutType = {
 	Scale: number,
 	Hazards: {PlacedObject},
@@ -22,6 +31,7 @@ export type MapLayoutType = {
 	TrackSegments: {{Vector2}}, -- устар. (восьмёрка); форма теперь в TrackPolyline
 	TrackPolyline: {Vector2}, -- осевая трассы из Road.svg (замкнутая, studs)
 	RaceCheckpoints: {Vector2},
+	ScareZones: {ScareZone},
 	StartDir: Vector2, -- направление старта (для грида/ворот)
 }
 
@@ -75,6 +85,19 @@ local MapLayout: MapLayoutType = {
 	TrackSegments = {}, -- пусто: форма трассы теперь в TrackPolyline
 
 	StartDir = Vector2.new(-0.999, 0.038),
+
+	-- Зоны скримеров: посажены на самые крутые повороты трассы (шпильки), где
+	-- обзор закрыт и стая срывается «из-за угла»; разнесены по кругу (≥290 studs
+	-- друг от друга), стартовая прямая чистая. Chance < 1 — чтобы не приедалось.
+	ScareZones = {
+		{ Position = Vector2.new(-137.2, 233.0), Radius = 44, Kind = "swarm", Chance = 0.70 }, -- сев.-зап. шпилька (70°)
+		{ Position = Vector2.new(-253.1, 8.1), Radius = 40, Kind = "flyby", Chance = 0.80 }, -- западная дуга: эмбиент, не скример
+		{ Position = Vector2.new(-224.2, -251.7), Radius = 44, Kind = "swarm", Chance = 0.65 }, -- юго-зап. поворот (61°)
+		{ Position = Vector2.new(266.5, -229.4), Radius = 44, Kind = "swarm", Chance = 0.65 }, -- юго-вост. поворот (64°)
+		{ Position = Vector2.new(106.7, 252.5), Radius = 44, Kind = "swarm", Chance = 0.70 }, -- сев.-вост. шпилька (71°)
+		{ Position = Vector2.new(143.5, -85.1), Radius = 44, Kind = "swarm", Chance = 0.75 }, -- у Часовни (51°)
+		{ Position = Vector2.new(-159.7, -100.9), Radius = 46, Kind = "swarm", Chance = 0.80 }, -- самая крутая шпилька (109°)
+	},
 
 	RaceCheckpoints = {
 		Vector2.new(-42.55, 65.87), Vector2.new(-132.24, 220.98), Vector2.new(-278.02, 136.07), Vector2.new(-271.89, -119.44), Vector2.new(-123.41, -236.21), Vector2.new(122.46, -235.86),

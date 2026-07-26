@@ -62,23 +62,26 @@ function PlayerFlow.sendToLobby(player: Player)
 	end
 end
 
--- // Стартовая решётка --------------------------------------------------------
--- База — CFrame сиденья преж-установленного багги (записываем при init и УБИРАЕМ
--- машину: свободных машин в мире больше нет, они выдаются на отсчёте).
-local FALLBACK_SEAT_CF = CFrame.lookAt(Vector3.new(10.05, 7.21, 5.19), Vector3.new(9.05, 7.21, 5.19))
--- смещения мест 2..8 от сиденья первого места (решётка 2 колонны)
-local GRID_OFFSETS = {
-	Vector3.new(-10, 0, 0),
-	Vector3.new(10, 0, 8),
-	Vector3.new(-10, 0, 8),
-	Vector3.new(10, 0, 16),
-	Vector3.new(-10, 0, 16),
-	Vector3.new(10, 0, 24),
-	Vector3.new(-10, 0, 24),
-}
-local gridBaseSeatCF = FALLBACK_SEAT_CF
+-- // Стартовая решётка: КОЛОННА ПО ДВА ВДОЛЬ ТРАССЫ ---------------------------
+-- Места идут парами назад от стартовой линии ПО ОСЕВОЙ (MapLayout.TrackPolyline):
+-- ряд = два места по разные стороны от осевой, машины смотрят по касательной, так
+-- что колонна повторяет изгиб дороги, а не уходит по прямой в траву.
+--
+-- Габариты багги в системе координат сиденья (замерено по VehicleTemplate):
+-- длина 13.1 (нос 7.3 впереди сиденья, корма 5.8 позади), ширина 8.3, причём
+-- сиденье смещено на 1.6 ВЛЕВО от геометрического центра кузова.
+local CAR_LEN = 13.1
+local CAR_SEAT_OFFSET_X = 1.6 -- центр кузова правее сиденья на столько
+local GRID_ROW_GAP = CAR_LEN + 5 -- 18.1: между рядами есть просвет (раньше 8 — машины ПЕРЕКРЫВАЛИСЬ)
+local GRID_LANE = 8 -- вбок от осевой (дорога 44.8 → полполотна 22.4, край кузова на 12.2)
 
-PlayerFlow.MaxSlots = #GRID_OFFSETS + 1
+local FALLBACK_SEAT_CF = CFrame.lookAt(Vector3.new(10.05, 7.21, 5.19), Vector3.new(9.05, 7.21, 5.19))
+local gridBaseSeatCF = FALLBACK_SEAT_CF
+local gridSlots: { CFrame } = {} -- построенные места (заполняется, когда террейн готов)
+local gridDepthStuds = 0 -- фактическая длина колонны по осевой (для точки лобби)
+
+PlayerFlow.MaxSlots = 8
+local GRID_ROWS = math.ceil(PlayerFlow.MaxSlots / 2)
 
 local function captureGridBase()
 	local captured = false
@@ -97,13 +100,107 @@ local function captureGridBase()
 	end
 end
 
+-- Точка на осевой в `dist` studs ПОЗАДИ старта + касательная (направление езды).
+-- Полилиния замкнутая, движение — по возрастанию индекса, значит назад = вниз по
+-- индексу. Возвращает мировые X/Z (уже с учётом MapLayout.Scale) и единичный
+-- вектор направления движения.
+local function trackPointBehind(dist: number): (Vector2?, Vector2?)
+	local poly = MapLayout.TrackPolyline
+	if not poly or #poly < 4 then
+		return nil, nil
+	end
+	local n = #poly
+	local i = 1 -- TrackPolyline[1] — стартовая точка (= Landmarks.StartGate)
+	local remaining = dist
+	for _ = 1, n do
+		local prev = ((i - 2) % n) + 1 -- индекс i-1 с заворотом
+		local a, b = poly[prev], poly[i]
+		local d = (b - a).Magnitude
+		local fwd = d > 1e-4 and (b - a).Unit or Vector2.new(1, 0)
+		if d >= remaining then
+			local p = b:Lerp(a, d > 1e-4 and (remaining / d) or 0)
+			return p * MapLayout.Scale, fwd
+		end
+		remaining -= d
+		i = prev
+	end
+	return nil, nil
+end
+
+-- Ряд на дистанции dist позади старта: базовый CFrame и центры кузовов обеих полос.
+local function gridRow(dist: number, y: number): (CFrame?, { Vector3 })
+	local res, fwd = trackPointBehind(dist)
+	if not res or not fwd then
+		return nil, {}
+	end
+	local p, f = res :: Vector2, fwd :: Vector2
+	local at = Vector3.new(p.X, y, p.Y)
+	local base = CFrame.lookAt(at, at + Vector3.new(f.X, 0, f.Y))
+	return base, { (base * CFrame.new(-GRID_LANE, 0, 0)).Position, (base * CFrame.new(GRID_LANE, 0, 0)).Position }
+end
+
+-- Построить места по осевой на высоте y (высота дороги — полотно плоское).
+-- ВАЖНО: шаг между рядами АДАПТИВНЫЙ. Отмерять ряды по осевой недостаточно — на
+-- изгибе внутренняя полоса идёт по более короткой дуге и машины съезжаются
+-- (на нашей трассе 3-й ряд оставался с зазором 1 stud). Поэтому ряд отодвигается
+-- назад, пока ОБЕ полосы не разойдутся на GRID_ROW_GAP.
+local function buildGridSlots(y: number)
+	local slots: { CFrame } = {}
+	local dist = 0
+	local _, prevBodies = gridRow(0, y)
+	if #prevBodies == 0 then
+		return -- нет полилинии: остаёмся на запасной решётке
+	end
+	for row = 0, GRID_ROWS - 1 do
+		if row > 0 then
+			dist += GRID_ROW_GAP
+			for _ = 1, 60 do
+				local _, bodies = gridRow(dist, y)
+				if #bodies == 0 then
+					return
+				end
+				local ok = true
+				for k, b in bodies do
+					if (b - prevBodies[k]).Magnitude < GRID_ROW_GAP - 0.05 then
+						ok = false
+						break
+					end
+				end
+				if ok then
+					break
+				end
+				dist += 1
+			end
+		end
+		local base, bodies = gridRow(dist, y)
+		if not base then
+			return
+		end
+		prevBodies = bodies
+		for side = 0, 1 do
+			-- нечётные места слева от осевой, чётные справа; сиденье сдвигаем так,
+			-- чтобы по центру полосы оказался КУЗОВ, а не сиденье.
+			local lane = (side == 0) and -GRID_LANE or GRID_LANE
+			table.insert(slots, (base :: CFrame) * CFrame.new(lane - CAR_SEAT_OFFSET_X, 0, 0))
+		end
+	end
+	gridSlots = slots
+	gridDepthStuds = dist
+end
+
 -- CFrame СИДЕНЬЯ для места i (1..MaxSlots)
 function PlayerFlow.gridSlot(i: number): CFrame
+	local built = gridSlots[math.clamp(i, 1, PlayerFlow.MaxSlots)]
+	if built then
+		return built
+	end
+	-- запасной вариант (террейн ещё не готов / нет полилинии): прямая колонна по два
 	if i <= 1 then
 		return gridBaseSeatCF
 	end
-	local off = GRID_OFFSETS[math.clamp(i - 1, 1, #GRID_OFFSETS)]
-	return gridBaseSeatCF * CFrame.new(off)
+	local row = math.ceil(i / 2) - 1
+	local lane = (i % 2 == 1) and -GRID_LANE or GRID_LANE
+	return gridBaseSeatCF * CFrame.new(lane - CAR_SEAT_OFFSET_X, 0, row * GRID_ROW_GAP)
 end
 
 -- // Выдача/уборка машины -----------------------------------------------------
@@ -285,9 +382,22 @@ function PlayerFlow.init()
 		local top = GameConfig.Map.GroundTop or 2
 		local sx, sz = sg.Position.X * MapLayout.Scale, sg.Position.Y * MapLayout.Scale
 		local dir = Vector3.new(sd.X, 0, sd.Y).Unit
+
+		-- Место игрока под заставкой — ПОЗАДИ всей колонны (иначе машина заднего
+		-- ряда спавнится прямо в стоящего игрока) и тоже по осевой, не по прямой.
+		local function lobbyCF(y: number): CFrame
+			local depth = gridDepthStuds > 0 and gridDepthStuds or (GRID_ROWS - 1) * GRID_ROW_GAP
+			local p = trackPointBehind(depth + 22)
+			if p then
+				return CFrame.new(Vector3.new(p.X, y, p.Y))
+			end
+			return CFrame.new(Vector3.new(sx, y, sz) - dir * (depth + 22))
+		end
+
 		-- дефолт до готовности террейна
 		gridBaseSeatCF = CFrame.lookAt(Vector3.new(sx, top + 10, sz), Vector3.new(sx, top + 10, sz) + dir)
-		START_CF = CFrame.new(Vector3.new(sx, top + 8, sz) - dir * 30)
+		buildGridSlots(top + 10)
+		START_CF = lobbyCF(top + 8)
 		task.spawn(function()
 			local rp = RaycastParams.new()
 			rp.FilterType = Enum.RaycastFilterType.Include
@@ -297,7 +407,8 @@ function PlayerFlow.init()
 				if r and r.Material == Enum.Material.Ground then
 					local sy = r.Position.Y
 					gridBaseSeatCF = CFrame.lookAt(Vector3.new(sx, sy + 6, sz), Vector3.new(sx, sy + 6, sz) + dir)
-					START_CF = CFrame.new(Vector3.new(sx, sy + 4, sz) - dir * 30)
+					buildGridSlots(sy + 6) -- полотно плоское → одна высота на всю колонну
+					START_CF = lobbyCF(sy + 4)
 					return
 				end
 				task.wait(0.2)
