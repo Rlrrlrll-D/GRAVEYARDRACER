@@ -74,10 +74,15 @@ function MapGen.paintPolyline(points: { Vector2 }, opts: PaintOpts?)
 	local sub = o.samplesPerSeg or 4
 
 	if o.area then
-		-- снести существующий террейн высоким блоком Air, затем травяная плита
+		-- Снести существующий террейн и ЩЕДРО по вертикали. Прежняя коробка шла от
+		-- top-85 до top+5, то есть всё, что выше, оставалось: от старой ручной карты
+		-- уцелели четыре бугра с верхушками на Y=8.6..10.9 (замер 2026-07-30). Низ им
+		-- срезало, верхушка ложилась на плоское поле — юзер увидел «большой холм,
+		-- покрытый травой, непонятного назначения» у восточной дуги: это кластер
+		-- 50×40 studs у (181,114). Чистим до top+110, чтобы такого не оставалось.
 		Terrain:FillBlock(
-			CFrame.new(origin.X, top - 40, origin.Z),
-			Vector3.new(o.area.X, 90, o.area.Y),
+			CFrame.new(origin.X, top + 10, origin.Z),
+			Vector3.new(o.area.X, 200, o.area.Y),
 			Enum.Material.Air
 		)
 		Terrain:FillBlock(
