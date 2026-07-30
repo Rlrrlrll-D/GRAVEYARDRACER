@@ -24,7 +24,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ContentProvider = game:GetService("ContentProvider")
 local SoundService = game:GetService("SoundService")
-local Lighting = game:GetService("Lighting")
+local player = game:GetService("Players").LocalPlayer
 
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local batScare = Net.get(Net.Events.BatScare)
@@ -162,25 +162,22 @@ local function warmSwarm()
 	if not camera or #pool == 0 then
 		return
 	end
-	-- Стаю мы рисуем НА ЭКРАНЕ — иначе движку нечего строить. Поэтому проводим её
-	-- только пока висит заставка: `LobbyUI` держит `Lighting.MenuBlur` размером 10 и
-	-- обнуляет его, когда прячет меню, так что этот размер и есть признак «экран
-	-- закрыт». Зритель, зашедший посреди заезда, заставки не видит — ему 32 мыши
-	-- мелькнули бы в лицо, поэтому для него прогон пропускаем: он один раз заплатит
-	-- за первый рой, и это меньшее зло.
-	-- ЖДЁМ блюр, а не проверяем однократно: `LobbyUI` создаёт его в своём старте, и при
-	-- разовой проверке прогрев проигрывает гонку скриптов и молча пропускается.
-	local blur: BlurEffect? = nil
+	-- Стаю мы рисуем НА ЭКРАНЕ — иначе движку нечего строить.
+	-- Ждём ШТОРКУ прогрева (её вешает `DecorPreload` — непрозрачная панель под меню,
+	-- закрывающая 3D, чтобы прогон камеры и вылет стаи не мельтешили на заставке).
+	-- Именно ждём, а не проверяем однократно: при разовой проверке прогрев проигрывал
+	-- гонку скриптов и молча пропускался. У зрителя, зашедшего посреди заезда, шторки
+	-- нет — он прогрев пропустит и заплатит за первый рой один раз.
+	local covered = false
 	local deadline = os.clock() + 10
 	while os.clock() < deadline do
-		local found = Lighting:FindFirstChild("MenuBlur")
-		if found and found:IsA("BlurEffect") and found.Size > 0 then
-			blur = found
+		if player:GetAttribute("WarmupCurtain") == true then
+			covered = true
 			break
 		end
 		task.wait(0.2)
 	end
-	if not blur then
+	if not covered then
 		return
 	end
 	warming = true

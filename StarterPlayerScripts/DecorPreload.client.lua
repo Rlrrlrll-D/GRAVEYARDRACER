@@ -134,19 +134,80 @@ end)
 local ZOMBIE_WARM_FRAMES = 8
 local ZOMBIE_WARM_DIST = 7
 
--- Заставка закрывает экран блюром `LobbyUI.MenuBlur`, и прогревы, которые рисуют
--- что-то ПЕРЕД камерой, ждут именно его. Ждём с таймаутом: у зрителя, зашедшего
--- посреди заезда, заставки не будет вовсе — он просто пропустит прогрев.
-local function waitForSplashBlur(): BlurEffect?
+-- // ШТОРКА НА ВРЕМЯ ПРОГРЕВА ------------------------------------------------
+-- Прогрев гоняет камеру по всей трассе и показывает в упор стаю мышей и рига зомби.
+-- Под заставкой это видно как «заблюренное мельтешение» (жалоба юзера 2026-07-30):
+-- фоном там ЖИВОЕ кладбище, размытое `LobbyUI.MenuBlur`, и любое движение камеры
+-- читается. Снять кадр в файл и подложить «фотографию» Roblox из скрипта не умеет —
+-- вьюпорт скриптам недоступен. Поэтому закрываем 3D непрозрачной шторкой, а меню
+-- оставляем поверх: `DisplayOrder` 5 против 10 у `LobbyUI`, так что тайтл, ростер и
+-- кнопка PLAY на месте и кликаются. Когда прогрев закончил — шторка плавно уходит, и
+-- открывается тот самый живой блюр-фон.
+local player = game:GetService("Players").LocalPlayer
+local CURTAIN_FADE = 0.6
+
+local curtainFrame: Frame? = nil
+local function raiseCurtain()
+	if curtainFrame then
+		return
+	end
+	local ok, theme = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("UITheme", 10))
+	end)
+	local bg = (ok and type(theme) == "table" and theme.PanelBg) or Color3.fromRGB(18, 24, 21)
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "WarmupCurtain"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = 5 -- НИЖЕ LobbyUI (10): закрываем мир, не меню
+	gui.Parent = player:WaitForChild("PlayerGui")
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.fromScale(1, 1)
+	frame.BackgroundColor3 = bg:Lerp(Color3.new(0, 0, 0), 0.45)
+	frame.BorderSizePixel = 0
+	frame.Active = false -- клики уходят меню поверх
+	frame.Parent = gui
+	curtainFrame = frame
+	player:SetAttribute("WarmupCurtain", true)
+end
+
+local function dropCurtain()
+	player:SetAttribute("WarmupCurtain", false)
+	local frame = curtainFrame
+	curtainFrame = nil
+	if not frame then
+		return
+	end
+	task.spawn(function()
+		local t0 = os.clock()
+		while os.clock() - t0 < CURTAIN_FADE do
+			frame.BackgroundTransparency = (os.clock() - t0) / CURTAIN_FADE
+			RunService.PreRender:Wait()
+		end
+		local gui = frame.Parent
+		if gui then
+			gui:Destroy()
+		end
+	end)
+end
+
+raiseCurtain()
+-- Страховка: если прогрев вообще не дойдёт до конца (нет MapLayout, оборвался,
+-- ошибка), шторка не должна остаться висеть на экране навсегда.
+task.delay(60, dropCurtain)
+
+-- Прогревы, которые рисуют что-то ПЕРЕД камерой, ждут именно шторку. Ждём с
+-- таймаутом: у зрителя, зашедшего посреди заезда, её не будет вовсе — он просто
+-- пропустит прогрев, заплатив за первое появление один раз.
+local function waitForCurtain(): boolean
 	local deadline = os.clock() + 10
 	while os.clock() < deadline do
-		local blur = Lighting:FindFirstChild("MenuBlur")
-		if blur and blur:IsA("BlurEffect") and blur.Size > 0 then
-			return blur
+		if player:GetAttribute("WarmupCurtain") == true then
+			return true
 		end
 		task.wait(0.2)
 	end
-	return nil
+	return false
 end
 
 local function memMb(tag: Enum.DeveloperMemoryTag): number
@@ -163,13 +224,9 @@ task.spawn(function()
 	if not proto or not cam then
 		return
 	end
-	-- Тот же признак «экран закрыт», что у стаи мышей: зрителю, зашедшему посреди
-	-- заезда, заставки не видно, и ему зомби мелькнул бы в лицо.
-	-- ЖДЁМ блюр, а не проверяем однократно: `LobbyUI` создаёт его в своём старте, и
-	-- при разовой проверке прогрев проигрывал гонку скриптов и молча пропускался
-	-- (в одном заезде строки «риг зомби прогрет» в логе не оказалось вовсе).
-	local blur = waitForSplashBlur()
-	if not blur then
+	-- Показываем рига только под шторкой: иначе зритель, зашедший посреди заезда,
+	-- получил бы зомби в лицо.
+	if not waitForCurtain() then
 		return
 	end
 	local rig = proto:Clone()
@@ -293,27 +350,32 @@ task.spawn(function()
 	local okMap, MapLayout = pcall(function()
 		return require(ReplicatedStorage:WaitForChild("MapLayout", 30))
 	end)
+	-- Шторка снимается на КАЖДОМ выходе отсюда, включая ранние: иначе она осталась бы
+	-- висеть глухим экраном поверх мира.
 	if not okMap or type(MapLayout) ~= "table" then
+		dropCurtain()
 		return
 	end
 	local poly = MapLayout.TrackPolyline
 	if type(poly) ~= "table" or #poly < 4 then
+		dropCurtain()
 		return
 	end
 	local scale = MapLayout.Scale or 1
 	local cam = workspace.CurrentCamera
 	if not cam then
+		dropCurtain()
 		return
 	end
 
 	-- Прогрев идёт только пока игрок НЕ в машине: сел за руль — сразу отдаём камеру.
-	local player = game:GetService("Players").LocalPlayer
 	local function seated(): boolean
 		local char = player.Character
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		return (hum ~= nil) and (hum.SeatPart ~= nil)
 	end
 	if seated() then
+		dropCurtain()
 		return
 	end
 
@@ -449,4 +511,5 @@ task.spawn(function()
 	print(("[DecorPreload] отрисовка трассы прогрета: %d видов за %.1fс (%.0f мс на вид), FOV %.0f, глаз %.1f над полотном%s")
 		:format(frames, spent, frames > 0 and (spent / frames) * 1000 or 0, cam.FieldOfView, WARM_EYE,
 			aborted and " — ОБОРВАН, трасса покрыта не вся." or "."))
+	dropCurtain() -- мир открывается только теперь, когда мельтешить уже нечему
 end)
