@@ -24,6 +24,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ContentProvider = game:GetService("ContentProvider")
 local SoundService = game:GetService("SoundService")
+local Lighting = game:GetService("Lighting")
 
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local batScare = Net.get(Net.Events.BatScare)
@@ -159,6 +160,16 @@ end
 local function warmSwarm()
 	local camera = workspace.CurrentCamera
 	if not camera or #pool == 0 then
+		return
+	end
+	-- Стаю мы рисуем НА ЭКРАНЕ — иначе движку нечего строить. Поэтому проводим её
+	-- только пока висит заставка: `LobbyUI` держит `Lighting.MenuBlur` размером 10 и
+	-- обнуляет его, когда прячет меню, так что этот размер и есть признак «экран
+	-- закрыт». Зритель, зашедший посреди заезда, заставки не видит — ему 32 мыши
+	-- мелькнули бы в лицо, поэтому для него прогон пропускаем: он один раз заплатит
+	-- за первый рой, и это меньшее зло.
+	local blur = Lighting:FindFirstChild("MenuBlur")
+	if not (blur and blur:IsA("BlurEffect") and blur.Size > 0) then
 		return
 	end
 	warming = true
