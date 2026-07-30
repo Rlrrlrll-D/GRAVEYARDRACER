@@ -24,6 +24,15 @@ mapFolder.Parent = workspace
 
 -- // Генерация Terrain-дороги по осевой (форма из Road.svg) -------------------
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
+
+-- ТРАВА ТЕРРЕЙНА: проверена и НЕ виновата в фризах (замер 2026-07-30). В кадре она
+-- действительно самая тяжёлая по геометрии — `Stats.RenderBreakdown` на пустой карте
+-- дал `Grass 438 852 tris / 100 draws` против `Opaque 5 367 / 5`, — но цена эта
+-- РОВНАЯ, а не рывками: проезд камерой на 84 studs/с по свежеперезалитому полю (вся
+-- трава пересобиралась заново) дал 2230 кадров с худшим 19 мс и ноль всплесков.
+-- Выключить её всё равно нечем: `Terrain.Decoration` в этой версии Roblox — «not a
+-- valid member» и из песочницы MCP, и из обычного серверного скрипта; трава идёт от
+-- самого материала Grass. Если когда-нибудь понадобится убрать — менять материал поля.
 if GameConfig.Map.GenerateRoad and MapLayout.TrackPolyline and #MapLayout.TrackPolyline > 0 then
 	local MapGen = require(script.Parent:WaitForChild("MapGen"))
 	MapGen.paintPolyline(MapLayout.TrackPolyline, {
