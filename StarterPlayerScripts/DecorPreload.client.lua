@@ -134,6 +134,21 @@ end)
 local ZOMBIE_WARM_FRAMES = 8
 local ZOMBIE_WARM_DIST = 7
 
+-- Заставка закрывает экран блюром `LobbyUI.MenuBlur`, и прогревы, которые рисуют
+-- что-то ПЕРЕД камерой, ждут именно его. Ждём с таймаутом: у зрителя, зашедшего
+-- посреди заезда, заставки не будет вовсе — он просто пропустит прогрев.
+local function waitForSplashBlur(): BlurEffect?
+	local deadline = os.clock() + 10
+	while os.clock() < deadline do
+		local blur = Lighting:FindFirstChild("MenuBlur")
+		if blur and blur:IsA("BlurEffect") and blur.Size > 0 then
+			return blur
+		end
+		task.wait(0.2)
+	end
+	return nil
+end
+
 local function memMb(tag: Enum.DeveloperMemoryTag): number
 	local ok, v = pcall(function()
 		return game:GetService("Stats"):GetMemoryUsageMbForTag(tag)
@@ -150,8 +165,11 @@ task.spawn(function()
 	end
 	-- Тот же признак «экран закрыт», что у стаи мышей: зрителю, зашедшему посреди
 	-- заезда, заставки не видно, и ему зомби мелькнул бы в лицо.
-	local blur = Lighting:FindFirstChild("MenuBlur")
-	if not (blur and blur:IsA("BlurEffect") and blur.Size > 0) then
+	-- ЖДЁМ блюр, а не проверяем однократно: `LobbyUI` создаёт его в своём старте, и
+	-- при разовой проверке прогрев проигрывал гонку скриптов и молча пропускался
+	-- (в одном заезде строки «риг зомби прогрет» в логе не оказалось вовсе).
+	local blur = waitForSplashBlur()
+	if not blur then
 		return
 	end
 	local rig = proto:Clone()
@@ -267,7 +285,9 @@ local WARM_EYE = 8 -- камера над ПОВЕРХНОСТЬЮ полотн�
 local WARM_LOOK = 30 -- на сколько studs вперёд смотрит камера (как погоня за машиной)
 local WARM_SIDE_EVERY = 5 -- каждый N-й шаг — ещё два взгляда в стороны (обочины в поворотах)
 local WARM_SIDE_YAW = 55 -- градусов в сторону: то, что проносится вплотную мимо борта
-local WARM_LIMIT = 30 -- сек: страховка, чтобы прогрев не тянулся вечно
+local FENCE_INSET = 70 -- с какой дистанции смотрим на ограду: примерно как водитель с полотна
+local FENCE_STEP = 25 -- шаг вдоль стороны периметра, studs
+local WARM_LIMIT = 45 -- сек: страховка, чтобы прогрев не тянулся вечно (с оградой видов больше)
 
 task.spawn(function()
 	local okMap, MapLayout = pcall(function()
@@ -378,6 +398,49 @@ task.spawn(function()
 			end
 		end
 		s += WARM_STEP_STUDS
+	end
+
+	-- // ОГРАДА ПО ПЕРИМЕТРУ -----------------------------------------------------
+	-- Когда прогрелись мыши и зомби, профайлер показал последнего актёра:
+	--   [РЫВОК 183 мс] отрисовка 171 @ (252,135) | ВПЕРВЫЕ В КАДРЕ: PerimeterFence×7
+	--   [РЫВОК 206 мс] отрисовка 193 @ (254,168) | ВПЕРВЫЕ В КАДРЕ: PerimeterFence×7
+	-- Ограда — 1068 частей, из них 608 юнионов, и стоит она СБОКУ от трассы, в 55-85
+	-- studs от полотна. Проход выше смотрит вперёд по курсу, а вбок заглядывает лишь
+	-- каждый пятый шаг (то есть раз в 65 studs) — на дуге этого не хватает, и куски
+	-- ограды впервые попадают в кадр уже за рулём. Поэтому отдельно обходим периметр,
+	-- глядя НАРУЖУ ровно с той дистанции, с какой её видит водитель.
+	if not aborted then
+		local fence = workspace:FindFirstChild("PerimeterFence")
+		local halfX, halfZ = 335, 335
+		if fence and fence:IsA("Model") then
+			local _, size = fence:GetBoundingBox()
+			halfX, halfZ = size.X / 2, size.Z / 2
+		end
+		local inset = FENCE_INSET
+		local sides = {
+			{ Vector3.new(-halfX + inset, eyeY, -halfZ + inset), Vector3.new(halfX - inset, eyeY, -halfZ + inset), Vector3.new(0, 0, -1) },
+			{ Vector3.new(halfX - inset, eyeY, -halfZ + inset), Vector3.new(halfX - inset, eyeY, halfZ - inset), Vector3.new(1, 0, 0) },
+			{ Vector3.new(halfX - inset, eyeY, halfZ - inset), Vector3.new(-halfX + inset, eyeY, halfZ - inset), Vector3.new(0, 0, 1) },
+			{ Vector3.new(-halfX + inset, eyeY, halfZ - inset), Vector3.new(-halfX + inset, eyeY, -halfZ + inset), Vector3.new(-1, 0, 0) },
+		}
+		for _, side in sides do
+			local from, to, outward = side[1], side[2], side[3]
+			local len = (to - from).Magnitude
+			local steps = math.max(1, math.floor(len / FENCE_STEP))
+			for i = 0, steps do
+				if seated() or os.clock() - t0 > WARM_LIMIT then
+					aborted = true
+					break
+				end
+				local at = from:Lerp(to, i / steps)
+				cam.CFrame = CFrame.lookAt(at, at + outward * 60)
+				RunService.PreRender:Wait()
+				frames += 1
+			end
+			if aborted then
+				break
+			end
+		end
 	end
 
 	cam.CFrame = origCF

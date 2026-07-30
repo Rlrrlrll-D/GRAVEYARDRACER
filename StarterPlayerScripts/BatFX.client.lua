@@ -168,8 +168,19 @@ local function warmSwarm()
 	-- закрыт». Зритель, зашедший посреди заезда, заставки не видит — ему 32 мыши
 	-- мелькнули бы в лицо, поэтому для него прогон пропускаем: он один раз заплатит
 	-- за первый рой, и это меньшее зло.
-	local blur = Lighting:FindFirstChild("MenuBlur")
-	if not (blur and blur:IsA("BlurEffect") and blur.Size > 0) then
+	-- ЖДЁМ блюр, а не проверяем однократно: `LobbyUI` создаёт его в своём старте, и при
+	-- разовой проверке прогрев проигрывает гонку скриптов и молча пропускается.
+	local blur: BlurEffect? = nil
+	local deadline = os.clock() + 10
+	while os.clock() < deadline do
+		local found = Lighting:FindFirstChild("MenuBlur")
+		if found and found:IsA("BlurEffect") and found.Size > 0 then
+			blur = found
+			break
+		end
+		task.wait(0.2)
+	end
+	if not blur then
 		return
 	end
 	warming = true
