@@ -360,6 +360,173 @@ local nTomb = scatter("Tombstone", 84, 0.6, 2.3)
 local nGrave = scatter("GraveMarker", 48, 0.9, 2.1)
 local nTree = scatter("DeadTree", 60, 0.4, 2.8)
 
+-- // КЛАСТЕРЫ ВДОЛЬ ТРАССЫ (веха 8, фаза 3) -----------------------------------
+-- Ровная россыпь по площади читается как шум: с полотна не видно, где поворот, и
+-- кладбище одинаково во все стороны. Поэтому ПОВЕРХ россыпи сажаем группы,
+-- привязанные к геометрии трассы:
+--   * на изгибах — могилы и кресты СНАРУЖИ поворота (именно туда смотрит водитель,
+--     входя в вираж), на самых крутых — ещё и фонарь;
+--   * на прямых — аллеи мёртвых деревьев по обе стороны полотна.
+-- Замер 2026-07-30 такую добавку разрешает: весь статичный декор в кадре стоил
+-- `Opaque 31 547 tris / 26 draws` против `Grass 188 682 / 44` у одной только травы,
+-- то есть надгробия почти ничего не стоят — тяжёлая тут земля, а не декор.
+local nClusterProps, nAlleyTrees, nClusterLamps = 0, 0, 0
+do
+	local poly = MapLayout.TrackPolyline
+	local scale = MapLayout.Scale or 1
+	if type(poly) == "table" and #poly >= 8 then
+		local ROAD_HALF = GameConfig.Map.RoadWidth / 2
+		local STEP = 12 -- шаг обхода осевой, studs
+		local CLUSTER_GAP = 130 -- не чаще, чем раз в столько studs вдоль трассы
+		local ALLEY_GAP = 30 -- шаг деревьев в аллее
+		local BEND_DEG = 3.2 -- поворот на шаг круче этого = изгиб
+		local STRAIGHT_DEG = 1.1 -- положе этого = прямая
+		local START_CLEAR = 80 -- у старта чисто: там колонна и выезд
+
+		local n = #poly
+		local function pt(i: number): Vector2
+			local p = poly[((i - 1) % n) + 1]
+			return Vector2.new(p.X * scale, p.Y * scale)
+		end
+
+		-- Плотная выборка по длине: у полилинии сегменты разной длины, и «через N
+		-- точек» дало бы кластеры гуще на мелких сегментах.
+		local cum: { number } = { 0 }
+		local total = 0
+		for i = 1, n do
+			total += (pt(i + 1) - pt(i)).Magnitude
+			cum[i + 1] = total
+		end
+		local function along(s: number): (Vector2, Vector2)
+			s = s % total
+			local i = 1
+			while i < n and cum[i + 1] <= s do
+				i += 1
+			end
+			local a, b = pt(i), pt(i + 1)
+			local seg = cum[i + 1] - cum[i]
+			local f = seg > 1e-6 and (s - cum[i]) / seg or 0
+			local dir = b - a
+			dir = dir.Magnitude > 1e-6 and dir.Unit or Vector2.new(0, 1)
+			return a + (b - a) * f, dir
+		end
+
+		-- Поставить одну модель на траву в точке (x,z); false, если там дорога/занято.
+		local function put(name: string, x: number, z: number, sMin: number, sMax: number): boolean
+			if not clearOfLandmarks(x, z) then
+				return false
+			end
+			local g = grassPosition(x, z)
+			if not g then
+				return false -- дорога, яма или край карты
+			end
+			local tmpl = getTemplateVariant(name)
+			if not tmpl then
+				return false
+			end
+			local model = tmpl:Clone()
+			model:ScaleTo(RNG:NextNumber(sMin, sMax))
+			if name == "DeadTree" then
+				paintTree(model)
+			end
+			dropToGround(model, g, RNG:NextNumber(0, 360))
+			for _, part in model:GetDescendants() do
+				if part:IsA("BasePart") then
+					part.Anchored = true
+					part.CanCollide = true -- как у россыпи: группа Obstacles держит машину, но не зомби
+					part.CollisionGroup = "Obstacles"
+				end
+			end
+			model.Parent = mapFolder
+			return true
+		end
+
+		local sinceCluster, sinceTree = CLUSTER_GAP, 0
+		local prevDir: Vector2? = nil
+		local s = 0
+		while s < total do
+			local p, dir = along(s)
+			local turn = 0
+			if prevDir then
+				-- знак поворота: положительный — влево, отрицательный — вправо
+				local cross = prevDir.X * dir.Y - prevDir.Y * dir.X
+				local dot = math.clamp(prevDir:Dot(dir), -1, 1)
+				turn = math.deg(math.atan2(cross, dot))
+			end
+			prevDir = dir
+			sinceCluster += STEP
+			sinceTree += STEP
+
+			local farFromStart = p.Magnitude > START_CLEAR
+			local normal = Vector2.new(-dir.Y, dir.X) -- левая нормаль к курсу
+
+			if farFromStart and math.abs(turn) > BEND_DEG and sinceCluster >= CLUSTER_GAP then
+				-- СНАРУЖИ поворота: влево крутим — группа справа, и наоборот
+				local outward = turn > 0 and -normal or normal
+				local centre = p + outward * (ROAD_HALF + RNG:NextNumber(20, 38))
+				local props = RNG:NextInteger(6, 11)
+				local placedHere = 0
+				for _ = 1, props do
+					local ang = RNG:NextNumber(0, math.pi * 2)
+					local rad = RNG:NextNumber(2, 15)
+					local x = centre.X + math.cos(ang) * rad
+					local z = centre.Y + math.sin(ang) * rad
+					local kind = RNG:NextNumber() < 0.62 and "Tombstone" or "GraveMarker"
+					if put(kind, x, z, 0.7, 1.9) then
+						placedHere += 1
+					end
+				end
+				nClusterProps += placedHere
+				if placedHere > 0 then
+					sinceCluster = 0
+					-- на крутых виражах — фонарь: поворот должен читаться в темноте
+					if math.abs(turn) > 5.5 then
+						local lampAt = p + outward * (ROAD_HALF + 9)
+						local lamp = getTemplateVariant("Lamp")
+						local g = grassPosition(lampAt.X, lampAt.Y)
+						if lamp and g then
+							local model = lamp:Clone()
+							dropToGround(model, g, RNG:NextNumber(0, 360))
+							local bulb = model:FindFirstChild("Bulb")
+							local holder = (bulb and bulb:IsA("BasePart")) and bulb or model.PrimaryPart
+							if holder then
+								local light = Instance.new("PointLight")
+								light.Color = Color3.fromRGB(255, 186, 95)
+								light.Range = 24
+								light.Brightness = 1.2
+								light.Parent = holder
+								CollectionService:AddTag(light, "FlickerLight")
+							end
+							for _, part in model:GetDescendants() do
+								if part:IsA("BasePart") then
+									part.Anchored = true
+								end
+							end
+							model.Parent = mapFolder
+							nClusterLamps += 1
+						end
+					end
+				end
+			elseif farFromStart and math.abs(turn) < STRAIGHT_DEG and sinceTree >= ALLEY_GAP then
+				-- АЛЛЕЯ по обе стороны прямой: коридор из деревьев тянет взгляд вперёд
+				local planted = 0
+				for _, side in { 1, -1 } do
+					local off = ROAD_HALF + RNG:NextNumber(12, 22)
+					local at = p + normal * (off * side)
+					if put("DeadTree", at.X, at.Y, 0.5, 2.4) then
+						planted += 1
+					end
+				end
+				nAlleyTrees += planted
+				if planted > 0 then
+					sinceTree = 0
+				end
+			end
+			s += STEP
+		end
+	end
+end
+
 -- // Трава: пучки-травинки выше terrain-травы, случайные высота/цвет/наклон ----
 -- Terrain-трава короткая; добавляем более высокие пучки — гуще у оснований
 -- объектов и по всей площади, чтобы придать картинке динамику.
@@ -558,5 +725,7 @@ end
 
 print(
 	`[MapBuilder] Расставлено: {#MapLayout.Hazards} hazard'ов, {#MapLayout.Graves} могил, {#MapLayout.Lamps} фонарей, {#MapLayout.DeadTrees} деревьев (по карте). `
-		.. `Декор-россыпь: {nTomb} надгробий, {nGrave} могил, {nTree} деревьев, {grassCount} пучков травы. Ограда по периметру ±335.`
+		.. `Декор-россыпь: {nTomb} надгробий, {nGrave} могил, {nTree} деревьев, {grassCount} пучков травы. `
+		.. `Кластеры вдоль трассы: {nClusterProps} могил/крестов на изгибах, {nAlleyTrees} деревьев в аллеях, {nClusterLamps} фонарей на виражах. `
+		.. `Ограда по периметру ±335.`
 )
