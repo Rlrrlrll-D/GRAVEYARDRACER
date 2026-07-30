@@ -18,6 +18,7 @@ local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
 local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
 
 local CHUNK = 40 -- греем пачками: один гигантский вызов держал бы очередь целиком
 
@@ -118,6 +119,51 @@ task.spawn(function()
 		consume(sv.Value)
 	end)
 	consume(sv.Value)
+end)
+
+-- // ПРОГРЕВ РИГА ЗОМБИ ----------------------------------------------------------
+-- Когда прогрелись мыши, профайлер показал следующего в очереди:
+--   [РЫВОК 193 мс] отрисовка 181 @ (132,29) | ВПЕРВЫЕ В КАДРЕ: ZombieTemplate×12
+--   [РЫВОК 207 мс] отрисовка 194 @ (139,2)  | ВПЕРВЫЕ В КАДРЕ: ZombieTemplate×12
+-- Первый зомби, попавший в кадр; текстурная память в тот же момент выросла с 36.9 до
+-- 43.0 Мб. Механизм тот же, что у роя: `PreloadAsync` тянет ассет по сети, а меш
+-- строится при первой ОТРИСОВКЕ, и уровень детализации выбирается по размеру на
+-- экране — зомби подбегает к машине вплотную. Копию рига кладёт сервер
+-- (`AssetWarmup` → `ReplicatedStorage.Assets.ZombieWarm`), потому что ServerStorage
+-- клиенту не виден. Показываем её камере вплотную, пока висит заставка.
+local ZOMBIE_WARM_FRAMES = 4
+local ZOMBIE_WARM_DIST = 7
+
+task.spawn(function()
+	local assets = ReplicatedStorage:WaitForChild("Assets", 60)
+	local proto = assets and assets:WaitForChild("ZombieWarm", 60)
+	local cam = workspace.CurrentCamera
+	if not proto or not cam then
+		return
+	end
+	-- Тот же признак «экран закрыт», что у стаи мышей: зрителю, зашедшему посреди
+	-- заезда, заставки не видно, и ему зомби мелькнул бы в лицо.
+	local blur = Lighting:FindFirstChild("MenuBlur")
+	if not (blur and blur:IsA("BlurEffect") and blur.Size > 0) then
+		return
+	end
+	local rig = proto:Clone()
+	for _, d in rig:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Anchored = true
+			d.CanCollide = false
+		end
+	end
+	-- В workspace, а не под камеру: `CharacterMesh` одевает риг только в настоящем
+	-- мире. Клиентская модель на сервер не реплицируется, других игроков не тронет.
+	rig.Parent = workspace
+	for _ = 1, ZOMBIE_WARM_FRAMES do
+		local cf = cam.CFrame -- камеру в это же время уводит прогрев трассы, поэтому
+		rig:PivotTo(CFrame.lookAt(cf * Vector3.new(0, -1.5, -ZOMBIE_WARM_DIST), cf.Position)) -- держим рига перед ней каждый кадр
+		RunService.PreRender:Wait()
+	end
+	rig:Destroy()
+	print("[DecorPreload] риг зомби прогрет: показан камере вплотную.")
 end)
 
 -- // ПРОГРЕВ ОТРИСОВКИ ТРАССЫ ---------------------------------------------------
