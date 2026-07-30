@@ -225,6 +225,55 @@ local function ensureTemplate(): Model?
 	return template
 end
 
+-- // ТУРЕЛЬ: ставим на место и привариваем ПОСЛЕ спавна ------------------------
+-- Жалоба юзера: «пулемёт висит в воздухе над машиной». Разбор показал, что в шаблоне
+-- вся машина держится ЯКОРЯМИ (детали `Part` — невидимые заякоренные плиты
+-- A-Chassis), сварок почти нет. При спавне A-Chassis разякоривает всё и сваривает по
+-- своей схеме, турель в неё не входит: `TurretBase` успевает уехать, а `Turret` со
+-- стволом вообще остаются отдельными физическими сборками и падают (замерено:
+-- основание оказывалось на 4.5 studs НИЖЕ сиденья вместо 2.4 выше, оба шарнира
+-- `Active=false`). Поэтому ставим турель на место сами — по позе из шаблона
+-- относительно сиденья — и привариваем жёстким `Weld` (он хранит смещение в C0 и
+-- восстанавливает его, в отличие от `WeldConstraint`, который запоминает то
+-- положение, в котором деталь застал момент активации).
+local TURRET_PARTS = { "TurretBase", "TurretMast", "Turret", "GunCradle", "GunMesh" }
+
+local function mountTurret(car: Model)
+	local t = template
+	local tSeat = t and t:FindFirstChild("DriveSeat")
+	local seat = car:FindFirstChild("DriveSeat")
+	if not (tSeat and tSeat:IsA("BasePart") and seat and seat:IsA("BasePart")) then
+		return
+	end
+	for _, name in TURRET_PARTS do
+		local src = t:FindFirstChild(name, true)
+		local dst = car:FindFirstChild(name, true)
+		if src and src:IsA("BasePart") and dst and dst:IsA("BasePart") then
+			-- поза из шаблона, пересчитанная от текущего сиденья
+			dst.CFrame = seat.CFrame * (tSeat.CFrame:Inverse() * src.CFrame)
+		end
+	end
+	-- Неподвижную часть держим сваркой к сиденью; вращаться должны только `Turret`
+	-- (рыскание) и `GunCradle` (наклон) — их держат шарниры, которым прицел задаёт угол.
+	for _, name in { "TurretBase", "TurretMast" } do
+		local part = car:FindFirstChild(name, true)
+		if part and part:IsA("BasePart") then
+			for _, old in part:GetChildren() do
+				if old:IsA("Weld") and old.Name == "TurretMount" then
+					old:Destroy()
+				end
+			end
+			part.Anchored = false
+			local w = Instance.new("Weld")
+			w.Name = "TurretMount"
+			w.Part0 = seat
+			w.Part1 = part
+			w.C0 = seat.CFrame:Inverse() * part.CFrame
+			w.Parent = part
+		end
+	end
+end
+
 function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 	PlayerFlow.releaseVehicle(player) -- на всякий: не плодим вторую машину
 	local t = ensureTemplate()
@@ -268,6 +317,18 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 	end)
 	CollectionService:AddTag(car, "PlayerVehicle") -- VehicleController подхватит
 	vehicleOfPlayer[player] = car
+	-- Турель ставим ПОСЛЕ инициализации A-Chassis: он на старте разякоривает детали и
+	-- сваривает машину по-своему, поэтому раньше времени крепить бесполезно —
+	-- перетрёт. Повторяем дважды: первый проход ловит обычный случай, второй —
+	-- если инициализация в этот раз оказалась дольше.
+	task.spawn(function()
+		for _, delay in { 0.4, 1.6 } do
+			task.wait(delay)
+			if car.Parent then
+				pcall(mountTurret, car)
+			end
+		end
+	end)
 	return car
 end
 
