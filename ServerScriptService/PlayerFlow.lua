@@ -263,25 +263,51 @@ local function mountTurret(car: Model, player: Player?)
 	if not (tSeat and tSeat:IsA("BasePart") and seat and seat:IsA("BasePart")) then
 		return
 	end
+	-- ПОРЯДОК ВАЖЕН. Двигать деталь, уже вваренную в сборку машины, НЕЛЬЗЯ: сдвиг
+	-- тащит ВСЮ сборку — кузов с колёсами, — и подвеску рвёт (машина буквально
+	-- разлеталась). Поэтому сперва снимаем с турели все чужие соединения, и только
+	-- потом ставим её на место и варим заново.
+	local mounted: { BasePart } = {}
+	for _, name in TURRET_PARTS do
+		local dst = car:FindFirstChild(name, true)
+		if dst and dst:IsA("BasePart") then
+			table.insert(mounted, dst)
+		end
+	end
+	local mountedSet: { [BasePart]: boolean } = {}
+	for _, p in mounted do
+		mountedSet[p] = true
+	end
+	for _, d in car:GetDescendants() do
+		local a, b
+		if d:IsA("WeldConstraint") then
+			a, b = d.Part0, d.Part1
+		elseif d:IsA("JointInstance") then
+			a, b = d.Part0, d.Part1
+		end
+		-- сварки ВНУТРИ турели (ствол к люльке, стойка к основанию) не трогаем,
+		-- режем только те, что связывают турель с машиной
+		if a and b and (mountedSet[a] ~= mountedSet[b]) then
+			d:Destroy()
+		end
+	end
+	task.wait() -- дать движку пересобрать сборки, иначе сдвиг ещё потянет за собой машину
+
 	for _, name in TURRET_PARTS do
 		local src = t:FindFirstChild(name, true)
 		local dst = car:FindFirstChild(name, true)
 		if src and src:IsA("BasePart") and dst and dst:IsA("BasePart") then
+			dst.Anchored = false
 			-- поза из шаблона, пересчитанная от текущего сиденья
 			dst.CFrame = seat.CFrame * (tSeat.CFrame:Inverse() * src.CFrame)
 		end
 	end
+
 	-- Неподвижную часть держим сваркой к сиденью; вращаться должны только `Turret`
 	-- (рыскание) и `GunCradle` (наклон) — их держат шарниры, которым прицел задаёт угол.
 	for _, name in { "TurretBase", "TurretMast" } do
 		local part = car:FindFirstChild(name, true)
 		if part and part:IsA("BasePart") then
-			for _, old in part:GetChildren() do
-				if old:IsA("Weld") and old.Name == "TurretMount" then
-					old:Destroy()
-				end
-			end
-			part.Anchored = false
 			local w = Instance.new("Weld")
 			w.Name = "TurretMount"
 			w.Part0 = seat
