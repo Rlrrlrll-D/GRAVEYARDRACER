@@ -12,6 +12,9 @@ local Players = game:GetService("Players")
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local MapLayout = require(ReplicatedStorage:WaitForChild("MapLayout"))
 local batScare = Net.get(Net.Events.BatScare)
+-- Скример = не только картинка: на рой из-за угла даём короткую тряску камеры.
+-- Клиент (UIController) сам чтит опцию cameraShake, здесь фильтровать не нужно.
+local cameraShake = Net.get(Net.Events.CameraShake)
 
 -- точки вылета: впереди по курсу каждого едущего игрока, чуть выше
 local function driverOrigins(): { Vector3 }
@@ -42,7 +45,7 @@ task.spawn(function()
 		task.wait(math.random(40, 75))
 		local o = driverOrigins()
 		if #o > 0 and math.random() < 0.6 then
-			batScare:FireAllClients(o[math.random(1, #o)], math.random(16, 24), "swarm")
+			batScare:FireAllClients(o[math.random(1, #o)], math.random(24, 32), "swarm")
 		end
 	end
 end)
@@ -97,8 +100,11 @@ if #zones > 0 then
 										local origin = pos
 											+ seat.CFrame.LookVector * ZONE_AHEAD
 											+ Vector3.new(0, ZONE_UP, 0)
-										local count = z.Kind == "swarm" and math.random(18, 26) or math.random(2, 4)
+										local count = z.Kind == "swarm" and math.random(26, 34) or math.random(2, 4)
 										batScare:FireClient(plr, origin, count, z.Kind)
+										if z.Kind == "swarm" then
+											cameraShake:FireClient(plr, 0.55, 0.3)
+										end
 									end
 								end
 								break -- зоны не перекрываются; хватит первой

@@ -223,9 +223,14 @@ end
 -- свет ярче; прочие — сильно полупрозрачные (призрачные), свет спокойный.
 -- Прозрачность плашки. Череп — призрак, а не белая наклейка: сквозь него видно
 -- трассу. Билборд стоит с LightInfluence=0, поэтому он «светится сам» и одинаково
--- читается и в сумерках, и в глубокой ночи; PointLight добавляет ореол вокруг.
-local SKULL_ALPHA_IDLE = 0.90 -- чужие чекпоинты — еле различимая дымка
-local SKULL_ALPHA_ACTIVE = 0.78 -- свой следующий — плотнее, но всё ещё сквозной
+-- читается и в сумерках, и в глубокой ночи (LightInfluence=0 у билборда).
+-- 2026-07-26, второй проход: череп должен быть ВОЗДУШНЫМ — почти дымка. Плотные
+-- 0.32/0.6 из первого прохода юзер забраковал («не такие плотные»), а ореолы
+-- (PointLight, аддитивный спрайт) выброшены совсем — они и были тем «белым круглым
+-- мутным облаком». Свой чекпоинт различается РАЗМЕРОМ и дыханием, а не плотностью.
+local SKULL_ALPHA_IDLE = 0.88 -- чужие чекпоинты — едва намёк
+local SKULL_ALPHA_ACTIVE = 0.76 -- свой следующий — чуть плотнее, но всё равно дымка
+local SKULL_PULSE = 0.06 -- амплитуда «дыхания» прозрачности у своего чекпоинта
 
 local skullBaseSize: { [Instance]: UDim2 } = {} -- исходный размер билборда каждого черепа
 local skullHome: { [Model]: CFrame } = {} -- «дом» каждого черепа (парение + сброс после сбора)
@@ -245,28 +250,28 @@ local function applySkullState(model: Model, active: boolean)
 				base = face.Size
 				skullBaseSize[face] = base
 			end
-			local k = active and 1.15 or 1.0 -- Size в Scale → масштабируется с расстоянием как объект
+			local k = active and 1.5 or 1.0 -- Size в Scale → масштабируется с расстоянием как объект
 			face.Size = UDim2.fromScale(base.X.Scale * k, base.Y.Scale * k)
-		end
-		local light = anchor:FindFirstChildOfClass("PointLight")
-		if light and light:IsA("PointLight") then
-			-- Ореол виден и днём, и ночью: в сумерках слабый свет тонул, поэтому
-			-- яркость поднята, а радиус оставлен небольшим (12 черепов × PointLight —
-			-- заметная статья расходов, раздувать Range нельзя).
-			light.Brightness = active and 3.0 or 1.2
-			light.Range = active and 13 or 8
 		end
 	end
 end
 
--- Прошёл чекпоинт: череп ВЗМЫВАЕТ В НЕБО (мировые координаты, вверх) и тает
--- дымком, затем возвращается на место к следующему кругу. Для орба — no-op.
+-- ПРЕВРАЩЕНИЕ ЧЕРЕПА В ДЫМ. Запускается НА ПОДЛЁТЕ (цикл парения ниже), а не по
+-- факту прохождения: на 60+ studs/с пройденный чекпоинт оказывается за спиной за
+-- доли секунды, и всю анимацию игрок физически не видел. Теперь череп распадается,
+-- пока он ещё в кадре, и машина проезжает сквозь облако. Проход по чекпоинту
+-- остаётся страховочным триггером — если мимо черепа прошли по широкой дуге.
+-- Для орба — no-op.
+local transformed: { [number]: boolean } = {} -- этот чекпоинт уже распался в текущем заходе
 local function collectSkull(index: number)
+	if transformed[index] then return end -- дважды один череп не растворяем
 	local marker = findMarker(index)
 	if not (marker and marker:IsA("Model")) then return end
 	local model = marker :: Model
+	if collecting[model] then return end
 	local anchor = model.PrimaryPart
 	if not anchor then return end
+	transformed[index] = true
 	local home = skullHome[model] or model:GetPivot()
 
 	-- «Улёт» анимируем на КЛИЕНТ-ЛОКАЛЬНОМ КЛОНЕ, а общий череп прячем локально.
@@ -290,39 +295,35 @@ local function collectSkull(index: number)
 	ghost.Parent = workspace -- вне RaceMarkers → цикл парения его не трогает; клиент-локально
 	local gAnchor = ghost.PrimaryPart
 
-	local RISE = 0.95 -- длительность улёта: чуть дольше прежнего, чтобы читалась струйка
+	local RISE = 1.0 -- дольше: юзеру нужна ВИДИМАЯ анимация превращения, а не мигание
 
 	if gAnchor then
-		local spirit = gAnchor:FindFirstChild("Spirit")
-		if spirit and spirit:IsA("ParticleEmitter") then
-			spirit:Emit(26)
-		end
-		local light = gAnchor:FindFirstChildOfClass("PointLight")
-		if light and light:IsA("PointLight") then
-			-- было 6 — вспышка выбеливала кадр и читалась как «белое пятно»
-			light.Brightness = 3.2
-			TweenService:Create(light, TweenInfo.new(RISE), { Brightness = 0 }):Play()
-		end
 		-- вверх с ускорением (в мировом Y)
 		TweenService:Create(gAnchor, TweenInfo.new(RISE, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-			{ Position = home.Position + Vector3.new(0, 22, 0) }):Play()
+			{ Position = home.Position + Vector3.new(0, 20, 0) }):Play()
 	end
 
-	-- РАСТВОРЕНИЕ СТРУЙКОЙ. Раньше клон на старте улёта делался почти НЕпрозрачным
-	-- (0.1) — из-за этого череп вспыхивал белым пятном и только потом таял. Теперь
-	-- он уходит вверх ровно таким же призрачным, каким висел, и по дороге
-	-- ВЫТЯГИВАЕТСЯ: ширина сходится почти в ноль, высота растёт — плашка на глазах
-	-- превращается в тонкую струйку дыма и гаснет.
+	-- САМ РАСПАД — и это ЕДИНСТВЕННОЕ, что здесь происходит. Никаких частиц: любой
+	-- размытый спрайт (smoke_main, аддитивный ореол) на этой сцене читался как «белое
+	-- круглое мутное облако», которое юзер требовал убрать. Превращается сам силуэт:
+	-- плашка ЗАКРУЧИВАЕТСЯ (ImageLabel.Rotation) и ВЫТЯГИВАЕТСЯ — ширина сходится
+	-- почти в ноль, высота растёт втрое, — то есть череп на глазах превращается в
+	-- струйку и гаснет. Стартуем ровно с той прозрачности, какой череп висел: вспышки
+	-- быть не должно.
 	local gImg = skullFaceImage(ghost)
 	if gImg then
 		gImg.ImageTransparency = SKULL_ALPHA_ACTIVE
-		TweenService:Create(gImg, TweenInfo.new(RISE, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		local twist = (math.random() < 0.5 and -1 or 1) * math.random(34, 52)
+		-- гаснет не сразу: сначала видно, КАК он тянется, и только к концу исчезает
+		TweenService:Create(gImg, TweenInfo.new(RISE, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
 			{ ImageTransparency = 1 }):Play()
+		TweenService:Create(gImg, TweenInfo.new(RISE, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+			{ Rotation = twist }):Play()
 		local gFace = gImg.Parent
 		if gFace and gFace:IsA("BillboardGui") then
 			local base = gFace.Size -- клон: стартуем с того размера, каким череп висел
 			TweenService:Create(gFace, TweenInfo.new(RISE, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-				Size = UDim2.fromScale(base.X.Scale * 0.18, base.Y.Scale * 1.9),
+				Size = UDim2.fromScale(base.X.Scale * 0.1, base.Y.Scale * 2.9),
 			}):Play()
 		end
 	end
@@ -337,9 +338,16 @@ local function collectSkull(index: number)
 end
 
 -- Подсветка СВОЕГО следующего чекпоинта — локально, у каждого игрока своя
+local activeSkullIndex: number? = nil -- за каким черепом сейчас следит цикл подлёта
 local function highlightCheckpoint(index: number?)
 	local folder = workspace:FindFirstChild("RaceMarkers")
 	if not folder then return end
+	if activeSkullIndex ~= index then
+		activeSkullIndex = index
+		if index then
+			transformed[index] = nil -- новый заход на этот чекпоинт: распад снова разрешён
+		end
+	end
 	for _, marker in folder:GetChildren() do
 		if marker:IsA("Model") then
 			-- череп активен, если обслуживает текущий чекпоинт (атрибут cpN)
@@ -373,6 +381,8 @@ local function setMarkersVisible(visible: boolean)
 				if face and face:IsA("BillboardGui") then face.Enabled = visible end
 				local light = anchor:FindFirstChildOfClass("PointLight")
 				if light then light.Enabled = visible end
+				-- Spirit — залповый (Rate=0, Enabled=false), его трогать не нужно:
+				-- он и так молчит, пока его не выстрелит анимация распада.
 			end
 		elseif m:IsA("BasePart") then
 			m.LocalTransparencyModifier = visible and 0 or 1 -- орб: скрыть локально
@@ -385,7 +395,12 @@ end
 
 -- Парение черепов-чекпоинтов — локально у каждого клиента (server держит их
 -- статичными). Первый кадр фиксирует «дом» (GetPivot), дальше — синусоида по Y.
--- Череп в процессе «улёта» (collecting) не парит — им управляет collectSkull.
+-- Череп в процессе распада (collecting) не парит — им управляет collectSkull.
+-- Здесь же ТРИГГЕР ПОДЛЁТА: как только «свой» череп ближе TRANSFORM_DIST, он
+-- начинает превращаться в дым — чтобы анимацию было видно, а не угадывать по
+-- облачку в зеркале. Расстояние подобрано так, чтобы облако успело раскрыться
+-- к моменту, когда машина в него влетает (60+ studs/с × ~0.5с распада).
+local TRANSFORM_DIST = 46
 RunService.Heartbeat:Connect(function()
 	local folder = workspace:FindFirstChild("RaceMarkers")
 	if not folder then return end
@@ -401,6 +416,19 @@ RunService.Heartbeat:Connect(function()
 			local phase = (id and tonumber(id) or 0) * 0.7
 			local y = math.sin(t * 1.3 + phase) * 0.9
 			m:PivotTo(home + Vector3.new(0, y, 0))
+			-- «дыхание» плотности у своего черепа: живой, но всё равно воздушный
+			local idx = activeSkullIndex
+			if idx and m:GetAttribute("cp" .. idx) == true then
+				local img = skullFaceImage(m)
+				if img then
+					img.ImageTransparency = SKULL_ALPHA_ACTIVE + math.sin(t * 2.1) * SKULL_PULSE
+				end
+				local char = player.Character
+				local root = char and char.PrimaryPart
+				if root and (root.Position - home.Position).Magnitude < TRANSFORM_DIST then
+					collectSkull(idx)
+				end
+			end
 		end
 	end
 end)

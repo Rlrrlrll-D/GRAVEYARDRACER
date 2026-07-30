@@ -121,49 +121,28 @@ local function buildSkull(cp: Vector3, i: number): Model
 	anchor.Parent = skull
 	skull.PrimaryPart = anchor
 
-	local glow = Instance.new("PointLight")
-	glow.Color = ORB_COLOR
-	glow.Brightness = 2.5 -- ярче: череп заметно светится над трассой
-	glow.Range = 16
-	glow.Parent = anchor
+	-- НИ ЛАМП, НИ ОРЕОЛОВ, НИ ЧАСТИЦ (2026-07-26, требование юзера). Всё, что он
+	-- называл «пятном» и «белым круглым мутным облаком», — это были по очереди:
+	-- PointLight (светил на дорогу, а не сам череп), аддитивный спрайт Halo и залп
+	-- Spirit текстурой smoke_main (она и есть размытый круглый шар). Любой софт-спрайт
+	-- на этой сцене читается как пятно, поэтому маркер = ОДИН силуэт черепа, а
+	-- «дымок» — это анимация превращения самой плашки (UIController.collectSkull).
 
-	-- плоская плашка-череп; клиент кладёт EditableImage в ImageLabel "Img"
+	-- плоская плашка-череп: чёткий силуэт. Тон холодный призрачный, а не белый —
+	-- белая плашка ночью читалась как «пятно».
 	local face = Instance.new("BillboardGui")
 	face.Name = "Face"
 	face.Size = UDim2.fromScale(4.2, 4.7) -- Scale (относительно якоря 0.6): ~2.5 studs, масштабируется с расстоянием как объект (offset давал постоянный экранный размер → казался «наоборот»)
-	face.LightInfluence = 0 -- полноярко: «светится», не темнеет ночью
+	face.LightInfluence = 0 -- полноярко: не темнеет ночью
 	face.Parent = anchor
 	local img = Instance.new("ImageLabel")
 	img.Name = "Img"
 	img.Size = UDim2.new(1, 0, 1, 0)
 	img.BackgroundTransparency = 1
 	img.Image = SKULL_IMAGE
-	img.ImageTransparency = 0.87 -- почти прозрачный призрак
+	img.ImageColor3 = ORB_COLOR -- призрачно-зелёный, не белый
+	img.ImageTransparency = 0.82 -- ВОЗДУШНЫЙ: почти дымка, не плашка
 	img.Parent = face
-
-	-- «дух улетает вверх»: залп дымка при прохождении (эмитит клиент через :Emit)
-	local spirit = Instance.new("ParticleEmitter")
-	spirit.Name = "Spirit"
-	spirit.Texture = "rbxasset://textures/particles/smoke_main.dds"
-	spirit.Color = ColorSequence.new(ORB_COLOR)
-	spirit.LightEmission = 0.9
-	spirit.LightInfluence = 0
-	spirit.Rate = 0
-	spirit.Enabled = false
-	spirit.Lifetime = NumberRange.new(0.8, 1.3)
-	spirit.Speed = NumberRange.new(8, 13)
-	spirit.SpreadAngle = Vector2.new(18, 18)
-	spirit.Acceleration = Vector3.new(0, 16, 0)
-	spirit.EmissionDirection = Enum.NormalId.Top
-	spirit.Size = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 2.2),
-		NumberSequenceKeypoint.new(1, 4.5),
-	})
-	spirit.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.25),
-		NumberSequenceKeypoint.new(1, 1),
-	})
-	spirit.Parent = anchor
 
 	skull.Parent = markerFolder
 	-- парение/изображение/подсветка — на клиенте (UIController skull-bob).
