@@ -131,8 +131,15 @@ end)
 -- экране — зомби подбегает к машине вплотную. Копию рига кладёт сервер
 -- (`AssetWarmup` → `ReplicatedStorage.Assets.ZombieWarm`), потому что ServerStorage
 -- клиенту не виден. Показываем её камере вплотную, пока висит заставка.
-local ZOMBIE_WARM_FRAMES = 4
+local ZOMBIE_WARM_FRAMES = 8
 local ZOMBIE_WARM_DIST = 7
+
+local function memMb(tag: Enum.DeveloperMemoryTag): number
+	local ok, v = pcall(function()
+		return game:GetService("Stats"):GetMemoryUsageMbForTag(tag)
+	end)
+	return ok and v or 0
+end
 
 task.spawn(function()
 	local assets = ReplicatedStorage:WaitForChild("Assets", 60)
@@ -154,16 +161,72 @@ task.spawn(function()
 			d.CanCollide = false
 		end
 	end
+
+	-- СНАЧАЛА ДОЖДАТЬСЯ АССЕТОВ. Первая версия рисовала рига сразу и печатала «прогрет»
+	-- ещё до строки «прогрето: 45 ассетов» — то есть показывала камере то, чего в кэше
+	-- ещё нет, и строить движку было нечего. Меши тела приходят через `CharacterMesh`,
+	-- у которого id ЧИСЛОВЫЕ, поэтому url собираем руками и греем их поимённо.
+	local wait: { any } = { rig }
+	for _, d in rig:GetDescendants() do
+		if d:IsA("CharacterMesh") then
+			for _, id in { d.MeshId, d.BaseTextureId, d.OverlayTextureId } do
+				if id ~= nil and id ~= 0 then
+					table.insert(wait, "rbxassetid://" .. tostring(id))
+				end
+			end
+		end
+	end
+	pcall(function()
+		ContentProvider:PreloadAsync(wait)
+	end)
+
 	-- В workspace, а не под камеру: `CharacterMesh` одевает риг только в настоящем
 	-- мире. Клиентская модель на сервер не реплицируется, других игроков не тронет.
 	rig.Parent = workspace
+
+	-- Заводим и анимацию: у настоящего зомби кости крутит Animator, и это отдельное
+	-- состояние. Скрипт `Animate` в копии вырезан (серверный скрипт у клиента всё
+	-- равно не запустится), поэтому дорожки поднимаем руками.
+	local tracks = {}
+	local hum = rig:FindFirstChildOfClass("Humanoid")
+	local animator = hum and hum:FindFirstChildOfClass("Animator")
+	if hum and not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = hum
+	end
+	if animator then
+		for _, d in rig:GetDescendants() do
+			if d:IsA("Animation") and #tracks < 3 then
+				local ok, track = pcall(function()
+					return (animator :: Animator):LoadAnimation(d)
+				end)
+				if ok and track then
+					pcall(function()
+						track:Play()
+					end)
+					table.insert(tracks, track)
+				end
+			end
+		end
+	end
+
+	local texBefore = memMb(Enum.DeveloperMemoryTag.GraphicsTexture)
 	for _ = 1, ZOMBIE_WARM_FRAMES do
 		local cf = cam.CFrame -- камеру в это же время уводит прогрев трассы, поэтому
 		rig:PivotTo(CFrame.lookAt(cf * Vector3.new(0, -1.5, -ZOMBIE_WARM_DIST), cf.Position)) -- держим рига перед ней каждый кадр
 		RunService.PreRender:Wait()
 	end
+	for _, track in tracks do
+		pcall(function()
+			track:Stop()
+		end)
+	end
+	local texAfter = memMb(Enum.DeveloperMemoryTag.GraphicsTexture)
 	rig:Destroy()
-	print("[DecorPreload] риг зомби прогрет: показан камере вплотную.")
+	-- Печатаем прирост текстур: это самопроверка. Если прогрев реально что-то построил,
+	-- на холодном клиенте здесь будут мегабайты, а не ноль.
+	print(("[DecorPreload] риг зомби прогрет (%d кадров, %d дорожек): текстуры %.1f → %.1f Мб.")
+		:format(ZOMBIE_WARM_FRAMES, #tracks, texBefore, texAfter))
 end)
 
 -- // ПРОГРЕВ ОТРИСОВКИ ТРАССЫ ---------------------------------------------------
