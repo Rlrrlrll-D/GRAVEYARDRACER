@@ -81,21 +81,72 @@ local function getMouseHit(excludeVehicle: Model?): (Vector3, Instance?)
 	return unitRay.Origin + unitRay.Direction * GameConfig.Weapon.Range, nil
 end
 
-local function createTracer(origin: Vector3, hitPosition: Vector3)
-	local distance = (hitPosition - origin).Magnitude
+-- НАЧАЛО ТРАССЕРА ЕДЕТ С ДУЛОМ. Жалоба: «отстаёт точка выхода трассера у ствола,
+-- совпадает только когда не движется». Так и было: трассер со вспышкой — АНКОРНЫЕ
+-- детали в мировых координатах, поставленные по позиции дула в МОМЕНТ выстрела и
+-- живущие 0.1 с. На 80 studs/с ствол за эту десятую уезжает на 8 studs, и начало
+-- трассера остаётся висеть позади — стоя на месте расхождения нет вовсе.
+-- Поэтому источник теперь передаётся не точкой, а самим дулом (Attachment): пока
+-- эффект жив, его начало каждый кадр берётся от текущего положения дула, а дальний
+-- конец остаётся там, куда попали. Vector3 тоже принимается — им рисуются чужие
+-- выстрелы, прилетевшие ремоутом: чужого дула у нас на руках нет.
+type EffectSource = Attachment | Vector3
+
+local function originOf(source: EffectSource): Vector3?
+	if typeof(source) == "Vector3" then
+		return source
+	end
+	local a = source :: Attachment
+	return a.Parent and a.WorldPosition or nil
+end
+
+-- Держим эффект приклеенным к дулу на всё его недолгое время жизни.
+local function followMuzzle(source: EffectSource, life: number, place: (Vector3) -> ())
+	if typeof(source) == "Vector3" then
+		return -- чужой выстрел: следовать не за чем, точка и так статична
+	end
+	local t0 = os.clock()
+	local conn: RBXScriptConnection
+	conn = RunService.RenderStepped:Connect(function()
+		local origin = originOf(source)
+		if not origin or os.clock() - t0 >= life then
+			conn:Disconnect()
+			return
+		end
+		place(origin)
+	end)
+end
+
+local TRACER_LIFE = 0.1
+local FLASH_LIFE = 0.05
+
+local function createTracer(source: EffectSource, hitPosition: Vector3)
+	local start = originOf(source)
+	if not start then
+		return
+	end
 	local tracer = Instance.new("Part")
 	tracer.Anchored = true
 	tracer.CanCollide = false
 	tracer.CanQuery = false
 	tracer.Material = Enum.Material.Neon
 	tracer.Color = Color3.fromRGB(224, 214, 170) -- кость (был янтарный)
-	tracer.Size = Vector3.new(0.15, 0.15, distance)
-	tracer.CFrame = CFrame.new(origin:Lerp(hitPosition, 0.5), hitPosition)
+	local function place(origin: Vector3)
+		local distance = (hitPosition - origin).Magnitude
+		tracer.Size = Vector3.new(0.15, 0.15, distance)
+		tracer.CFrame = CFrame.new(origin:Lerp(hitPosition, 0.5), hitPosition)
+	end
+	place(start)
 	tracer.Parent = workspace
-	Debris:AddItem(tracer, 0.1)
+	followMuzzle(source, TRACER_LIFE, place)
+	Debris:AddItem(tracer, TRACER_LIFE)
 end
 
-local function createMuzzleFlash(origin: Vector3)
+local function createMuzzleFlash(source: EffectSource)
+	local start = originOf(source)
+	if not start then
+		return
+	end
 	local flash = Instance.new("Part")
 	flash.Shape = Enum.PartType.Ball
 	flash.Anchored = true
@@ -104,7 +155,7 @@ local function createMuzzleFlash(origin: Vector3)
 	flash.Material = Enum.Material.Neon
 	flash.Color = Color3.fromRGB(255, 220, 130)
 	flash.Size = Vector3.new(1.1, 1.1, 1.1)
-	flash.CFrame = CFrame.new(origin)
+	flash.CFrame = CFrame.new(start)
 
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(255, 210, 120)
@@ -113,7 +164,10 @@ local function createMuzzleFlash(origin: Vector3)
 	light.Parent = flash
 
 	flash.Parent = workspace
-	Debris:AddItem(flash, 0.05)
+	followMuzzle(source, FLASH_LIFE, function(origin)
+		flash.CFrame = CFrame.new(origin)
+	end)
+	Debris:AddItem(flash, FLASH_LIFE)
 end
 
 local function playGunshot(position: Vector3)
@@ -320,8 +374,10 @@ local function tryFire()
 	rp.FilterDescendantsInstances = flt
 	local res = workspace:Raycast(origin, direction * GameConfig.Weapon.Range, rp)
 	local hitPos = res and res.Position or (origin + direction * GameConfig.Weapon.Range)
-	createTracer(origin, hitPos)
-	createMuzzleFlash(origin)
+	-- СВОЙ выстрел рисуем от самого дула, а не от снятой с него точки: на ходу точка
+	-- устаревает за первый же кадр (см. комментарий у createTracer).
+	createTracer(muzzle :: Attachment, hitPos)
+	createMuzzleFlash(muzzle :: Attachment)
 	playGunshot(origin)
 
 	fireWeapon:FireServer(origin, direction)
