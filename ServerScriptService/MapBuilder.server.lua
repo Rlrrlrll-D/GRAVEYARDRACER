@@ -199,7 +199,12 @@ for _, data in MapLayout.Graves do
 end
 
 -- // Lamps (мерцающие фонари) -------------------------------------------------
-for _, data in MapLayout.Lamps do
+-- ВЫКЛЮЧЕНО (2026-07-30): восемь фонарей из `MapLayout.Lamps` стоят по данным карты
+-- и прежнего роста (9.5 studs), а вдоль трассы теперь идёт процедурный ряд — высокий
+-- (×1.8) и в 4 studs от кромки, см. блок кластеров. Рядом со столбами старые
+-- смотрелись пеньками, поэтому оставляем один источник правды. Данные не удаляю:
+-- вернуть — снять `false and`.
+for _, data in (false and MapLayout.Lamps or {}) :: { any } do
 	local model = getTemplate("Lamp")
 	local isPlaceholder = false
 	if model then
