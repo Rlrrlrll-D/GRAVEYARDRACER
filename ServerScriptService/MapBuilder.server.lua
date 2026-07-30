@@ -183,9 +183,12 @@ for _, data in MapLayout.Hazards do
 end
 
 -- // Graves (точки спавна зомби) --------------------------------------------
+-- Спавн-точки зомби. Бугров-могил на карте больше нет (юзер: «могилы бугры убери
+-- вообще»), поэтому место, откуда лезет зомби, отмечает надгробие — тег `Grave`
+-- остаётся на нём, логика спавна не меняется.
 for _, data in MapLayout.Graves do
-	local model = getTemplate("GraveMarker")
-	model = model and model:Clone() or makePlaceholder("GraveMarker", Vector3.new(4, 0.4, 7), Color3.fromRGB(70, 60, 50))
+	local model = getTemplate("Tombstone")
+	model = model and model:Clone() or makePlaceholder("Tombstone", Vector3.new(3, 4, 1.2), Color3.fromRGB(120, 120, 130))
 	placeOnGrass(model, data.Position.X, data.Position.Y, data.Rotation)
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
@@ -356,9 +359,11 @@ local function scatter(name: string, count: number, sMin: number, sMax: number, 
 	return placed
 end
 
-local nTomb = scatter("Tombstone", 84, 0.6, 2.3)
-local nGrave = scatter("GraveMarker", 48, 0.9, 2.1)
-local nTree = scatter("DeadTree", 60, 0.4, 2.8)
+-- Надгробия больше НЕ разбрасываются случайно: кладбище выстроено рядами, см. блок
+-- «РЕГУЛЯРНОЕ КЛАДБИЩЕ» ниже. Могилы-бугры (`GraveMarker`) убраны с карты совсем.
+-- Деревьев — кратно больше и с широким разбросом размеров: они как раз должны
+-- стоять природно, вразнобой, в отличие от рядов надгробий.
+local nTree = scatter("DeadTree", 230, 0.35, 3.6)
 
 -- // КЛАСТЕРЫ ВДОЛЬ ТРАССЫ (веха 8, фаза 3) -----------------------------------
 -- Ровная россыпь по площади читается как шум: с полотна не видно, где поворот, и
@@ -370,15 +375,115 @@ local nTree = scatter("DeadTree", 60, 0.4, 2.8)
 -- Замер 2026-07-30 такую добавку разрешает: весь статичный декор в кадре стоил
 -- `Opaque 31 547 tris / 26 draws` против `Grass 188 682 / 44` у одной только травы,
 -- то есть надгробия почти ничего не стоят — тяжёлая тут земля, а не декор.
-local nClusterProps, nAlleyTrees, nClusterLamps = 0, 0, 0
+-- // РЕГУЛЯРНОЕ КЛАДБИЩЕ: ряды надгробий по всей площади, кроме трассы ----------
+-- Требование юзера: «расположение не хаотичное, но строго геометрически параллельно,
+-- размеры больше и разные, наполни карту максимально». Поэтому надгробия больше не
+-- разбрасываются рандомом — они стоят СЕТКОЙ: шаг по X — место в ряду, шаг по Z —
+-- сам ряд, разворот у ВСЕХ одинаковый (никакого случайного поворота, иначе поле
+-- сразу читается как мусор). Разнообразие даёт не поворот, а типоразмер: семь
+-- шаблонов надгробий (два своих + пять из стора) и широкий разброс масштаба.
+-- Каждый N-й ряд и каждый M-й столбец пропускаем — это дорожки между участками,
+-- без них поле выглядит как склад, а не кладбище.
+local CEM_HALF = 318 -- до ограды (±335) остаётся полоса, чтобы камни в неё не влезали
+local CEM_COL = 10 -- шаг места в ряду, studs
+local CEM_ROW = 13 -- шаг между рядами, studs
+local CEM_AISLE_ROW = 6 -- каждый 6-й ряд — поперечная дорожка
+local CEM_AISLE_COL = 11 -- каждый 11-й столбец — продольная дорожка
+local CEM_ROAD_CLEAR = 10 -- не ближе этого к кромке полотна (проверяется рейкастом)
+local CEM_YAW = 0 -- единый разворот всех камней
+
+-- Веса типов: свои меши по одной детали — основа поля; магазинные крупные
+-- памятники редкими акцентами, они дороже по деталям и заметно больше.
+local CEM_KINDS = {
+	{ name = "Tombstone", weight = 30, sMin = 1.0, sMax = 2.6 },
+	{ name = "Tombstone_B", weight = 22, sMin = 1.0, sMax = 2.4 },
+	{ name = "Tombstone_C", weight = 14, sMin = 0.9, sMax = 1.8 },
+	{ name = "Tombstone_G", weight = 12, sMin = 1.2, sMax = 2.6 },
+	{ name = "Tombstone_F", weight = 10, sMin = 0.9, sMax = 1.6 },
+	{ name = "Tombstone_E", weight = 8, sMin = 0.6, sMax = 1.0 }, -- обелиск, высокий
+	-- Плита широкая (11 studs): в полный рост читается как стена поперёк участка,
+	-- поэтому и вес маленький, и масштаб срезан — она тут семейный склеп, не забор.
+	{ name = "Tombstone_D", weight = 3, sMin = 0.45, sMax = 0.7 }
+}
+local CEM_WEIGHT_TOTAL = 0
+for _, k in CEM_KINDS do
+	CEM_WEIGHT_TOTAL += k.weight
+end
+local function pickKind()
+	local r = RNG:NextNumber(0, CEM_WEIGHT_TOTAL)
+	for _, k in CEM_KINDS do
+		r -= k.weight
+		if r <= 0 then
+			return k
+		end
+	end
+	return CEM_KINDS[1]
+end
+
+local nCemetery = 0
+do
+	-- Дорога = Ground, поле = Grass, поэтому «занято ли место дорогой» решает тот же
+	-- рейкаст, что и у остальной расстановки: nil = полотно или дыра.
+	local col = 0
+	for x = -CEM_HALF, CEM_HALF, CEM_COL do
+		col += 1
+		local row = 0
+		local colAisle = (col % CEM_AISLE_COL == 0)
+		for z = -CEM_HALF, CEM_HALF, CEM_ROW do
+			row += 1
+			if colAisle or (row % CEM_AISLE_ROW == 0) then
+				continue -- дорожка между участками
+			end
+			if not clearOfLandmarks(x, z) then
+				continue
+			end
+			local g = grassPosition(x, z)
+			if not g then
+				continue -- полотно трассы
+			end
+			-- у самой кромки не ставим: рейкаст в четырёх точках вокруг места
+			local tooCloseToRoad = false
+			for _, d in { Vector2.new(CEM_ROAD_CLEAR, 0), Vector2.new(-CEM_ROAD_CLEAR, 0), Vector2.new(0, CEM_ROAD_CLEAR), Vector2.new(0, -CEM_ROAD_CLEAR) } do
+				if not grassPosition(x + d.X, z + d.Y) then
+					tooCloseToRoad = true
+					break
+				end
+			end
+			if tooCloseToRoad then
+				continue
+			end
+			local kind = pickKind()
+			local tmpl = getTemplateVariant(kind.name)
+			if tmpl then
+				local model = tmpl:Clone()
+				model:ScaleTo(RNG:NextNumber(kind.sMin, kind.sMax))
+				dropToGround(model, g, CEM_YAW) -- разворот ОДИН на всех: ряды параллельны
+				for _, part in model:GetDescendants() do
+					if part:IsA("BasePart") then
+						part.Anchored = true
+						part.CanCollide = true
+						part.CollisionGroup = "Obstacles"
+						part.CastShadow = false
+					end
+				end
+				model.Parent = mapFolder
+				nCemetery += 1
+			end
+		end
+	end
+end
+
+local nAlleyTrees, nClusterLamps = 0, 0
 do
 	local poly = MapLayout.TrackPolyline
 	local scale = MapLayout.Scale or 1
 	if type(poly) == "table" and #poly >= 8 then
 		local ROAD_HALF = GameConfig.Map.RoadWidth / 2
 		local STEP = 12 -- шаг обхода осевой, studs
-		local CLUSTER_GAP = 130 -- не чаще, чем раз в столько studs вдоль трассы
-		local ALLEY_GAP = 30 -- шаг деревьев в аллее
+		local ALLEY_GAP = 26 -- шаг деревьев в аллее
+		local LAMP_GAP = 150 -- шаг фонарей вдоль дороги, studs
+		local LAMP_OFFSET = 4 -- от кромки полотна: фонарь стоит У ДОРОГИ, не в поле
+		local LAMP_SCALE = 1.8 -- шаблон 9.5 studs -> ~17: столб, а не пенёк
 		local BEND_DEG = 3.2 -- поворот на шаг круче этого = изгиб
 		local STRAIGHT_DEG = 1.1 -- положе этого = прямая
 		local START_CLEAR = 80 -- у старта чисто: там колонна и выезд
@@ -441,8 +546,40 @@ do
 			return true
 		end
 
-		local sinceCluster, sinceTree = CLUSTER_GAP, 0
+		-- Фонарь ставим У САМОЙ ДОРОГИ и высоким: прежние стояли в 9 studs от кромки и
+		-- ростом 9.5 studs — юзер справедливо назвал их низкими и стоящими не у дороги.
+		local function putLamp(at: Vector2, outward: Vector2): boolean
+			local spot = at + outward * (ROAD_HALF + LAMP_OFFSET)
+			local lamp = getTemplateVariant("Lamp")
+			local g = grassPosition(spot.X, spot.Y)
+			if not lamp or not g then
+				return false
+			end
+			local model = lamp:Clone()
+			model:ScaleTo(LAMP_SCALE) -- ~17 studs: фонарь должен нависать над полотном
+			dropToGround(model, g, RNG:NextNumber(0, 360))
+			local bulb = model:FindFirstChild("Bulb")
+			local holder = (bulb and bulb:IsA("BasePart")) and bulb or model.PrimaryPart
+			if holder then
+				local light = Instance.new("PointLight")
+				light.Color = Color3.fromRGB(255, 186, 95)
+				light.Range = 34 -- выше фонарь — шире пятно
+				light.Brightness = 1.4
+				light.Parent = holder
+				CollectionService:AddTag(light, "FlickerLight")
+			end
+			for _, part in model:GetDescendants() do
+				if part:IsA("BasePart") then
+					part.Anchored = true
+				end
+			end
+			model.Parent = mapFolder
+			return true
+		end
+
+		local sinceLamp, sinceTree = 0, 0
 		local prevDir: Vector2? = nil
+		local lampSide = 1
 		local s = 0
 		while s < total do
 			local p, dir = along(s)
@@ -454,60 +591,26 @@ do
 				turn = math.deg(math.atan2(cross, dot))
 			end
 			prevDir = dir
-			sinceCluster += STEP
+			sinceLamp += STEP
 			sinceTree += STEP
 
 			local farFromStart = p.Magnitude > START_CLEAR
 			local normal = Vector2.new(-dir.Y, dir.X) -- левая нормаль к курсу
 
-			if farFromStart and math.abs(turn) > BEND_DEG and sinceCluster >= CLUSTER_GAP then
-				-- СНАРУЖИ поворота: влево крутим — группа справа, и наоборот
-				local outward = turn > 0 and -normal or normal
-				local centre = p + outward * (ROAD_HALF + RNG:NextNumber(20, 38))
-				local props = RNG:NextInteger(6, 11)
-				local placedHere = 0
-				for _ = 1, props do
-					local ang = RNG:NextNumber(0, math.pi * 2)
-					local rad = RNG:NextNumber(2, 15)
-					local x = centre.X + math.cos(ang) * rad
-					local z = centre.Y + math.sin(ang) * rad
-					local kind = RNG:NextNumber() < 0.62 and "Tombstone" or "GraveMarker"
-					if put(kind, x, z, 0.7, 1.9) then
-						placedHere += 1
-					end
+			-- ФОНАРИ ВДОЛЬ ДОРОГИ: регулярно по всей трассе, а на крутых виражах — чаще
+			-- и обязательно снаружи поворота, чтобы вираж читался в темноте.
+			local sharp = math.abs(turn) > BEND_DEG
+			local due = sinceLamp >= (sharp and LAMP_GAP * 0.6 or LAMP_GAP)
+			if farFromStart and due then
+				local outward = sharp and (turn > 0 and -normal or normal) or normal * lampSide
+				if putLamp(p, outward) then
+					nClusterLamps += 1
+					sinceLamp = 0
+					lampSide = -lampSide -- на прямых чередуем стороны
 				end
-				nClusterProps += placedHere
-				if placedHere > 0 then
-					sinceCluster = 0
-					-- на крутых виражах — фонарь: поворот должен читаться в темноте
-					if math.abs(turn) > 5.5 then
-						local lampAt = p + outward * (ROAD_HALF + 9)
-						local lamp = getTemplateVariant("Lamp")
-						local g = grassPosition(lampAt.X, lampAt.Y)
-						if lamp and g then
-							local model = lamp:Clone()
-							dropToGround(model, g, RNG:NextNumber(0, 360))
-							local bulb = model:FindFirstChild("Bulb")
-							local holder = (bulb and bulb:IsA("BasePart")) and bulb or model.PrimaryPart
-							if holder then
-								local light = Instance.new("PointLight")
-								light.Color = Color3.fromRGB(255, 186, 95)
-								light.Range = 24
-								light.Brightness = 1.2
-								light.Parent = holder
-								CollectionService:AddTag(light, "FlickerLight")
-							end
-							for _, part in model:GetDescendants() do
-								if part:IsA("BasePart") then
-									part.Anchored = true
-								end
-							end
-							model.Parent = mapFolder
-							nClusterLamps += 1
-						end
-					end
-				end
-			elseif farFromStart and math.abs(turn) < STRAIGHT_DEG and sinceTree >= ALLEY_GAP then
+			end
+
+			if farFromStart and math.abs(turn) < STRAIGHT_DEG and sinceTree >= ALLEY_GAP then
 				-- АЛЛЕЯ по обе стороны прямой: коридор из деревьев тянет взгляд вперёд
 				local planted = 0
 				for _, side in { 1, -1 } do
@@ -725,7 +828,7 @@ end
 
 print(
 	`[MapBuilder] Расставлено: {#MapLayout.Hazards} hazard'ов, {#MapLayout.Graves} могил, {#MapLayout.Lamps} фонарей, {#MapLayout.DeadTrees} деревьев (по карте). `
-		.. `Декор-россыпь: {nTomb} надгробий, {nGrave} могил, {nTree} деревьев, {grassCount} пучков травы. `
-		.. `Кластеры вдоль трассы: {nClusterProps} могил/крестов на изгибах, {nAlleyTrees} деревьев в аллеях, {nClusterLamps} фонарей на виражах. `
-		.. `Ограда по периметру ±335.`
+		.. `Кладбище рядами: {nCemetery} надгробий (шаг {CEM_COL}×{CEM_ROW}, 7 типов). `
+		.. `Деревья: {nTree} по площади + {nAlleyTrees} в аллеях. Фонарей у дороги: {nClusterLamps}. `
+		.. `Травы: {grassCount} пучков. Ограда по периметру ±335.`
 )
