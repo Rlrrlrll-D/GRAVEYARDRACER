@@ -238,7 +238,25 @@ end
 -- положение, в котором деталь застал момент активации).
 local TURRET_PARTS = { "TurretBase", "TurretMast", "Turret", "GunCradle", "GunMesh" }
 
-local function mountTurret(car: Model)
+-- ВЛАДЕНИЕ ТУРЕЛЬЮ — ВОДИТЕЛЮ. Жалоба: «точка выстрела запаздывает при поворотах».
+-- Направление выстрела и так считается по прицелу, а не по стволу, значит отставала
+-- сама турель. Причина структурная: `Turret` и `GunCradle` — ОТДЕЛЬНЫЕ физические
+-- сборки (их держат шарниры, а не сварка), а сетевое владение выдаётся по сборкам —
+-- машину отдали водителю, турель осталась за сервером. Прицел ставит `TargetAngle`
+-- у клиента, а отрабатывает сервопривод на сервере, и поворот приезжает через круг
+-- связи; на вираже, когда угол меняется быстро, это и читается как запаздывание.
+local function giveTurretOwnership(car: Model, player: Player)
+	for _, name in { "Turret", "GunCradle", "GunMesh" } do
+		local part = car:FindFirstChild(name, true)
+		if part and part:IsA("BasePart") and not part.Anchored then
+			pcall(function()
+				part:SetNetworkOwner(player)
+			end)
+		end
+	end
+end
+
+local function mountTurret(car: Model, player: Player?)
 	local t = template
 	local tSeat = t and t:FindFirstChild("DriveSeat")
 	local seat = car:FindFirstChild("DriveSeat")
@@ -271,6 +289,9 @@ local function mountTurret(car: Model)
 			w.C0 = seat.CFrame:Inverse() * part.CFrame
 			w.Parent = part
 		end
+	end
+	if player then
+		giveTurretOwnership(car, player)
 	end
 end
 
@@ -325,7 +346,7 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 		for _, delay in { 0.4, 1.6 } do
 			task.wait(delay)
 			if car.Parent then
-				pcall(mountTurret, car)
+				pcall(mountTurret, car, player)
 			end
 		end
 	end)
@@ -370,8 +391,8 @@ function PlayerFlow.seatDriver(player: Player)
 		-- Отдаём владение водителю И ПРОВЕРЯЕМ, что прижилось. На 2-й+ машине в
 		-- мультиплеере одиночный SetNetworkOwner иногда не срабатывает (ассамблея
 		-- ещё оседает / владение перехватывает автопил) → «стреляет, но не едет»:
-		-- турель на ремоутах и от владения не зависит, а физику AC6 двигает ТОЛЬКО
-		-- владелец-клиент. Ретраим, пока GetNetworkOwner не станет игроком.
+		-- физику AC6 двигает ТОЛЬКО владелец-клиент. Ретраим, пока GetNetworkOwner
+		-- не станет игроком.
 		local owner: Player? = nil
 		for _ = 1, 12 do
 			pcall(function()
@@ -385,6 +406,10 @@ function PlayerFlow.seatDriver(player: Player)
 				break
 			end
 		end
+		-- Турель — ОТДЕЛЬНЫЕ сборки (их держат шарниры, а не сварка), и владение
+		-- машиной на них НЕ распространяется. Без этого сервопривод поворота считает
+		-- сервер, и прицел отстаёт на круг связи — заметнее всего на виражах.
+		giveTurretOwnership(car, player)
 	end
 end
 
