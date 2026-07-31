@@ -345,10 +345,33 @@ function ZombieAI.PlayDeath(zombie: Model)
 		return hit and hit.Position.Y or nil
 	end
 
+	-- ЧТО ИМЕННО КЛАДЁМ НА ГРУНТ — ТОРС, а не самую низкую точку тела.
+	--
+	-- Юзер: «зомби не долетают до земли». Замер лежащего трупа по деталям объяснил:
+	--     Right Arm низ +0.35   <- только она и касалась земли
+	--     Torso     низ +1.35   <- корпус лежал НА собственной руке
+	--     Head      низ +1.56
+	--     Left Arm  низ +3.33   <- торчала вверх
+	-- Посадка по минимуму ставит на грунт кончик ближайшей конечности, а всё тело
+	-- поднимается на её толщину — и висит. Опора у лежащего тела одна осмысленная:
+	-- торс. Конечности пусть ложатся вокруг (чуть утонуть краем ладони не страшно,
+	-- висеть в воздухе — страшно).
+	local torsoPart: BasePart? = (torso and torso:IsA("BasePart")) and torso :: BasePart or nil
+	local function restPoint(): (number, number, number)
+		if torsoPart then
+			local cf, half = torsoPart.CFrame, torsoPart.Size / 2
+			local ext = math.abs(cf.RightVector.Y) * half.X
+				+ math.abs(cf.UpVector.Y) * half.Y
+				+ math.abs(cf.LookVector.Y) * half.Z
+			return cf.Position.Y - ext, cf.Position.X, cf.Position.Z
+		end
+		return lowestNow()
+	end
+
 	-- Досадить тело на грунт после установки позы. `blend` растягивает поправку по
-	-- фазе, чтобы тело не дёргалось вверх скачком: при blend=1 низ ложится точно.
+	-- фазе, чтобы тело не дёргалось вверх скачком: при blend=1 торс ложится точно.
 	local function settle(blend: number)
-		local low, lx, lz = lowestNow()
+		local low, lx, lz = restPoint()
 		if low == math.huge then
 			return
 		end
@@ -385,12 +408,20 @@ function ZombieAI.PlayDeath(zombie: Model)
 	end
 
 	-- 3. ПАДЕНИЕ: с разгоном (easeIn), руки и голова доболтываются следом.
+	--
+	-- К концу падения конечности СВОДЯТСЯ К ТЕЛУ. Раньше они, наоборот, разводились
+	-- (локальный X плеча уходил с -0.40 до -0.90 — это «руки в стороны» ОТНОСИТЕЛЬНО
+	-- ТОРСА). Пока тело стоит, «в стороны» — это вбок и незаметно; но падает оно
+	-- вокруг мировой оси и часто ложится НА БОК, и тогда та же разводка задирает одну
+	-- руку в небо, а вторую загоняет под корпус. Замер: левая рука на +3.33, правая
+	-- на +0.35, торс на ней сверху. Теперь к концу падения руки идут вдоль тела, и
+	-- лежащий силуэт получается плоским.
 	if not phase(zombie, DEATH_FALL_TIME, easeIn, function(a)
 		set(neck, -0.30 - 0.20 * a, 0.18 + 0.22 * a, 0)
-		set(rs, -0.40 - 0.50 * a, 0, 0.60 - 0.35 * a)
-		set(ls, -0.40 - 0.35 * a, 0, -0.55 + 0.30 * a)
-		set(rh, 0, 0, 0.70 - 0.45 * a)
-		set(lh, 0, 0, -0.55 + 0.30 * a)
+		set(rs, -0.40 + 0.28 * a, 0, 0.60 - 0.45 * a)
+		set(ls, -0.40 + 0.28 * a, 0, -0.55 + 0.40 * a)
+		set(rh, 0, 0, 0.70 - 0.58 * a)
+		set(lh, 0, 0, -0.55 + 0.45 * a)
 		zombie:PivotTo(bodyCF(DEATH_FALL_ANGLE * a, DEATH_BUCKLE_DROP))
 		settle(a) -- к концу падения низ тела ложится ровно на грунт
 	end) then
@@ -401,7 +432,9 @@ function ZombieAI.PlayDeath(zombie: Model)
 	if not phase(zombie, DEATH_BOUNCE_TIME, easeSmooth, function(a)
 		local over = math.sin(a * math.pi) -- 0 → 1 → 0
 		zombie:PivotTo(bodyCF(DEATH_FALL_ANGLE + DEATH_BOUNCE_ANGLE * over, DEATH_BUCKLE_DROP))
-		set(rs, -0.90 + 0.12 * over, 0, 0.25)
+		-- руки остаются лежать вдоль тела, на отскоке лишь чуть подбрасывает
+		set(rs, -0.12 - 0.10 * over, 0, 0.15)
+		set(ls, -0.12 - 0.08 * over, 0, -0.15)
 		set(neck, -0.50, 0.40 + 0.10 * over, 0)
 		settle(1)
 		-- отскок: на миг приподнимаем тело над грунтом и тут же роняем обратно

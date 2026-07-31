@@ -141,7 +141,14 @@ local function buildSkull(cp: Vector3, i: number): Model
 	img.BackgroundTransparency = 1
 	img.Image = SKULL_IMAGE
 	img.ImageColor3 = ORB_COLOR -- призрачно-зелёный, не белый
-	img.ImageTransparency = 0.82 -- ВОЗДУШНЫЙ: почти дымка, не плашка
+	-- Юзер: «сделай, чтобы черепа-чеки светились как стрелки на старте, только менее
+	-- интенсивно». Стрелки — это Neon с прозрачностью 0.15, то есть почти сплошной
+	-- свет. Череп светится тем же приёмом, что и они: `LightInfluence = 0` уже стоит,
+	-- значит плашка не темнеет ночью и сама попадает в bloom, — не хватало только
+	-- плотности: 0.82 читалось как «едва намёк». 0.55 — заметно слабее стрелок, но
+	-- уже свечение. Живое значение ставит клиент (UIController: SKULL_ALPHA_*), это —
+	-- стартовое, до первого его касания.
+	img.ImageTransparency = 0.55
 	img.Parent = face
 
 	skull.Parent = markerFolder
