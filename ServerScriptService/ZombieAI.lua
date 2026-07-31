@@ -282,36 +282,63 @@ function ZombieAI.PlayDeath(zombie: Model)
 	-- тела, и тело зависало ровно на эту разницу. Плюс коробка модели заведомо
 	-- шире содержимого. Считаем по каждой детали отдельно и КАЖДЫЙ КАДР — у R6
 	-- их шесть, это дёшево, зато поза и грунт учитываются честно.
-	local function lowestNow(): number
-		local low = math.huge
+	-- Возвращает самую низкую точку тела и её место по горизонтали: под НЕЙ и надо
+	-- искать грунт, а не под пивотом — за падение тело уезжает от точки смерти.
+	local function lowestNow(): (number, number, number)
+		local low, lx, lz = math.huge, startPivot.Position.X, startPivot.Position.Z
 		for _, p in zombie:GetDescendants() do
 			if p:IsA("BasePart") then
 				local cf, half = p.CFrame, p.Size / 2
 				local ext = math.abs(cf.RightVector.Y) * half.X
 					+ math.abs(cf.UpVector.Y) * half.Y
 					+ math.abs(cf.LookVector.Y) * half.Z
-				low = math.min(low, cf.Position.Y - ext)
+				local y = cf.Position.Y - ext
+				if y < low then
+					low, lx, lz = y, cf.Position.X, cf.Position.Z
+				end
 			end
 		end
-		return low
+		return low, lx, lz
 	end
 
-	-- Земля под зомби. Ищем от ТАЗА вниз, исключив само тело: под ногами может
-	-- оказаться и террейн, и плита у могилы — годится любая твёрдая опора.
+	-- Земля под телом.
+	--
+	-- Юзер: «зомби зависают в воздухе, не долетая до земли». Раньше грунт брался ОДНИМ
+	-- лучом в момент смерти, из точки смерти, и в фильтре исключений стоял только сам
+	-- зомби. Но зомби почти всегда умирает ПОД МАШИНОЙ: подсечённое капотом тело в этот
+	-- миг лежит на кузове, луч упирался в кузов, и «грунтом» становилась крыша багги —
+	-- труп аккуратно укладывался на неё, машина уезжала, и он оставался висеть ровно на
+	-- её высоте. Второй случай того же бага — падение со склона или с обочины: тело за
+	-- падение уезжает на пару studs вбок, а высота бралась по старому месту.
+	--
+	-- Поэтому: машины из луча исключены совсем, а грунт ищется КАЖДЫЙ КАДР и под
+	-- текущей нижней точкой тела. Луч бьём с запасом сверху и вниз до самого низа карты,
+	-- чтобы не промахнуться ни по высоко подброшенному телу, ни по яме.
 	local groundParams = RaycastParams.new()
 	groundParams.FilterType = Enum.RaycastFilterType.Exclude
-	groundParams.FilterDescendantsInstances = { zombie }
-	local groundHit = workspace:Raycast(startPivot.Position, Vector3.new(0, -60, 0), groundParams)
-	local groundY = groundHit and groundHit.Position.Y or (lowestNow() - DEATH_REST_CLEARANCE)
-	local restY = groundY + DEATH_REST_CLEARANCE
+	local ignore: { Instance } = { zombie }
+	for _, v in CollectionService:GetTagged("PlayerVehicle") do
+		table.insert(ignore, v)
+	end
+	groundParams.FilterDescendantsInstances = ignore
+
+	local function groundUnder(x: number, y: number, z: number): number?
+		local hit = workspace:Raycast(Vector3.new(x, y + 8, z), Vector3.new(0, -400, 0), groundParams)
+		return hit and hit.Position.Y or nil
+	end
 
 	-- Досадить тело на грунт после установки позы. `blend` растягивает поправку по
 	-- фазе, чтобы тело не дёргалось вверх скачком: при blend=1 низ ложится точно.
 	local function settle(blend: number)
-		local low = lowestNow()
+		local low, lx, lz = lowestNow()
 		if low == math.huge then
 			return
 		end
+		local groundY = groundUnder(lx, low, lz)
+		if not groundY then
+			return -- под телом пусто (край карты): не дёргаем, просто оставляем как есть
+		end
+		local restY = groundY + DEATH_REST_CLEARANCE
 		zombie:PivotTo(zombie:GetPivot() + Vector3.new(0, (restY - low) * blend, 0))
 	end
 

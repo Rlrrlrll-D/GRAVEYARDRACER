@@ -351,6 +351,26 @@ local function measureFootprint(template: Model): Footprint
 		warn(`[MapBuilder] Подошва {template.Name} не нащупалась лучами — сажаю по коробке.`)
 	end
 
+	-- Опорная точка по горизонтали — ЦЕНТР пятна касания, а не самая низкая колонна.
+	-- У надгробия подошва плоская: десятки колонн дают одну и ту же высоту, и «самая
+	-- низкая» из них выпадает случайно то с одного края плиты, то с другого — камни
+	-- одного ряда расходились бы по X на ширину подошвы, а решётка читалась бы криво
+	-- (замер: 657 камней из 778 не попадали в узел). У дерева полоса касания — это
+	-- комель, и его центр даже точнее прежней «самой низкой точки ствола».
+	-- ВЫСОТУ при этом оставляем минимальной: сажаем по нижней точке модели, иначе
+	-- выпуклая подошва повисла бы над грунтом.
+	local sumX, sumZ, nBase = 0, 0, 0
+	for _, h in hits do
+		if h.y <= best + BASE_BAND then
+			sumX += h.x
+			sumZ += h.z
+			nBase += 1
+		end
+	end
+	if nBase > 0 then
+		bestX, bestZ = sumX / nBase, sumZ / nBase
+	end
+
 	-- Радиус пятна касания: самая дальняя колонна, которая всё ещё «на подошве».
 	-- Полшага сетки добавляем на грубость промера, чтобы не занизить.
 	local baseRadius = 0
@@ -669,15 +689,28 @@ local CEM_YAW = 0 -- единый разворот всех камней
 -- `Tombstone_D` выброшен совсем: на нём были авторские подписи из стора
 -- (`SurfaceGui`/`SIGN` — «RIP Dienyans main account»), а детали лежали повёрнутыми
 -- на 90°, отчего памятник выглядел опрокинутым.
+--
+-- ВЕСА ПЕРЕСЧИТАНЫ 2026-07-31 ПО ЗАМЕРУ ЦЕНЫ КАЖДОГО ТИПА. Когда камней стало 1038
+-- вместо 582, кадр с дороги вырос до 298 480 треугольников. Разбор по типам (прячем
+-- группу, смотрим Opaque с одной точки) показал, что дело НЕ в количестве:
+--     Tombstone_H  -> 133 896 tris     Tombstone_J -> 2 964
+--     Tombstone_B  -> 107 084 tris     Tombstone_G -> 2 634
+--     Tombstone    ->   7 170 tris     Tombstone_C -> 1 954
+--     Tombstone_E  ->   1 064 tris     Tombstone_F ->   994
+-- Два меша (оба мои, из Blender, с бевелем) стоят по ~730-770 треугольников штука
+-- против 10-38 у остальных семи — вдвоём они съедали 81% кадра. Поэтому они больше не
+-- массовка, а АКЦЕНТ: их доля срезана с 29% до 10%. Крестов при этом не убавилось —
+-- квота ушла к `Tombstone_J` (крест на плинте, 23 треугольника), и силуэт креста в
+-- рядах остался ровно таким же частым.
 local CEM_KINDS = {
-	{ name = "Tombstone", weight = 18, sMin = 1.0, sMax = 2.4 },
-	{ name = "Tombstone_B", weight = 15, sMin = 1.0, sMax = 2.2 },
-	{ name = "Tombstone_H", weight = 14, sMin = 0.9, sMax = 1.8 }, -- кельтский крест
-	{ name = "Tombstone_C", weight = 13, sMin = 0.9, sMax = 1.8 },
-	{ name = "Tombstone_J", weight = 13, sMin = 1.0, sMax = 1.9 }, -- крест на плинте
-	{ name = "Tombstone_G", weight = 12, sMin = 1.2, sMax = 2.6 },
-	{ name = "Tombstone_F", weight = 10, sMin = 0.9, sMax = 1.6 },
-	{ name = "Tombstone_E", weight = 5, sMin = 0.6, sMax = 1.0 }, -- обелиск, высокий
+	{ name = "Tombstone", weight = 22, sMin = 1.0, sMax = 2.4 },
+	{ name = "Tombstone_J", weight = 20, sMin = 1.0, sMax = 1.9 }, -- крест на плинте, дешёвый
+	{ name = "Tombstone_C", weight = 16, sMin = 0.9, sMax = 1.8 },
+	{ name = "Tombstone_G", weight = 14, sMin = 1.2, sMax = 2.6 },
+	{ name = "Tombstone_F", weight = 12, sMin = 0.9, sMax = 1.6 },
+	{ name = "Tombstone_E", weight = 6, sMin = 0.6, sMax = 1.0 }, -- обелиск, высокий
+	{ name = "Tombstone_H", weight = 6, sMin = 0.9, sMax = 1.8 }, -- кельтский крест: дорогой, редкий
+	{ name = "Tombstone_B", weight = 4, sMin = 1.0, sMax = 2.2 }, -- тоже дорогой, самый редкий
 }
 
 -- Камень одного тона на всё поле тоже читается как копипаста, поэтому у каждого
@@ -717,17 +750,25 @@ end
 -- крупные памятники налезали друг на друга, мелкие оставляли дыры, и ряд читался
 -- как случайный, хотя строился по линейке.
 --
--- Теперь у каждого камня СВОЙ участок: ширину даёт промеренное пятно касания
--- (`baseRadius`, см. промер подошвы) на его масштаб, плюс проход. Шаг вдоль ряда
--- переменный, шаг между рядами — по самому глубокому участку прошедшего ряда.
--- Ряды при этом остаются строго параллельными и разворот у всех общий: юзер просил
--- геометрию, а не хаос. Разнообразие даёт размер участка, а не поворот.
-local PLOT_GAP = 2.6 -- проход между соседними захоронениями в ряду, studs
-local PLOT_ROW_GAP = 4.5 -- проход между рядами, studs
-local PLOT_AISLE_ROWS = 6 -- каждый 6-й ряд — поперечная дорожка
-local PLOT_AISLE_WIDTH = 11 -- ширина дорожки, studs
-local PLOT_AISLE_EVERY = 11 -- каждый 11-й участок в ряду — продольная дорожка
-local PLOT_MIN_STEP = 5 -- страховка от зацикливания, если камень выродился в точку
+-- ПЕРЕДЕЛАНО 2026-07-31 (юзер: «расставь уже кресты и надгробья равномерно рядами
+-- и увеличь их количество»). Предыдущий заход давал каждому камню участок ПО ЕГО
+-- размеру, и шаг вдоль ряда получался переменным: ряды оставались прямыми, но
+-- столбцов не было вовсе — поле читалось как случайное, хотя строилось по линейке.
+-- Замер это подтвердил: 582 камня на 75 рядов с разным шагом между рядами.
+--
+-- Теперь всё поле — ОДНА РЕШЁТКА с постоянным шагом: столбец = PLOT_STEP, ряд =
+-- PLOT_ROW_STEP, и каждый камень стоит ровно в её узле. Крупный памятник не двигает
+-- решётку, а ЗАНИМАЕТ НЕСКОЛЬКО ЯЧЕЕК подряд (как семейный участок), поэтому ряды и
+-- столбцы читаются насквозь. Дорожки — это пропущенные линии решётки, а не вставки
+-- переменной ширины: узлы соседних кварталов остаются на одной прямой.
+--
+-- Разброс масштаба сохранён, но подрезается глубиной ряда: камень, который не влезает
+-- между рядами, ужимается до неё — иначе задний ряд наползал бы на передний.
+local PLOT_STEP = 11 -- шаг решётки вдоль ряда (столбцы), studs
+local PLOT_ROW_STEP = 14 -- шаг решётки между рядами, studs
+local PLOT_GAP = 2.2 -- минимальный проход между соседними захоронениями, studs
+local PLOT_AISLE_ROWS = 8 -- каждый 8-й ряд решётки пуст — поперечная дорожка
+local PLOT_AISLE_EVERY = 13 -- каждый 13-й столбец решётки пуст — продольная дорожка
 
 local nCemetery = 0
 -- Где встали камни: по этим точкам потом пускаем траву у оснований (см. ниже).
@@ -742,76 +783,71 @@ do
 		Vector2.new(0, CEM_ROAD_CLEAR),
 		Vector2.new(0, -CEM_ROAD_CLEAR),
 	}
-	local z = -CEM_HALF
+	-- Глубже этого камень не растёт: иначе соседний РЯД окажется у него внутри.
+	local PLOT_MAX_RADIUS = (PLOT_ROW_STEP - PLOT_GAP) / 2
 	local rowIndex = 0
+	local z = -CEM_HALF
 	while z <= CEM_HALF do
 		rowIndex += 1
-		if rowIndex % PLOT_AISLE_ROWS == 0 then
-			z += PLOT_AISLE_WIDTH -- поперечная дорожка между участками
-			continue
-		end
-		local rowDepth = 0
-		local plotIndex = 0
-		local x = -CEM_HALF
-		while x <= CEM_HALF do
-			plotIndex += 1
-			local kind = pickKind()
-			-- ТОЧНЫЙ шаблон, не `getTemplateVariant`: тот сам случайно выбирает среди
-			-- всех `Tombstone_*` и затирает веса — в первой сборке из-за этого «Tombstone»
-			-- с весом 18% получил 3% поля, а раздача типов шла почти поровну.
-			local tmpl = getTemplate(kind.name)
-			if not tmpl then
-				x += PLOT_MIN_STEP
-				continue
-			end
-			local scale = RNG:NextNumber(kind.sMin, kind.sMax)
-			local footRadius = measureFootprint(tmpl).baseRadius * scale
-			local half = math.max(footRadius + PLOT_GAP / 2, PLOT_MIN_STEP / 2)
-			local cx = x + half -- центр участка
-			rowDepth = math.max(rowDepth, footRadius)
+		if rowIndex % PLOT_AISLE_ROWS ~= 0 then -- иначе ряд пропущен целиком = дорожка
+			local col = 0
+			local nextFreeCol = 1 -- докуда решётку занял предыдущий крупный памятник
+			local x = -CEM_HALF
+			while x <= CEM_HALF do
+				col += 1
+				if col >= nextFreeCol and col % PLOT_AISLE_EVERY ~= 0 then
+					local kind = pickKind()
+					-- ТОЧНЫЙ шаблон, не `getTemplateVariant`: тот сам случайно выбирает среди
+					-- всех `Tombstone_*` и затирает веса — в первой сборке из-за этого «Tombstone»
+					-- с весом 18% получил 3% поля, а раздача типов шла почти поровну.
+					local tmpl = getTemplate(kind.name)
+					if tmpl then
+						local baseR = measureFootprint(tmpl).baseRadius
+						local scale = RNG:NextNumber(kind.sMin, kind.sMax)
+						if baseR * scale > PLOT_MAX_RADIUS then
+							scale = PLOT_MAX_RADIUS / baseR -- подрезаем по глубине ряда
+						end
+						local footRadius = baseR * scale
 
-			if plotIndex % PLOT_AISLE_EVERY == 0 then
-				x = cx + half + PLOT_AISLE_WIDTH -- продольная дорожка
-				continue
-			end
-
-			local ok = clearOfLandmarks(cx, z)
-			local g = ok and grassPosition(cx, z) or nil
-			if g then
-				-- у самой кромки не ставим: рейкаст в четырёх точках вокруг места
-				for _, d in roadProbe do
-					if not grassPosition(cx + d.X, z + d.Y) then
-						g = nil
-						break
+						local ok = clearOfLandmarks(x, z)
+						local g = ok and grassPosition(x, z) or nil
+						if g then
+							-- у самой кромки не ставим: рейкаст в четырёх точках вокруг места
+							for _, d in roadProbe do
+								if not grassPosition(x + d.X, z + d.Y) then
+									g = nil
+									break
+								end
+							end
+						end
+						-- и место не должно быть уже занято деревом или фонарём
+						if g and spotFree(x, z, footRadius) then
+							local model = tmpl:Clone()
+							model:ScaleTo(scale)
+							plantOnGround(model, tmpl, x, z, g.Y, CEM_YAW, scale, 0) -- разворот ОДИН на всех: ряды параллельны
+							occupy(x, z, footRadius)
+							local tone = stoneTone()
+							for _, part in model:GetDescendants() do
+								if part:IsA("BasePart") then
+									part.Anchored = true
+									part.CanCollide = true
+									part.CollisionGroup = "Obstacles"
+									part.CastShadow = false
+									part.Color = tone
+								end
+							end
+							model.Parent = mapFolder
+							nCemetery += 1
+							table.insert(cemeterySpots, { x = x, z = z, y = g.Y, r = footRadius })
+							-- широкий памятник забирает соседние ячейки решётки целиком
+							nextFreeCol = col + math.max(1, math.ceil((2 * footRadius + PLOT_GAP) / PLOT_STEP))
+						end
 					end
 				end
+				x += PLOT_STEP
 			end
-			-- и место не должно быть уже занято деревом или фонарём
-			if g and spotFree(cx, z, footRadius) then
-				local model = tmpl:Clone()
-				model:ScaleTo(scale)
-				plantOnGround(model, tmpl, cx, z, g.Y, CEM_YAW, scale, 0) -- разворот ОДИН на всех: ряды параллельны
-				occupy(cx, z, footRadius)
-				local tone = stoneTone()
-				for _, part in model:GetDescendants() do
-					if part:IsA("BasePart") then
-						part.Anchored = true
-						part.CanCollide = true
-						part.CollisionGroup = "Obstacles"
-						part.CastShadow = false
-						part.Color = tone
-					end
-				end
-				model.Parent = mapFolder
-				nCemetery += 1
-				table.insert(cemeterySpots, { x = cx, z = z, y = g.Y, r = footRadius })
-			end
-			x = cx + half
 		end
-		z += 2 * rowDepth + PLOT_ROW_GAP
-		if rowDepth == 0 then
-			z += PLOT_MIN_STEP -- пустой ряд (весь на трассе) — не зацикливаемся
-		end
+		z += PLOT_ROW_STEP
 	end
 end
 
@@ -823,8 +859,13 @@ do
 		local ROAD_HALF = GameConfig.Map.RoadWidth / 2
 		local STEP = 12 -- шаг обхода осевой, studs
 		local ALLEY_GAP = 26 -- шаг деревьев в аллее
-		local LAMP_GAP = 150 -- шаг фонарей вдоль дороги, studs
-		local LAMP_OFFSET = 4 -- от кромки полотна: фонарь стоит У ДОРОГИ, не в поле
+		local LAMP_GAP = 120 -- шаг фонарей вдоль дороги, studs
+		-- От ОСЕВОЙ до столба = ROAD_HALF + это. Было 4, и все 26 фонарей молча сносила
+		-- чистка дороги (она бьёт всё ближе ROAD_HALF + 6) — на карте не осталось ни
+		-- одного. Теперь фонарь вынесен за радиус чистки и вдобавок помечен `Roadside`,
+		-- а его подошва проверяется кольцом: полотно шире номинала (замер 31.07: кромка
+		-- до 24.0 при ROAD_HALF = 22.4), и по одному лучу в центр это не поймать.
+		local LAMP_OFFSET = 6
 		local LAMP_SCALE = 1.8 -- шаблон 9.5 studs -> ~17: столб, а не пенёк
 		local BEND_DEG = 3.2 -- поворот на шаг круче этого = изгиб
 		local STRAIGHT_DEG = 1.1 -- положе этого = прямая
@@ -909,7 +950,18 @@ do
 			if not lamp or not g then
 				return false
 			end
+			-- Кольцо по подошве: столб не должен зацепить полотно даже краем.
+			local footR = measureFootprint(lamp).baseRadius * LAMP_SCALE
+			for a = 0, 315, 45 do
+				local rad = math.rad(a)
+				if not grassPosition(spot.X + math.cos(rad) * footR, spot.Y + math.sin(rad) * footR) then
+					return false
+				end
+			end
 			local model = lamp:Clone()
+			-- Фонарь стоит у обочины НАМЕРЕННО и промерен по подошве — чистка дороги
+			-- (она идёт последней и сносит всё близкое к осевой) обязана его пропустить.
+			model:SetAttribute("Roadside", true)
 			model:ScaleTo(LAMP_SCALE) -- ~17 studs: фонарь должен нависать над полотном
 			plantOnGround(model, lamp, spot.X, spot.Y, g.Y, RNG:NextNumber(0, 360), LAMP_SCALE, 0)
 			occupy(spot.X, spot.Y, measureFootprint(lamp).baseRadius * LAMP_SCALE)
@@ -1002,16 +1054,26 @@ end
 -- Поэтому траву сеем НЕ по площади, а по списку реально поставленных камней, и
 -- только у каждого N-го. Пучок — три травинки одной моделью: цена всей затеи
 -- порядка трёх сотен мелких деталей вместо прежних полутора тысяч.
-local GRASS_EVERY = 7 -- у каждого N-го надгробия
-local GRASS_MAX = 110 -- жёсткий потолок: кадр важнее плотности
+-- ПЛОТНОСТЬ ПОДНЯТА 2026-07-31 (юзер: «траву забыл добавить к надгробьям»). Трава
+-- была на месте — 80 пучков, — но на 582 камня это один куст на семь могил: с дороги
+-- такое не читается вовсе, и выглядит как «забыл». Теперь у каждого второго камня, а
+-- у крупных участков — два пучка с разных сторон. Потолок поднят соразмерно: пучок
+-- это три плоские дощечки без теней, весь ковёр стоил 130 треугольников в кадре
+-- против 129 тысяч у самих надгробий.
+local GRASS_EVERY = 2 -- у каждого N-го надгробия
+local GRASS_MAX = 420 -- жёсткий потолок: кадр важнее плотности
 local grassCount = 0
 do
 	local function makeTuft(scale: number): Model
 		local m = Instance.new("Model")
 		m.Name = "GraveGrass"
 		local root: BasePart? = nil
-		for _ = 1, 3 do
-			local h = RNG:NextNumber(1.4, 3.2) * scale
+		-- Замер 31.07 крупным планом: пучок был из трёх лезвий шириной 0.12 studs и в
+		-- тон полю — на экране это игла в пиксель, которой не видно уже с трёх метров
+		-- (юзер: «траву забыл добавить»). Лезвий четыре, они втрое шире и заметно суше
+		-- по цвету: трава у камня обязана читаться на фоне грунта.
+		for _ = 1, 4 do
+			local h = RNG:NextNumber(1.7, 3.6) * scale
 			local blade = Instance.new("WedgePart")
 			blade.Anchored = true
 			blade.CanCollide = false
@@ -1019,15 +1081,15 @@ do
 			blade.CanTouch = false
 			blade.CastShadow = false
 			blade.Material = Enum.Material.Grass
-			-- в тон полю (жухлый оливковый), но чуть живее — иначе сливается с грунтом
+			-- суше и светлее поля: поле = RGB(78,82,58), в тон с ним трава пропадала
 			blade.Color = Color3.fromRGB(
-				RNG:NextInteger(64, 96),
-				RNG:NextInteger(78, 104),
-				RNG:NextInteger(40, 58)
+				RNG:NextInteger(104, 138),
+				RNG:NextInteger(110, 142),
+				RNG:NextInteger(54, 78)
 			)
-			blade.Size = Vector3.new(0.12, h, RNG:NextNumber(0.3, 0.6) * scale)
+			blade.Size = Vector3.new(RNG:NextNumber(0.3, 0.5) * scale, h, RNG:NextNumber(0.5, 0.9) * scale)
 			local ang = math.rad(RNG:NextNumber(0, 360))
-			local off = RNG:NextNumber(0, 0.5) * scale
+			local off = RNG:NextNumber(0, 0.7) * scale
 			blade.CFrame = CFrame.new(math.cos(ang) * off, h / 2, math.sin(ang) * off)
 				* CFrame.Angles(0, ang, 0)
 				* CFrame.Angles(0, 0, math.rad(RNG:NextNumber(4, 22)))
@@ -1045,19 +1107,26 @@ do
 		if i % GRASS_EVERY ~= 0 then
 			continue
 		end
-		-- прижимаем пучок к подножию камня, со случайной стороны
-		local a = math.rad(RNG:NextNumber(0, 360))
-		local d = spot.r * RNG:NextNumber(0.55, 0.95)
-		local gx, gz = spot.x + math.cos(a) * d, spot.z + math.sin(a) * d
-		local g = grassPosition(gx, gz)
-		if not g then
-			continue -- вылезли на полотно
+		-- у широкого участка подножие длиннее — там второй пучок с другой стороны
+		local tufts = spot.r >= 3.2 and 2 or 1
+		local a0 = RNG:NextNumber(0, 360)
+		for k = 1, tufts do
+			if grassCount >= GRASS_MAX then
+				break
+			end
+			-- прижимаем пучок к подножию камня, со случайной стороны
+			local a = math.rad(a0 + (k - 1) * RNG:NextNumber(110, 250))
+			local d = spot.r * RNG:NextNumber(0.55, 0.95)
+			local gx, gz = spot.x + math.cos(a) * d, spot.z + math.sin(a) * d
+			local g = grassPosition(gx, gz)
+			if g then
+				local tuft = makeTuft(RNG:NextNumber(0.9, 1.6))
+				-- пучок строится от нуля вверх, поэтому сажаем пивотом на грунт
+				tuft:PivotTo(CFrame.new(gx, g.Y, gz) * CFrame.Angles(0, RNG:NextNumber(0, 6.28), 0))
+				tuft.Parent = mapFolder
+				grassCount += 1
+			end
 		end
-		local tuft = makeTuft(RNG:NextNumber(0.9, 1.6))
-		-- пучок строится от нуля вверх, поэтому сажаем пивотом на грунт
-		tuft:PivotTo(CFrame.new(gx, g.Y, gz) * CFrame.Angles(0, RNG:NextNumber(0, 6.28), 0))
-		tuft.Parent = mapFolder
-		grassCount += 1
 	end
 end
 
@@ -1071,6 +1140,9 @@ do
 	local clearR2 = clearR * clearR
 	local removed = 0
 	for _, m in mapFolder:GetChildren() do
+		if m:GetAttribute("Roadside") then
+			continue -- фонари вдоль дороги: поставлены у обочины осознанно, подошва промерена
+		end
 		local ok, piv = pcall(function()
 			return m:GetPivot().Position
 		end)
