@@ -262,17 +262,6 @@ function ZombieAI.PlayDeath(zombie: Model)
 	-- макушку в сторону push (проверено по правилу правой руки для up × push).
 	local tipAxis = Vector3.yAxis:Cross(push)
 
-	local _, bbSize = zombie:GetBoundingBox()
-	local feetY = startPivot.Position.Y - bbSize.Y / 2
-	local pivotPoint = Vector3.new(startPivot.Position.X, feetY + DEATH_PIVOT_LIFT, startPivot.Position.Z)
-
-	-- Положение всей модели: поворот на angle вокруг мировой точки pivotPoint
-	-- плюс просадка drop по мировой вертикали.
-	local function bodyCF(angle: number, drop: number): CFrame
-		local spin = CFrame.new(pivotPoint) * CFrame.fromAxisAngle(tipAxis, angle) * CFrame.new(-pivotPoint)
-		return CFrame.new(0, -drop, 0) * spin * startPivot
-	end
-
 	-- Самая низкая точка тела ПРЯМО СЕЙЧАС, по реальным деталям.
 	--
 	-- Раньше тут стоял габарит всей модели (`GetBoundingBox`), и юзер справедливо
@@ -301,6 +290,26 @@ function ZombieAI.PlayDeath(zombie: Model)
 		return low, lx, lz
 	end
 
+	-- ОСЬ НАКЛОНА — У СТОП, и стопы меряем по реальным деталям.
+	--
+	-- Юзер: «ощущение, что пивот при падении не в районе ног, а где-то в центре тела».
+	-- Так и было: низ брался как `pivot.Y - bbSize.Y/2` по габаритной коробке модели, а
+	-- она (а) центрирована по ПИВОТУ, а не по телу, и (б) снимается в момент смерти,
+	-- когда у зомби часто задраны в замахе руки — коробка растёт ВВЕРХ, половина её
+	-- высоты растёт вместе с ней, и расчётный «низ» уезжал от стоп на эту половину.
+	-- Ось выходила то выше, то ниже настоящих ног, и тело крутилось вокруг живота.
+	-- Теперь низ — это честная нижняя точка деталей, та же, что и для посадки на грунт.
+	local measuredLow = lowestNow()
+	local feetY = measuredLow < math.huge and measuredLow or startPivot.Position.Y - 3
+	local pivotPoint = Vector3.new(startPivot.Position.X, feetY + DEATH_PIVOT_LIFT, startPivot.Position.Z)
+
+	-- Положение всей модели: поворот на angle вокруг мировой точки pivotPoint
+	-- плюс просадка drop по мировой вертикали.
+	local function bodyCF(angle: number, drop: number): CFrame
+		local spin = CFrame.new(pivotPoint) * CFrame.fromAxisAngle(tipAxis, angle) * CFrame.new(-pivotPoint)
+		return CFrame.new(0, -drop, 0) * spin * startPivot
+	end
+
 	-- Земля под телом.
 	--
 	-- Юзер: «зомби зависают в воздухе, не долетая до земли». Раньше грунт брался ОДНИМ
@@ -314,8 +323,17 @@ function ZombieAI.PlayDeath(zombie: Model)
 	-- Поэтому: машины из луча исключены совсем, а грунт ищется КАЖДЫЙ КАДР и под
 	-- текущей нижней точкой тела. Луч бьём с запасом сверху и вниз до самого низа карты,
 	-- чтобы не промахнуться ни по высоко подброшенному телу, ни по яме.
+	-- ГЛАВНОЕ: луч бьём ОТ ЛИЦА ЗОМБИ, группой `Zombies`. Замер 31.07 над первым же
+	-- надгробием: луч группой `Default` упирается в камень на Y=6.28, а группой
+	-- `Zombies` проходит сквозь него и находит землю на Y=4.02. Декор живёт в группе
+	-- `Obstacles`, и она держит машину, но НЕ зомби (Bootstrap: Zombies↔Obstacles =
+	-- false) — то есть камень зомби не опора, сквозь него он ходит. А вылезают зомби
+	-- ровно у надгробий, поэтому «упор в камень» был не редкостью, а нормой: тело
+	-- укладывалось на крышку надгробия и оставалось висеть над землёй на его высоту.
+	-- Машины группу не спасают (Zombies↔Vehicles = true), их исключаем списком.
 	local groundParams = RaycastParams.new()
 	groundParams.FilterType = Enum.RaycastFilterType.Exclude
+	groundParams.CollisionGroup = "Zombies"
 	local ignore: { Instance } = { zombie }
 	for _, v in CollectionService:GetTagged("PlayerVehicle") do
 		table.insert(ignore, v)
