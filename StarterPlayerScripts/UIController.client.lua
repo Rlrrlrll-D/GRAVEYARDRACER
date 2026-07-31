@@ -208,20 +208,19 @@ type RacePayload = {
 -- = 1.5 в этом плейсе): пиксель UI ярче 1.0 не бывает, потому у плашки и не было
 -- ореола, сколько её ни высветляй.
 --
--- Поэтому силуэт снят с исходника (ReplicatedStorage.SkullShape: 208 прямоугольников,
--- полученных из D:\VECTOR\skull.svg — который, вопреки расширению, оказался обёрткой
--- вокруг встроенного PNG) и собирается в МЕШ прямо на клиенте через EditableMesh.
--- Загружать ассет не нужно, верификация не нужна — проверено в этом плейсе.
+-- Поэтому силуэт лежит геометрией (ReplicatedStorage.SkullShape: 212 вершин и 214
+-- треугольников, обведены в Blender по альфе исходного PNG) и собирается в МЕШ прямо
+-- на клиенте через EditableMesh. Загружать ассет не нужно, верификация не нужна —
+-- проверено в этом плейсе.
 --
 -- ПОЧЕМУ НА КЛИЕНТЕ, а не на сервере: меш, построенный из EditableMesh, не
 -- реплицируется — сервер собрал бы его себе, а игроки увидели бы пустоту. Сервер
 -- поэтому держит только невидимый якорь (RaceScene), а вид навешивает каждый клиент.
 local AssetService = game:GetService("AssetService")
--- Бело-голубой (просьба юзера), но с ТОЙ ЖЕ глубиной провала, что у стрелок старта:
--- у них (110,255,170), то есть младший канал = 110 из 255. Именно провал по одному
--- каналу и даёт «неоновость» — почти белый неон читается блёкло. Здесь тот же
--- минимум 110, только развёрнутый в синее.
-local SKULL_COLOR = Color3.fromRGB(110, 190, 255)
+-- Цвет ТОТ ЖЕ, что у стрелок старта (BuildTemplates: 110,255,170) — юзер просил
+-- «и цвет сделай как у стрелок и все остальные параметры». Бело-голубой вариант
+-- (110,190,255) остался в истории: вернуть — поменять эту строку.
+local SKULL_COLOR = Color3.fromRGB(110, 255, 170)
 local SKULL_WIDTH = 2.6 -- ширина плашки в studs
 local plateTemplate: BasePart? = nil
 local plateTried = false
@@ -240,28 +239,20 @@ local function buildPlateTemplate(): BasePart?
 	end
 	local ok, part = pcall(function()
 		local em = AssetService:CreateEditableMesh()
-		local gw, gh = shape.GridW, shape.GridH
-		local step = 1 / gw
-		local halfT = step * 2 -- толщина плиты: тонкая, но не нулевая
-		for _, r in shape.Rects do
-			local x0 = (r[1] - gw / 2) * step
-			local x1 = (r[1] + r[3] - gw / 2) * step
-			-- в сетке Y растёт ВНИЗ, в мире — вверх
-			local y0 = (gh / 2 - (r[2] + r[4])) * step
-			local y1 = (gh / 2 - r[2]) * step
-			for _, z in { halfT, -halfT } do
-				local a = em:AddVertex(Vector3.new(x0, y0, z))
-				local b = em:AddVertex(Vector3.new(x1, y0, z))
-				local c = em:AddVertex(Vector3.new(x1, y1, z))
-				local d = em:AddVertex(Vector3.new(x0, y1, z))
-				if z > 0 then -- лицевая сторона против часовой, тыльная наоборот
-					em:AddTriangle(a, b, c)
-					em:AddTriangle(a, c, d)
-				else
-					em:AddTriangle(a, c, b)
-					em:AddTriangle(a, d, c)
-				end
-			end
+		local halfT = 0.012 -- полутолщина плиты в долях ширины: тонкая, но не нулевая
+		-- Обе стороны из одного контура: вершины дублируются на +z и -z, треугольники
+		-- у тыльной стороны идут в обратном порядке, иначе она отсекается по нормали.
+		-- Y с минусом: в Blender строки картинки идут снизу вверх, обводка это уже
+		-- учитывала — и в мире череп вставал вверх ногами (челюсть сверху). Намотке
+		-- зеркало не вредит: каждый треугольник и так добавляется в обе стороны.
+		local front, back = {}, {}
+		for i, v in shape.Verts do
+			front[i] = em:AddVertex(Vector3.new(v[1], -v[2], halfT))
+			back[i] = em:AddVertex(Vector3.new(v[1], -v[2], -halfT))
+		end
+		for _, t in shape.Tris do
+			em:AddTriangle(front[t[1]], front[t[2]], front[t[3]])
+			em:AddTriangle(back[t[1]], back[t[3]], back[t[2]])
 		end
 		return AssetService:CreateMeshPartAsync(Content.fromObject(em))
 	end)
