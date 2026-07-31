@@ -323,6 +323,61 @@ for _, data in MapLayout.DeadTrees do
 	end
 end
 
+-- // Расстояние до осевой трассы -----------------------------------------------
+-- Нужно, чтобы деревья не лезли к полотну: рейкаст «под ногами трава» этого не
+-- ловит — в 23 studs от осевой трава есть, а крона уже висит над дорогой.
+local TREE_ROAD_CLEAR = 34 -- ближе этого к осевой деревьев нет: полотно 22.4 + запас
+local TREE_SINK = 0.35 -- на столько топим ствол в грунт, чтобы не читался шов
+local TRACK_PTS: { Vector2 } = {}
+do
+	local poly = MapLayout.TrackPolyline
+	local scale = MapLayout.Scale or 1
+	if type(poly) == "table" then
+		for _, p in poly do
+			table.insert(TRACK_PTS, Vector2.new(p.X * scale, p.Y * scale))
+		end
+	end
+end
+local function trackDistance(x: number, z: number): number
+	local best = math.huge
+	local n = #TRACK_PTS
+	if n == 0 then
+		return best
+	end
+	local p = Vector2.new(x, z)
+	for i = 1, n do
+		local a, b = TRACK_PTS[i], TRACK_PTS[i % n + 1]
+		local ab = b - a
+		local len2 = ab:Dot(ab)
+		local t = len2 > 0 and math.clamp((p - a):Dot(ab) / len2, 0, 1) or 0
+		local d = (p - (a + ab * t)).Magnitude
+		if d < best then
+			best = d
+		end
+	end
+	return best
+end
+
+-- // Посадка «по стволу», а не по пивоту ---------------------------------------
+-- У мешей деревьев пивот смещён от самого ствола (у `DeadTree_B` на 2.2 studs, а с
+-- масштабом до 3.6 это ~8). Из-за этого проверка «под точкой трава» относилась к
+-- пустому месту, а ствол вставал в стороне — иногда прямо на полотно. Поэтому после
+-- посадки сдвигаем модель так, чтобы в заданную точку попал ЦЕНТР МАССЫ деталей.
+local function centerOnTrunk(model: Model, x: number, z: number)
+	local sum, n = Vector3.zero, 0
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") then
+			sum += d.Position
+			n += 1
+		end
+	end
+	if n == 0 then
+		return
+	end
+	local c = sum / n
+	model:PivotTo(model:GetPivot() + Vector3.new(x - c.X, 0, z - c.Z))
+end
+
 -- // Процедурная рассадка декора по траве (плотно, случайный размер/поворот) ---
 -- Чистый декор без тегов (не спавнит зомби, не мешает физике машины на дороге).
 local function scatter(name: string, count: number, sMin: number, sMax: number, minStartDist: number?): number
@@ -335,6 +390,12 @@ local function scatter(name: string, count: number, sMin: number, sMax: number, 
 			continue
 		end
 		if minStartDist and Vector2.new(x, z).Magnitude < minStartDist then
+			continue
+		end
+		-- Деревья держим ПОДАЛЬШЕ от полотна: 8 деревьев прошлой сборки стояли в
+		-- 20-29 studs от осевой при полуширине дороги 22.4 — то есть кроной над
+		-- трассой, и на широком вылете машина влетала в ствол.
+		if name == "DeadTree" and trackDistance(x, z) < TREE_ROAD_CLEAR then
 			continue
 		end
 		local g = grassPosition(x, z)
@@ -351,6 +412,14 @@ local function scatter(name: string, count: number, sMin: number, sMax: number, 
 			paintTree(model) -- каждое дерево — свой случайный тёмно-коричневый
 		end
 		dropToGround(model, g, RNG:NextNumber(0, 360))
+		centerOnTrunk(model, x, z) -- ствол в проверенную точку, а не пивот меша
+		-- после сдвига пересаживаем на землю и топим на палец: у самой земли шов
+		-- между стволом и травой иначе читается как «дерево висит»
+		local g2 = grassPosition(model:GetPivot().Position.X, model:GetPivot().Position.Z)
+		if g2 then
+			model:PivotTo(model:GetPivot() + Vector3.new(0, g2.Y - g.Y, 0))
+		end
+		model:PivotTo(model:GetPivot() - Vector3.new(0, TREE_SINK, 0))
 		for _, part in model:GetDescendants() do
 			if part:IsA("BasePart") then
 				part.Anchored = true
@@ -552,6 +621,11 @@ do
 			if not clearOfLandmarks(x, z) then
 				return false
 			end
+			-- аллея идёт вдоль полотна, поэтому здесь тоже держим дистанцию: точка
+			-- задана от осевой, но пивот меша смещён, и без проверки ствол сползает к дороге
+			if name == "DeadTree" and trackDistance(x, z) < TREE_ROAD_CLEAR then
+				return false
+			end
 			local g = grassPosition(x, z)
 			if not g then
 				return false -- дорога, яма или край карты
@@ -566,6 +640,15 @@ do
 				paintTree(model)
 			end
 			dropToGround(model, g, RNG:NextNumber(0, 360))
+			if name == "DeadTree" then
+				centerOnTrunk(model, x, z)
+				local p = model:GetPivot().Position
+				local g2 = grassPosition(p.X, p.Z)
+				if g2 then
+					model:PivotTo(model:GetPivot() + Vector3.new(0, g2.Y - g.Y, 0))
+				end
+				model:PivotTo(model:GetPivot() - Vector3.new(0, TREE_SINK, 0))
+			end
 			for _, part in model:GetDescendants() do
 				if part:IsA("BasePart") then
 					part.Anchored = true
@@ -579,6 +662,7 @@ do
 
 		-- Фонарь ставим У САМОЙ ДОРОГИ и высоким: прежние стояли в 9 studs от кромки и
 		-- ростом 9.5 studs — юзер справедливо назвал их низкими и стоящими не у дороги.
+		local lampIndex = 0
 		local function putLamp(at: Vector2, outward: Vector2): boolean
 			local spot = at + outward * (ROAD_HALF + LAMP_OFFSET)
 			local lamp = getTemplateVariant("Lamp")
@@ -597,7 +681,14 @@ do
 				light.Range = 34 -- выше фонарь — шире пятно
 				light.Brightness = 1.4
 				light.Parent = holder
-				CollectionService:AddTag(light, "FlickerLight")
+				-- Мерцает только каждый третий: `FlickerLight` крутит яркость НА СЕРВЕРЕ,
+				-- и каждая смена реплицируется всем клиентам, а под unified-светом ещё и
+				-- пересчитывается. Двадцать шесть мигающих фонарей — постоянный поток
+				-- обновлений на ровном месте; для атмосферы хватает трети.
+				lampIndex += 1
+				if lampIndex % 3 == 0 then
+					CollectionService:AddTag(light, "FlickerLight")
+				end
 			end
 			for _, part in model:GetDescendants() do
 				if part:IsA("BasePart") then
@@ -753,11 +844,22 @@ do
 	print(("[MapBuilder] Дорога очищена: снято %d объектов с полотна."):format(removed))
 end
 
--- // ОПТИМИЗАЦИЯ теней (2026-07-25): под Future каждый CastShadow-part дорог
--- (были сотни casters → фризы). Тени оставляем ТОЛЬКО деревьям (атмосферные
--- силуэты); весь прочий декор — без теней.
+-- // ОПТИМИЗАЦИЯ теней (2026-07-25, ужато 2026-07-31): каждый CastShadow-part
+-- дорог, а деревьев стало 281 вместо прежних 60 — замер показал ровно 281 теневую
+-- деталь на сцене против трёх десятков у всего остального. Тень оставляем только
+-- деревьям ВДОЛЬ ТРАССЫ: их силуэт игрок и видит, а тени дальнего леса он не
+-- увидит никогда — они лишь греют видеокарту (жалоба «шумят кулера»).
+local SHADOW_TRACK_RANGE = 45
+local shadowTrees = 0
 for _, m in mapFolder:GetChildren() do
-	local keepShadow = m.Name:match("^DeadTree") ~= nil
+	local keepShadow = false
+	if m.Name:match("^DeadTree") then
+		local p = m:GetPivot().Position
+		keepShadow = trackDistance(p.X, p.Z) < SHADOW_TRACK_RANGE
+		if keepShadow then
+			shadowTrees += 1
+		end
+	end
 	for _, d in m:GetDescendants() do
 		if d:IsA("BasePart") then
 			d.CastShadow = keepShadow
@@ -807,6 +909,19 @@ local function buildPerimeterFence(half: number, baseY: number)
 				-- юнионы шаблона уже RenderFidelity=Performance (задано в Studio: рантайм-
 				-- скрипт НЕ может писать RenderFidelity — capability Plugin); клон наследует.
 				local piece = tmpl:Clone()
+				-- ШИПЫ ДОЛОЙ (2026-07-31, жалоба «шумят кулера»). Замер по кадру с трассы:
+				-- ограда давала 81 264 tris из 238 928, и 69 720 из них — два юниона
+				-- декоративных шипов поверху (`Small Spikes` 36 540 + `Large Spikes`
+				-- 33 180). Это 29% треугольников всего кадра ради узора, который с 60-90
+				-- studs читается как мохнатая линия. Столбы, рейки и прутья остаются —
+				-- силуэт ограды сохраняется. Вернуть — убрать этот блок.
+				for _, junk in { "Small Spikes", "Large Spikes" } do
+					local part = piece:FindFirstChild(junk, true)
+					while part do
+						part:Destroy()
+						part = piece:FindFirstChild(junk, true)
+					end
+				end
 				piece:PivotTo(CFrame.new(fx + dx * t, baseY, fz + dz * t) * CFrame.Angles(0, rotY, 0))
 				piece.Parent = fence
 			end
@@ -860,6 +975,6 @@ end
 print(
 	`[MapBuilder] Расставлено: {#MapLayout.Hazards} hazard'ов, {#MapLayout.Graves} могил, {#MapLayout.Lamps} фонарей, {#MapLayout.DeadTrees} деревьев (по карте). `
 		.. `Кладбище рядами: {nCemetery} надгробий (шаг {CEM_COL}×{CEM_ROW}, 7 типов). `
-		.. `Деревья: {nTree} по площади + {nAlleyTrees} в аллеях. Фонарей у дороги: {nClusterLamps}. `
+		.. `Деревья: {nTree} по площади + {nAlleyTrees} в аллеях (тени только у {shadowTrees} вдоль трассы). Фонарей у дороги: {nClusterLamps}. `
 		.. `Травы: {grassCount} пучков. Ограда по периметру ±335.`
 )
