@@ -254,12 +254,207 @@ for _, data in (false and MapLayout.Lamps or {}) :: { any } do
 	end
 end
 
+-- // ПОДОШВА ШАБЛОНА: где модель на самом деле касается земли ------------------
+-- Жалоба юзера: «деревья висят над землёй». Замер 2026-07-31 объяснил, почему:
+-- `dropToGround` сажает на грунт нижний угол ГАБАРИТНОЙ КОРОБКИ, а шаблоны деревьев
+-- НАКЛОНЕНЫ (DeadTree на 15°, DeadTree_B на 18° — наклон вшит в сам шаблон). У
+-- наклонённой коробки нижний угол — пустое место: он уходил в грунт, а ствол при
+-- этом висел на 2.2 studs выше. Плотный скан подошвы одного дерева: 0 из 169
+-- колонн касались земли.
+--
+-- Поэтому подошву меряем ЛУЧАМИ по самому мешу, а не по коробке. Меряем ОДИН РАЗ
+-- на шаблон (масштаб 1, без поворота) и переносим на клоны: масштаб множит смещение,
+-- рыскание вокруг Y его поворачивает, а вертикаль от рыскания не зависит.
+-- Заодно скан даёт, ГДЕ у модели ствол: самая низкая колонна — это и есть точка
+-- опоры, и сажать модель надо именно ею, а не пивотом (у мешей пивот уезжает от
+-- ствола) и не центром деталей (у дерева это середина кроны).
+local PROBE_ORIGIN = Vector3.new(0, 5000, 0) -- промерочная площадка высоко над картой
+local PROBE_GRID = 6 -- 13x13 колонн на подошву: хватает, чтобы поймать ствол
+
+export type Footprint = {
+	base: Vector3, -- точка опоры относительно пивота (масштаб 1, без поворота)
+	radius: number, -- горизонтальный радиус ВСЕЙ модели, studs (масштаб 1)
+	baseRadius: number, -- радиус пятна КАСАНИЯ земли: ствол, а не крона
+}
+-- Насколько выше самой низкой точки колонна ещё считается «подошвой». Кроне дерева
+-- до земли далеко, поэтому в полосу попадает только комель — а у надгробия, наоборот,
+-- вся плита. Ровно это и нужно: у дерева занято место под стволом (крона пусть
+-- нависает над камнями, это красиво), у надгробия — весь его участок.
+local BASE_BAND = 2.0
+local footprintCache: { [Instance]: Footprint } = {}
+
+-- Нижний угол ориентированной коробки детали в мировых координатах.
+local function partBottom(p: BasePart): number
+	local cf, half = p.CFrame, p.Size / 2
+	return cf.Position.Y
+		- (
+			math.abs(cf.RightVector.Y) * half.X
+			+ math.abs(cf.UpVector.Y) * half.Y
+			+ math.abs(cf.LookVector.Y) * half.Z
+		)
+end
+
+local function measureFootprint(template: Model): Footprint
+	local cached = footprintCache[template]
+	if cached then
+		return cached
+	end
+
+	local probe = template:Clone()
+	probe:PivotTo(CFrame.new(PROBE_ORIGIN)) -- строго без поворота: меряем «как нарисовано»
+	probe.Parent = workspace
+
+	-- габарит: радиус для расстановки + рамка, по которой пускаем колонны
+	local minX, maxX, minZ, maxZ, boxBottom = math.huge, -math.huge, math.huge, -math.huge, math.huge
+	for _, p in probe:GetDescendants() do
+		if p:IsA("BasePart") then
+			local h = math.max(p.Size.X, p.Size.Z) / 2
+			minX = math.min(minX, p.Position.X - h)
+			maxX = math.max(maxX, p.Position.X + h)
+			minZ = math.min(minZ, p.Position.Z - h)
+			maxZ = math.max(maxZ, p.Position.Z + h)
+			boxBottom = math.min(boxBottom, partBottom(p))
+		end
+	end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { probe }
+	-- Луч уважает группы столкновений, а декор живёт в Obstacles: без явной группы
+	-- промер бы молча ничего не нашёл. Меряем от лица самого декора.
+	params.CollisionGroup = "Obstacles"
+
+	local best, bestX, bestZ = math.huge, PROBE_ORIGIN.X, PROBE_ORIGIN.Z
+	local hits: { { x: number, z: number, y: number } } = {}
+	local from = boxBottom - 10
+	local height = (maxX - minX) + (maxZ - minZ) + 400 -- заведомо выше модели
+	local stepX = (maxX - minX) / (PROBE_GRID * 2)
+	local stepZ = (maxZ - minZ) / (PROBE_GRID * 2)
+	for ix = 0, PROBE_GRID * 2 do
+		for iz = 0, PROBE_GRID * 2 do
+			local wx = minX + stepX * ix
+			local wz = minZ + stepZ * iz
+			local hit = workspace:Raycast(Vector3.new(wx, from, wz), Vector3.new(0, height, 0), params)
+			if hit then
+				table.insert(hits, { x = wx, z = wz, y = hit.Position.Y })
+				if hit.Position.Y < best then
+					best, bestX, bestZ = hit.Position.Y, wx, wz
+				end
+			end
+		end
+	end
+
+	if best == math.huge then
+		-- Меш не нащупался (например, CollisionFidelity выродился в ничто) — честно
+		-- откатываемся на коробку: хуже, чем было, от этого не станет.
+		best, bestX, bestZ = boxBottom, PROBE_ORIGIN.X, PROBE_ORIGIN.Z
+		warn(`[MapBuilder] Подошва {template.Name} не нащупалась лучами — сажаю по коробке.`)
+	end
+
+	-- Радиус пятна касания: самая дальняя колонна, которая всё ещё «на подошве».
+	-- Полшага сетки добавляем на грубость промера, чтобы не занизить.
+	local baseRadius = 0
+	for _, h in hits do
+		if h.y <= best + BASE_BAND then
+			local dx, dz = h.x - bestX, h.z - bestZ
+			baseRadius = math.max(baseRadius, math.sqrt(dx * dx + dz * dz))
+		end
+	end
+	baseRadius += math.max(stepX, stepZ) / 2
+
+	local fp: Footprint = {
+		base = Vector3.new(bestX, best, bestZ) - PROBE_ORIGIN,
+		radius = math.max(maxX - minX, maxZ - minZ) / 2,
+		baseRadius = baseRadius,
+	}
+	probe:Destroy()
+	footprintCache[template] = fp
+	return fp
+end
+
+-- Посадить клон так, чтобы ЕГО ТОЧКА ОПОРЫ попала в (x, groundY - sink, z).
+-- Возвращает фактический горизонтальный радиус (для проверки занятости места).
+local function plantOnGround(
+	model: Model,
+	template: Model,
+	x: number,
+	z: number,
+	groundY: number,
+	yawDeg: number,
+	scale: number,
+	sink: number
+): number
+	local fp = measureFootprint(template)
+	local yaw = CFrame.Angles(0, math.rad(yawDeg), 0)
+	local pivot = model:GetPivot()
+	-- сначала разворот вокруг собственной вертикали, наклон шаблона сохраняем
+	model:PivotTo(CFrame.new(pivot.Position) * yaw * pivot.Rotation)
+	-- затем сдвиг: опора шаблона, повёрнутая и промасштабированная, должна лечь в точку
+	local offset = yaw * (fp.base * scale)
+	local cur = model:GetPivot()
+	model:PivotTo(
+		cur
+			+ Vector3.new(
+				x - (cur.Position.X + offset.X),
+				(groundY - sink) - (cur.Position.Y + offset.Y),
+				z - (cur.Position.Z + offset.Z)
+			)
+	)
+	return fp.radius * scale
+end
+
+-- // ЗАНЯТОСТЬ МЕСТА: чтобы декор не пророс друг сквозь друга ------------------
+-- Жалоба юзера: «некоторые деревья пробивают надгробья». Замер: 190 пересечений
+-- ствол-камень из 281 дерева. Причина структурная — деревья и кладбище ставились
+-- двумя независимыми проходами, ни один не знал о другом. Теперь оба пишут занятые
+-- пятна в общую сетку и спрашивают её перед посадкой.
+local OCC_CELL = 16 -- studs: ячейка пространственного хеша
+local occupancy: { [string]: { { x: number, z: number, r: number } } } = {}
+
+local function occKey(x: number, z: number): string
+	return `{math.floor(x / OCC_CELL)}:{math.floor(z / OCC_CELL)}`
+end
+
+local function spotFree(x: number, z: number, r: number): boolean
+	local cells = math.ceil((r + OCC_CELL) / OCC_CELL)
+	for cx = -cells, cells do
+		for cz = -cells, cells do
+			local bucket = occupancy[occKey(x + cx * OCC_CELL, z + cz * OCC_CELL)]
+			if bucket then
+				for _, o in bucket do
+					local dx, dz = x - o.x, z - o.z
+					local need = r + o.r
+					if dx * dx + dz * dz < need * need then
+						return false
+					end
+				end
+			end
+		end
+	end
+	return true
+end
+
+local function occupy(x: number, z: number, r: number)
+	local key = occKey(x, z)
+	local bucket = occupancy[key]
+	if not bucket then
+		bucket = {}
+		occupancy[key] = bucket
+	end
+	table.insert(bucket, { x = x, z = z, r = r })
+end
+
 -- // Детерминированный ГПСЧ для декора (одна и та же карта каждый запуск) ------
 local RNG = Random.new(20260717)
 
 -- Деревья не ставим ближе этого радиуса к старту (0,0): у выезда с дороги должно
 -- быть чисто (никакого «валежника» из чёрных деревьев), сами деревья — по карте.
 local TREE_START_CLEAR = 90
+
+-- На столько топим комель в грунт: у самой земли шов между стволом и грунтом
+-- иначе читается как «дерево висит». Объявлено здесь, а не у остальных TREE_*
+-- ниже, потому что первая же расстановка деревьев (по MapLayout) уже его просит.
+local TREE_SINK = 0.35
 
 -- Зоны, вокруг которых декор не ставим (пивот-центр, радиус-запрет).
 -- Старт/грид новой трассы (StartGate) держим чистым.
@@ -296,9 +491,11 @@ end
 
 -- // Dead trees — убраны с дороги (только на траве) + случайный размер --------
 for _, data in MapLayout.DeadTrees do
-	local model = getTemplateVariant("DeadTree")
-	model = model and model:Clone() or makePlaceholder("DeadTree", Vector3.new(1.5, 12, 1.5), Color3.fromRGB(60, 52, 44))
-	model:ScaleTo(RNG:NextNumber(0.5, 2.6))
+	local tmpl = getTemplateVariant("DeadTree")
+	local model = tmpl and tmpl:Clone()
+		or makePlaceholder("DeadTree", Vector3.new(1.5, 12, 1.5), Color3.fromRGB(60, 52, 44))
+	local scale = RNG:NextNumber(0.5, 2.6)
+	model:ScaleTo(scale)
 	paintTree(model)
 	local wx, wz = data.Position.X * MapLayout.Scale, data.Position.Y * MapLayout.Scale
 	local g = grassPosition(wx, wz)
@@ -320,7 +517,14 @@ for _, data in MapLayout.DeadTrees do
 		end
 	end
 	if g and clearOfLandmarks(g.X, g.Z) and Vector2.new(g.X, g.Z).Magnitude > TREE_START_CLEAR then -- не ставим деревья у старта/лендмарков
-		dropToGround(model, g, data.Rotation or 0)
+		if tmpl then
+			-- по промеренной подошве: у наклонённого шаблона низ коробки — пустой угол
+			local r = measureFootprint(tmpl).baseRadius * scale
+			plantOnGround(model, tmpl, g.X, g.Z, g.Y, data.Rotation or 0, scale, TREE_SINK)
+			occupy(g.X, g.Z, r)
+		else
+			dropToGround(model, g, data.Rotation or 0) -- заглушка-Part: коробка и есть меш
+		end
 		for _, part in model:GetDescendants() do
 			if part:IsA("BasePart") then
 				part.Anchored = true
@@ -336,7 +540,6 @@ end
 -- Нужно, чтобы деревья не лезли к полотну: рейкаст «под ногами трава» этого не
 -- ловит — в 23 studs от осевой трава есть, а крона уже висит над дорогой.
 local TREE_ROAD_CLEAR = 34 -- ближе этого к осевой деревьев нет: полотно 22.4 + запас
-local TREE_SINK = 0.35 -- на столько топим ствол в грунт, чтобы не читался шов
 local TRACK_PTS: { Vector2 } = {}
 do
 	local poly = MapLayout.TrackPolyline
@@ -367,25 +570,9 @@ local function trackDistance(x: number, z: number): number
 	return best
 end
 
--- // Посадка «по стволу», а не по пивоту ---------------------------------------
--- У мешей деревьев пивот смещён от самого ствола (у `DeadTree_B` на 2.2 studs, а с
--- масштабом до 3.6 это ~8). Из-за этого проверка «под точкой трава» относилась к
--- пустому месту, а ствол вставал в стороне — иногда прямо на полотно. Поэтому после
--- посадки сдвигаем модель так, чтобы в заданную точку попал ЦЕНТР МАССЫ деталей.
-local function centerOnTrunk(model: Model, x: number, z: number)
-	local sum, n = Vector3.zero, 0
-	for _, d in model:GetDescendants() do
-		if d:IsA("BasePart") then
-			sum += d.Position
-			n += 1
-		end
-	end
-	if n == 0 then
-		return
-	end
-	local c = sum / n
-	model:PivotTo(model:GetPivot() + Vector3.new(x - c.X, 0, z - c.Z))
-end
+-- Посадку «по стволу, а не по пивоту» теперь делает `plantOnGround` (см. промер
+-- подошвы выше): прежний `centerOnTrunk` целился в ЦЕНТР МАСС деталей, а у дерева
+-- это середина кроны, а не комель. Промер лучами находит точку опоры честно.
 
 -- // Процедурная рассадка декора по траве (плотно, случайный размер/поворот) ---
 -- Чистый декор без тегов (не спавнит зомби, не мешает физике машины на дороге).
@@ -415,20 +602,22 @@ local function scatter(name: string, count: number, sMin: number, sMax: number, 
 		if not tmpl then
 			break
 		end
+		-- Место проверяем ДО клонирования: радиус пятна касания известен из промера
+		-- шаблона, клонировать ради отказа незачем.
+		local scale = RNG:NextNumber(sMin, sMax)
+		local footRadius = measureFootprint(tmpl).baseRadius * scale
+		if not spotFree(x, z, footRadius) then
+			continue
+		end
 		local model = tmpl:Clone()
-		model:ScaleTo(RNG:NextNumber(sMin, sMax))
+		model:ScaleTo(scale)
 		if name == "DeadTree" then
 			paintTree(model) -- каждое дерево — свой случайный тёмно-коричневый
 		end
-		dropToGround(model, g, RNG:NextNumber(0, 360))
-		centerOnTrunk(model, x, z) -- ствол в проверенную точку, а не пивот меша
-		-- после сдвига пересаживаем на землю и топим на палец: у самой земли шов
-		-- между стволом и травой иначе читается как «дерево висит»
-		local g2 = grassPosition(model:GetPivot().Position.X, model:GetPivot().Position.Z)
-		if g2 then
-			model:PivotTo(model:GetPivot() + Vector3.new(0, g2.Y - g.Y, 0))
-		end
-		model:PivotTo(model:GetPivot() - Vector3.new(0, TREE_SINK, 0))
+		-- Топим на палец: у самой земли шов между стволом и грунтом читается как
+		-- «дерево висит». Саму посадку делает plantOnGround — по промеренной подошве.
+		plantOnGround(model, tmpl, x, z, g.Y, RNG:NextNumber(0, 360), scale, name == "DeadTree" and TREE_SINK or 0)
+		occupy(x, z, footRadius)
 		for _, part in model:GetDescendants() do
 			if part:IsA("BasePart") then
 				part.Anchored = true
@@ -469,10 +658,6 @@ local nTree = scatter("DeadTree", 230, 0.35, 3.6)
 -- Каждый N-й ряд и каждый M-й столбец пропускаем — это дорожки между участками,
 -- без них поле выглядит как склад, а не кладбище.
 local CEM_HALF = 318 -- до ограды (±335) остаётся полоса, чтобы камни в неё не влезали
-local CEM_COL = 10 -- шаг места в ряду, studs
-local CEM_ROW = 13 -- шаг между рядами, studs
-local CEM_AISLE_ROW = 6 -- каждый 6-й ряд — поперечная дорожка
-local CEM_AISLE_COL = 11 -- каждый 11-й столбец — продольная дорожка
 local CEM_ROAD_CLEAR = 10 -- не ближе этого к кромке полотна (проверяется рейкастом)
 local CEM_YAW = 0 -- единый разворот всех камней
 
@@ -525,48 +710,88 @@ local function pickKind()
 	return CEM_KINDS[1]
 end
 
+-- // УЧАСТОК ПОД ЗАХОРОНЕНИЕ (2026-07-31) -------------------------------------
+-- Требование юзера: «надгробья должны располагаться не как попало, а с учётом
+-- размера захоронения». Прежняя сетка была ЖЁСТКОЙ (шаг 10×13 studs) при разбросе
+-- масштабов от 0.6 до 2.6 — то есть шаг не имел никакого отношения к размеру камня:
+-- крупные памятники налезали друг на друга, мелкие оставляли дыры, и ряд читался
+-- как случайный, хотя строился по линейке.
+--
+-- Теперь у каждого камня СВОЙ участок: ширину даёт промеренное пятно касания
+-- (`baseRadius`, см. промер подошвы) на его масштаб, плюс проход. Шаг вдоль ряда
+-- переменный, шаг между рядами — по самому глубокому участку прошедшего ряда.
+-- Ряды при этом остаются строго параллельными и разворот у всех общий: юзер просил
+-- геометрию, а не хаос. Разнообразие даёт размер участка, а не поворот.
+local PLOT_GAP = 2.6 -- проход между соседними захоронениями в ряду, studs
+local PLOT_ROW_GAP = 4.5 -- проход между рядами, studs
+local PLOT_AISLE_ROWS = 6 -- каждый 6-й ряд — поперечная дорожка
+local PLOT_AISLE_WIDTH = 11 -- ширина дорожки, studs
+local PLOT_AISLE_EVERY = 11 -- каждый 11-й участок в ряду — продольная дорожка
+local PLOT_MIN_STEP = 5 -- страховка от зацикливания, если камень выродился в точку
+
 local nCemetery = 0
+-- Где встали камни: по этим точкам потом пускаем траву у оснований (см. ниже).
+local cemeterySpots: { { x: number, z: number, y: number, r: number } } = {}
 do
 	-- Дорога и поле — разные материалы террейна (см. MapGen), поэтому «занято ли
 	-- место дорогой» решает тот же рейкаст, что и у остальной расстановки:
 	-- nil = полотно или дыра.
-	local col = 0
-	for x = -CEM_HALF, CEM_HALF, CEM_COL do
-		col += 1
-		local row = 0
-		local colAisle = (col % CEM_AISLE_COL == 0)
-		for z = -CEM_HALF, CEM_HALF, CEM_ROW do
-			row += 1
-			if colAisle or (row % CEM_AISLE_ROW == 0) then
-				continue -- дорожка между участками
-			end
-			if not clearOfLandmarks(x, z) then
-				continue
-			end
-			local g = grassPosition(x, z)
-			if not g then
-				continue -- полотно трассы
-			end
-			-- у самой кромки не ставим: рейкаст в четырёх точках вокруг места
-			local tooCloseToRoad = false
-			for _, d in { Vector2.new(CEM_ROAD_CLEAR, 0), Vector2.new(-CEM_ROAD_CLEAR, 0), Vector2.new(0, CEM_ROAD_CLEAR), Vector2.new(0, -CEM_ROAD_CLEAR) } do
-				if not grassPosition(x + d.X, z + d.Y) then
-					tooCloseToRoad = true
-					break
-				end
-			end
-			if tooCloseToRoad then
-				continue
-			end
+	local roadProbe = {
+		Vector2.new(CEM_ROAD_CLEAR, 0),
+		Vector2.new(-CEM_ROAD_CLEAR, 0),
+		Vector2.new(0, CEM_ROAD_CLEAR),
+		Vector2.new(0, -CEM_ROAD_CLEAR),
+	}
+	local z = -CEM_HALF
+	local rowIndex = 0
+	while z <= CEM_HALF do
+		rowIndex += 1
+		if rowIndex % PLOT_AISLE_ROWS == 0 then
+			z += PLOT_AISLE_WIDTH -- поперечная дорожка между участками
+			continue
+		end
+		local rowDepth = 0
+		local plotIndex = 0
+		local x = -CEM_HALF
+		while x <= CEM_HALF do
+			plotIndex += 1
 			local kind = pickKind()
 			-- ТОЧНЫЙ шаблон, не `getTemplateVariant`: тот сам случайно выбирает среди
 			-- всех `Tombstone_*` и затирает веса — в первой сборке из-за этого «Tombstone»
 			-- с весом 18% получил 3% поля, а раздача типов шла почти поровну.
 			local tmpl = getTemplate(kind.name)
-			if tmpl then
+			if not tmpl then
+				x += PLOT_MIN_STEP
+				continue
+			end
+			local scale = RNG:NextNumber(kind.sMin, kind.sMax)
+			local footRadius = measureFootprint(tmpl).baseRadius * scale
+			local half = math.max(footRadius + PLOT_GAP / 2, PLOT_MIN_STEP / 2)
+			local cx = x + half -- центр участка
+			rowDepth = math.max(rowDepth, footRadius)
+
+			if plotIndex % PLOT_AISLE_EVERY == 0 then
+				x = cx + half + PLOT_AISLE_WIDTH -- продольная дорожка
+				continue
+			end
+
+			local ok = clearOfLandmarks(cx, z)
+			local g = ok and grassPosition(cx, z) or nil
+			if g then
+				-- у самой кромки не ставим: рейкаст в четырёх точках вокруг места
+				for _, d in roadProbe do
+					if not grassPosition(cx + d.X, z + d.Y) then
+						g = nil
+						break
+					end
+				end
+			end
+			-- и место не должно быть уже занято деревом или фонарём
+			if g and spotFree(cx, z, footRadius) then
 				local model = tmpl:Clone()
-				model:ScaleTo(RNG:NextNumber(kind.sMin, kind.sMax))
-				dropToGround(model, g, CEM_YAW) -- разворот ОДИН на всех: ряды параллельны
+				model:ScaleTo(scale)
+				plantOnGround(model, tmpl, cx, z, g.Y, CEM_YAW, scale, 0) -- разворот ОДИН на всех: ряды параллельны
+				occupy(cx, z, footRadius)
 				local tone = stoneTone()
 				for _, part in model:GetDescendants() do
 					if part:IsA("BasePart") then
@@ -579,7 +804,13 @@ do
 				end
 				model.Parent = mapFolder
 				nCemetery += 1
+				table.insert(cemeterySpots, { x = cx, z = z, y = g.Y, r = footRadius })
 			end
+			x = cx + half
+		end
+		z += 2 * rowDepth + PLOT_ROW_GAP
+		if rowDepth == 0 then
+			z += PLOT_MIN_STEP -- пустой ряд (весь на трассе) — не зацикливаемся
 		end
 	end
 end
@@ -645,21 +876,18 @@ do
 			if not tmpl then
 				return false
 			end
+			local scale = RNG:NextNumber(sMin, sMax)
+			local footRadius = measureFootprint(tmpl).baseRadius * scale
+			if not spotFree(x, z, footRadius) then
+				return false -- на этом месте уже что-то стоит
+			end
 			local model = tmpl:Clone()
-			model:ScaleTo(RNG:NextNumber(sMin, sMax))
+			model:ScaleTo(scale)
 			if name == "DeadTree" then
 				paintTree(model)
 			end
-			dropToGround(model, g, RNG:NextNumber(0, 360))
-			if name == "DeadTree" then
-				centerOnTrunk(model, x, z)
-				local p = model:GetPivot().Position
-				local g2 = grassPosition(p.X, p.Z)
-				if g2 then
-					model:PivotTo(model:GetPivot() + Vector3.new(0, g2.Y - g.Y, 0))
-				end
-				model:PivotTo(model:GetPivot() - Vector3.new(0, TREE_SINK, 0))
-			end
+			plantOnGround(model, tmpl, x, z, g.Y, RNG:NextNumber(0, 360), scale, name == "DeadTree" and TREE_SINK or 0)
+			occupy(x, z, footRadius)
 			for _, part in model:GetDescendants() do
 				if part:IsA("BasePart") then
 					part.Anchored = true
@@ -683,7 +911,8 @@ do
 			end
 			local model = lamp:Clone()
 			model:ScaleTo(LAMP_SCALE) -- ~17 studs: фонарь должен нависать над полотном
-			dropToGround(model, g, RNG:NextNumber(0, 360))
+			plantOnGround(model, lamp, spot.X, spot.Y, g.Y, RNG:NextNumber(0, 360), LAMP_SCALE, 0)
+			occupy(spot.X, spot.Y, measureFootprint(lamp).baseRadius * LAMP_SCALE)
 			local bulb = model:FindFirstChild("Bulb")
 			local holder = (bulb and bulb:IsA("BasePart")) and bulb or model.PrimaryPart
 			if holder then
@@ -763,13 +992,74 @@ do
 	end
 end
 
--- // Трава: УБРАНА СОВСЕМ (2026-07-31) ----------------------------------------
--- Здесь жили пучки-травинки из WedgePart'ов. История: сперва их было ~490
--- (=~1500 деталей, больше половины всей сцены) → просадки и фризы; 25.07 их
--- срезали до 45 «для переднего плана». Теперь убраны и эти: юзер просил снять
--- траву с поля ради кадра, а держать 45 моделей ради переднего плана бессмысленно,
--- когда фоновой terrain-травы (см. FIELD_COLOR выше) больше нет — одинокие
--- травинки на голом поле читались бы как мусор, а не как трава.
+-- // Трава: ТОЛЬКО У НАДГРОБИЙ (2026-07-31) -----------------------------------
+-- История: сперва пучков было ~490 (=~1500 деталей, больше половины всей сцены) →
+-- просадки и фризы; 25.07 срезали до 45 по всему полю; 31.07 убрали совсем вместе
+-- с terrain-травой ради кадра. Юзер попросил вернуть «кое-где близ надгробий» —
+-- и это как раз правильное место: одинокая травинка посреди голого поля читается
+-- как мусор, а пучок, пробившийся у основания камня, читается как заброшенность.
+--
+-- Поэтому траву сеем НЕ по площади, а по списку реально поставленных камней, и
+-- только у каждого N-го. Пучок — три травинки одной моделью: цена всей затеи
+-- порядка трёх сотен мелких деталей вместо прежних полутора тысяч.
+local GRASS_EVERY = 7 -- у каждого N-го надгробия
+local GRASS_MAX = 110 -- жёсткий потолок: кадр важнее плотности
+local grassCount = 0
+do
+	local function makeTuft(scale: number): Model
+		local m = Instance.new("Model")
+		m.Name = "GraveGrass"
+		local root: BasePart? = nil
+		for _ = 1, 3 do
+			local h = RNG:NextNumber(1.4, 3.2) * scale
+			local blade = Instance.new("WedgePart")
+			blade.Anchored = true
+			blade.CanCollide = false
+			blade.CanQuery = false
+			blade.CanTouch = false
+			blade.CastShadow = false
+			blade.Material = Enum.Material.Grass
+			-- в тон полю (жухлый оливковый), но чуть живее — иначе сливается с грунтом
+			blade.Color = Color3.fromRGB(
+				RNG:NextInteger(64, 96),
+				RNG:NextInteger(78, 104),
+				RNG:NextInteger(40, 58)
+			)
+			blade.Size = Vector3.new(0.12, h, RNG:NextNumber(0.3, 0.6) * scale)
+			local ang = math.rad(RNG:NextNumber(0, 360))
+			local off = RNG:NextNumber(0, 0.5) * scale
+			blade.CFrame = CFrame.new(math.cos(ang) * off, h / 2, math.sin(ang) * off)
+				* CFrame.Angles(0, ang, 0)
+				* CFrame.Angles(0, 0, math.rad(RNG:NextNumber(4, 22)))
+			blade.Parent = m
+			root = root or blade
+		end
+		m.PrimaryPart = root
+		return m
+	end
+
+	for i, spot in cemeterySpots do
+		if grassCount >= GRASS_MAX then
+			break
+		end
+		if i % GRASS_EVERY ~= 0 then
+			continue
+		end
+		-- прижимаем пучок к подножию камня, со случайной стороны
+		local a = math.rad(RNG:NextNumber(0, 360))
+		local d = spot.r * RNG:NextNumber(0.55, 0.95)
+		local gx, gz = spot.x + math.cos(a) * d, spot.z + math.sin(a) * d
+		local g = grassPosition(gx, gz)
+		if not g then
+			continue -- вылезли на полотно
+		end
+		local tuft = makeTuft(RNG:NextNumber(0.9, 1.6))
+		-- пучок строится от нуля вверх, поэтому сажаем пивотом на грунт
+		tuft:PivotTo(CFrame.new(gx, g.Y, gz) * CFrame.Angles(0, RNG:NextNumber(0, 6.28), 0))
+		tuft.Parent = mapFolder
+		grassCount += 1
+	end
+end
 
 -- // ЧИСТКА ДОРОГИ (2026-07-25): убираем ЛЮБОЙ декор, чей центр ближе
 -- (RoadWidth/2 + запас) к осевой трассы — плиты/деревья у обочины иногда нависают
@@ -933,7 +1223,7 @@ end
 
 print(
 	`[MapBuilder] Расставлено: {#MapLayout.Hazards} hazard'ов, {#MapLayout.Graves} могил, {#MapLayout.Lamps} фонарей, {#MapLayout.DeadTrees} деревьев (по карте). `
-		.. `Кладбище рядами: {nCemetery} надгробий (шаг {CEM_COL}×{CEM_ROW}, 7 типов). `
+		.. `Кладбище рядами: {nCemetery} надгробий (участок по размеру камня, 8 типов). `
 		.. `Деревья: {nTree} по площади + {nAlleyTrees} в аллеях (тени только у {shadowTrees} вдоль трассы). Фонарей у дороги: {nClusterLamps}. `
-		.. `Трава убрана: поле = {MapGen.FieldMaterial.Name} без декорации. Ограда по периметру ±335.`
+		.. `Поле = {MapGen.FieldMaterial.Name} без декорации, трава только у камней: {grassCount} пучков. Ограда по периметру ±335.`
 )

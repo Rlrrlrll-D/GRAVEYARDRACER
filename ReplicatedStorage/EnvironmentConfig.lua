@@ -22,8 +22,21 @@ export type EnvironmentConfigType = {
 		BloomIntensity: number,
 		StarCount: number,
 	},
-	-- Сумерки: то, ОТКУДА заезд стартует. Ночь (Atmosphere выше) — то, КУДА он
-	-- приходит. Значения тех же свойств, между ними клиент плавно интерполирует.
+	-- ДУГА СУТОК: день → сумерки → ночь. Три опорных состояния одних и тех же
+	-- свойств, между ними клиент плавно интерполирует (StarterPlayerScripts.DayNightCycle).
+	-- День — то, ОТКУДА всё начинается (и что стоит в лобби), ночь (Atmosphere выше) —
+	-- то, КУДА приходит; сумерки — промежуточная опора, чтобы закат шёл через тёплый
+	-- оранжевый, а не серым провалом из дня прямо в ночь.
+	Day: {
+		ClockTime: number,
+		Density: number,
+		FogColor: Color3,
+		FogEnd: number,
+		Brightness: number,
+		OutdoorAmbient: Color3,
+		ColorCorrectionSaturation: number,
+		ColorCorrectionTintColor: Color3,
+	},
 	Dusk: {
 		ClockTime: number, -- ClockTime растёт до Atmosphere.ClockTime + 24 (через полночь)
 		Density: number,
@@ -34,6 +47,7 @@ export type EnvironmentConfigType = {
 		ColorCorrectionSaturation: number,
 		ColorCorrectionTintColor: Color3,
 		NightFallSeconds: number, -- за сколько секунд от старта отсчёта наступает полная ночь
+		DuskAt: number, -- доля перехода, на которой стоят сумерки (0..1)
 	},
 	Thunder: {
 		MinInterval: number,
@@ -69,6 +83,19 @@ local EnvironmentConfig: EnvironmentConfigType = {
 		BloomIntensity = 0.4,
 		StarCount = 4000,
 	},
+	-- ДЕНЬ: с него начинается игра (юзер: «начало игры днём, сумерки и темнеть
+	-- должно медленно, не сразу»). Пасмурный серо-голубой полдень, а не курорт:
+	-- кладбище должно читаться мрачно даже при солнце.
+	Day = {
+		ClockTime = 13.2,
+		Density = 0.14,              -- лёгкая дымка: даль есть, но воздух не стеклянный
+		FogColor = Color3.fromRGB(150, 156, 168),
+		FogEnd = 1200,
+		Brightness = 2.4,
+		OutdoorAmbient = Color3.fromRGB(150, 152, 160),
+		ColorCorrectionSaturation = -0.06,
+		ColorCorrectionTintColor = Color3.fromRGB(248, 246, 240),
+	},
 	Dusk = {
 		ClockTime = 17.9,            -- солнце у горизонта: густые сумерки, трассу видно
 		Density = 0.28,              -- дымка реже, чем ночью — дальше видно
@@ -78,7 +105,13 @@ local EnvironmentConfig: EnvironmentConfigType = {
 		OutdoorAmbient = Color3.fromRGB(105, 98, 110),
 		ColorCorrectionSaturation = -0.12,
 		ColorCorrectionTintColor = Color3.fromRGB(255, 236, 214), -- тёплый, к ночи уходит в холод
-		NightFallSeconds = 80,       -- полная ночь примерно к середине заезда
+		-- Юзер: «темнеть должно медленно, не сразу». Раньше было 80 секунд от сумерек
+		-- до ночи; теперь тот же счётчик покрывает ВСЮ дугу день→сумерки→ночь, так что
+		-- на одну только вторую половину (сумерки→ночь) приходится больше прежнего.
+		NightFallSeconds = 210,
+		-- Сумерки стоят чуть дальше середины: день держится дольше заката, а сам
+		-- закат — самая красивая часть дуги, её тянуть незачем.
+		DuskAt = 0.55,
 	},
 	Thunder = {
 		MinInterval = 18,

@@ -18,8 +18,9 @@ local RunService = game:GetService("RunService")
 local EnvironmentConfig = require(ReplicatedStorage:WaitForChild("EnvironmentConfig"))
 local night = EnvironmentConfig.Atmosphere
 local dusk = EnvironmentConfig.Dusk
+local day = EnvironmentConfig.Day
 
--- NightAnchor: 0 — ночь (базовое состояние сервера), < 0 — держим сумерки (лобби),
+-- NightAnchor: 0 — ночь (базовое состояние сервера), < 0 — держим ДЕНЬ (лобби),
 -- > 0 — идёт переход, значение = серверное время его начала.
 local anchor = ReplicatedStorage:WaitForChild("NightAnchor") :: NumberValue
 
@@ -37,14 +38,23 @@ end
 local atmosphere: Atmosphere = waitForEffect("Atmosphere")
 local colorCorrection: ColorCorrectionEffect = waitForEffect("ColorCorrectionEffect")
 
--- ClockTime идёт ЧЕРЕЗ полночь: 17.9 → 24.7, на выходе берём остаток от 24.
--- Иначе интерполяция 17.9 → 0.7 отмотала бы сутки назад, через полдень.
-local NIGHT_CLOCK = night.ClockTime + 24
+-- ДУГА СУТОК: три опоры вместо двух (юзер: «начало игры днём, сумерки и темнеть
+-- должно медленно, не сразу»). Раньше заезд стартовал сразу с сумерек, и дня в
+-- игре не было вовсе. Теперь день → сумерки → ночь, сумерки стоят на доле DuskAt.
+--
+-- ClockTime идёт ЧЕРЕЗ полночь: 13.2 → 17.9 → 24.7, на выходе берём остаток от 24.
+-- Иначе интерполяция к 0.7 отмотала бы сутки назад, через полдень.
+local KEYS = {
+	{ at = 0, cfg = day, clock = day.ClockTime },
+	{ at = math.clamp(dusk.DuskAt, 0.05, 0.95), cfg = dusk, clock = dusk.ClockTime },
+	{ at = 1, cfg = night, clock = night.ClockTime + 24 },
+}
 
--- Темнеет не линейно: первые секунды держим светлее (на старте толкотня и надо
--- видеть соседей), к концу перехода ускоряемся. t^1.6 даёт именно такую кривую.
+-- Темнеет не линейно: первую часть держим светлее (на старте толкотня и надо
+-- видеть соседей), к концу перехода ускоряемся. t^1.35 даёт такую кривую, но
+-- мягче прежней 1.6 — иначе день проскакивает почти мгновенно.
 local function ease(t: number): number
-	return t ^ 1.6
+	return t ^ 1.35
 end
 
 -- Молния множит текущую яркость на время вспышки (см. блок ThunderFlash ниже).
@@ -52,16 +62,26 @@ local flashBoost = 1
 
 local function apply(t: number)
 	local k = ease(math.clamp(t, 0, 1))
-	Lighting.ClockTime = (dusk.ClockTime + (NIGHT_CLOCK - dusk.ClockTime) * k) % 24
-	Lighting.Brightness = (dusk.Brightness + (night.Brightness - dusk.Brightness) * k) * flashBoost
-	Lighting.OutdoorAmbient = dusk.OutdoorAmbient:Lerp(night.OutdoorAmbient, k)
+	-- какой отрезок дуги сейчас и насколько мы в нём продвинулись
+	local i = 1
+	while i < #KEYS - 1 and k > KEYS[i + 1].at do
+		i += 1
+	end
+	local a, b = KEYS[i], KEYS[i + 1]
+	local span = b.at - a.at
+	local f = span > 1e-6 and math.clamp((k - a.at) / span, 0, 1) or 0
+	local ca, cb = a.cfg, b.cfg
+
+	Lighting.ClockTime = (a.clock + (b.clock - a.clock) * f) % 24
+	Lighting.Brightness = (ca.Brightness + (cb.Brightness - ca.Brightness) * f) * flashBoost
+	Lighting.OutdoorAmbient = ca.OutdoorAmbient:Lerp(cb.OutdoorAmbient, f)
 	Lighting.Ambient = Lighting.OutdoorAmbient
-	Lighting.FogColor = dusk.FogColor:Lerp(night.FogColor, k)
-	Lighting.FogEnd = dusk.FogEnd + (night.FogEnd - dusk.FogEnd) * k
-	atmosphere.Density = dusk.Density + (night.Density - dusk.Density) * k
-	colorCorrection.Saturation = dusk.ColorCorrectionSaturation
-		+ (night.ColorCorrectionSaturation - dusk.ColorCorrectionSaturation) * k
-	colorCorrection.TintColor = dusk.ColorCorrectionTintColor:Lerp(night.ColorCorrectionTintColor, k)
+	Lighting.FogColor = ca.FogColor:Lerp(cb.FogColor, f)
+	Lighting.FogEnd = ca.FogEnd + (cb.FogEnd - ca.FogEnd) * f
+	atmosphere.Density = ca.Density + (cb.Density - ca.Density) * f
+	colorCorrection.Saturation = ca.ColorCorrectionSaturation
+		+ (cb.ColorCorrectionSaturation - ca.ColorCorrectionSaturation) * f
+	colorCorrection.TintColor = ca.ColorCorrectionTintColor:Lerp(cb.ColorCorrectionTintColor, f)
 end
 
 -- Насколько далеко зашёл переход прямо сейчас. nil = метки нет, свет держит сервер.
@@ -71,7 +91,7 @@ local function progress(): number?
 		return nil -- сервер ещё не провёл ни одного заезда: остаёмся на ночи
 	end
 	if startedAt < 0 then
-		return 0 -- лобби: сумерки, чтобы на старте отсчёта небо не прыгнуло из ночи
+		return 0 -- лобби: ДЕНЬ, чтобы на старте отсчёта небо не прыгнуло из ночи
 	end
 	local elapsed = workspace:GetServerTimeNow() - startedAt
 	return math.clamp(elapsed / math.max(dusk.NightFallSeconds, 1), 0, 1)
@@ -86,7 +106,7 @@ local function tick()
 	end
 	apply(t)
 	-- Выходим из цикла, когда двигаться больше некуда: дошли до ночи либо стоим
-	-- на сумерках в лобби. Обратно разбудит anchor.Changed.
+	-- на дне в лобби. Обратно разбудит anchor.Changed.
 	return t >= 1 or anchor.Value < 0
 end
 

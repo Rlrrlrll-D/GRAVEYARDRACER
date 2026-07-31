@@ -179,11 +179,11 @@ local DEATH_SINK_DEPTH = 6
 
 local DEATH_FALL_ANGLE = math.rad(84) -- добить почти до земли, но не перевернуть
 local DEATH_BOUNCE_ANGLE = math.rad(6) -- перелёт, который тут же отыгрывается назад
+local DEATH_BOUNCE_LIFT = 0.35 -- на столько тело подскакивает от удара о грунт
 local DEATH_BUCKLE_DROP = 0.45 -- на сколько studs просесть, пока подгибаются ноги
 local DEATH_PIVOT_LIFT = 1.0 -- ось наклона выше стоп: отвечает за ДУГУ падения, не за высоту
--- Габарит снимается со СТОЯЧЕГО зомби, а руки в позе трупа разведены, поэтому
--- расчётная опора выходит чуть оптимистичной: замер дал -0.19 у торса и -0.40 у
--- ног. Приподнимаем на эту разницу, иначе ноги наполовину в грунте.
+-- На столько миллиметров выше грунта лежит нижняя точка трупа: впритык тело
+-- цепляется за неровности террейна и подрагивает, а с зазором лежит спокойно.
 local DEATH_REST_CLEARANCE = 0.35
 
 -- Гасим всё, что спорит с позой трупа. `Animate` крутит ходьбу через
@@ -273,34 +273,47 @@ function ZombieAI.PlayDeath(zombie: Model)
 		return CFrame.new(0, -drop, 0) * spin * startPivot
 	end
 
-	-- Насколько низко опустится габарит модели, если поставить её в cf. Габарит
-	-- снят СТОЯЧИМ и поворачивается вместе с телом, поэтому проекция его полуразмера
-	-- на мировую вертикаль считается через модули строк матрицы поворота.
-	local bbCF, bbSize = zombie:GetBoundingBox()
-	local relBox = startPivot:ToObjectSpace(bbCF)
-	local function lowestY(cf: CFrame): number
-		local box = cf * relBox
-		local r = box - box.Position
-		local half = 0.5
-			* (
-				math.abs(r.XVector.Y) * bbSize.X
-				+ math.abs(r.YVector.Y) * bbSize.Y
-				+ math.abs(r.ZVector.Y) * bbSize.Z
-			)
-		return box.Position.Y - half
+	-- Самая низкая точка тела ПРЯМО СЕЙЧАС, по реальным деталям.
+	--
+	-- Раньше тут стоял габарит всей модели (`GetBoundingBox`), и юзер справедливо
+	-- пожаловался: «зомби падая застывают в воздухе горизонтально». Причина —
+	-- габарит снимался ОДИН РАЗ в момент смерти, а зомби нередко умирает с
+	-- задранными в замахе руками: коробка выходит на пару studs выше реального
+	-- тела, и тело зависало ровно на эту разницу. Плюс коробка модели заведомо
+	-- шире содержимого. Считаем по каждой детали отдельно и КАЖДЫЙ КАДР — у R6
+	-- их шесть, это дёшево, зато поза и грунт учитываются честно.
+	local function lowestNow(): number
+		local low = math.huge
+		for _, p in zombie:GetDescendants() do
+			if p:IsA("BasePart") then
+				local cf, half = p.CFrame, p.Size / 2
+				local ext = math.abs(cf.RightVector.Y) * half.X
+					+ math.abs(cf.UpVector.Y) * half.Y
+					+ math.abs(cf.LookVector.Y) * half.Z
+				low = math.min(low, cf.Position.Y - ext)
+			end
+		end
+		return low
 	end
 
-	-- Куда тело ляжет по высоте — НЕ константа. Первый заход ронял труп на 1.8
-	-- studs ПОД землю (замер 2026-07-31): поворот вокруг линии стоп кладёт тело
-	-- туда, куда получится, а у рига свои габариты и земля под ним неровная.
-	-- Поэтому конечную просадку считаем: сколько не хватает, чтобы габарит лёг
-	-- ровно на грунт. Значение бывает и отрицательным — тогда тело приподнимаем.
+	-- Земля под зомби. Ищем от ТАЗА вниз, исключив само тело: под ногами может
+	-- оказаться и террейн, и плита у могилы — годится любая твёрдая опора.
 	local groundParams = RaycastParams.new()
 	groundParams.FilterType = Enum.RaycastFilterType.Exclude
 	groundParams.FilterDescendantsInstances = { zombie }
-	local groundHit = workspace:Raycast(startPivot.Position, Vector3.new(0, -50, 0), groundParams)
-	local groundY = groundHit and groundHit.Position.Y or lowestY(startPivot)
-	local restDrop = lowestY(bodyCF(DEATH_FALL_ANGLE, 0)) - groundY - DEATH_REST_CLEARANCE
+	local groundHit = workspace:Raycast(startPivot.Position, Vector3.new(0, -60, 0), groundParams)
+	local groundY = groundHit and groundHit.Position.Y or (lowestNow() - DEATH_REST_CLEARANCE)
+	local restY = groundY + DEATH_REST_CLEARANCE
+
+	-- Досадить тело на грунт после установки позы. `blend` растягивает поправку по
+	-- фазе, чтобы тело не дёргалось вверх скачком: при blend=1 низ ложится точно.
+	local function settle(blend: number)
+		local low = lowestNow()
+		if low == math.huge then
+			return
+		end
+		zombie:PivotTo(zombie:GetPivot() + Vector3.new(0, (restY - low) * blend, 0))
+	end
 
 	playSoundAt(GROWL_SOUND_ID, startPivot.Position, 0.75, 0.5, 0.62) -- предсмертный хрип: ниже и длиннее рыка
 
@@ -333,7 +346,8 @@ function ZombieAI.PlayDeath(zombie: Model)
 		set(ls, -0.40 - 0.35 * a, 0, -0.55 + 0.30 * a)
 		set(rh, 0, 0, 0.70 - 0.45 * a)
 		set(lh, 0, 0, -0.55 + 0.30 * a)
-		zombie:PivotTo(bodyCF(DEATH_FALL_ANGLE * a, DEATH_BUCKLE_DROP + (restDrop - DEATH_BUCKLE_DROP) * a))
+		zombie:PivotTo(bodyCF(DEATH_FALL_ANGLE * a, DEATH_BUCKLE_DROP))
+		settle(a) -- к концу падения низ тела ложится ровно на грунт
 	end) then
 		return
 	end
@@ -341,9 +355,12 @@ function ZombieAI.PlayDeath(zombie: Model)
 	-- 4. ОТСКОК: перелёт на пару градусов и возврат — вес тела на удар о землю.
 	if not phase(zombie, DEATH_BOUNCE_TIME, easeSmooth, function(a)
 		local over = math.sin(a * math.pi) -- 0 → 1 → 0
-		zombie:PivotTo(bodyCF(DEATH_FALL_ANGLE + DEATH_BOUNCE_ANGLE * over, restDrop))
+		zombie:PivotTo(bodyCF(DEATH_FALL_ANGLE + DEATH_BOUNCE_ANGLE * over, DEATH_BUCKLE_DROP))
 		set(rs, -0.90 + 0.12 * over, 0, 0.25)
 		set(neck, -0.50, 0.40 + 0.10 * over, 0)
+		settle(1)
+		-- отскок: на миг приподнимаем тело над грунтом и тут же роняем обратно
+		zombie:PivotTo(zombie:GetPivot() + Vector3.new(0, DEATH_BOUNCE_LIFT * over, 0))
 	end) then
 		return
 	end
