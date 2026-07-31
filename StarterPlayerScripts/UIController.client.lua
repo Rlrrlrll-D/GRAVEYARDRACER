@@ -200,12 +200,30 @@ type RacePayload = {
 	Needed: number?,
 }
 
--- достать плашку-картинку черепа из модели чекпоинта (Image ставит сервер в buildSkull)
-local function skullFaceImage(model: Model): ImageLabel?
-	local anchor = model.PrimaryPart
-	local face = anchor and anchor:FindFirstChild("Face")
-	local img = face and face:FindFirstChild("Img")
-	return (img and img:IsA("ImageLabel")) and (img :: ImageLabel) or nil
+-- Череп — плашка-силуэт плюс слои ореола из неё же (RaceScene.buildSkull). Плотность
+-- ведём ОДНОЙ величиной fade: 0 — как построено сервером (основная плашка 0.15, слои
+-- ореола 0.64/0.80/0.90), 1 — исчез совсем. Авторскую прозрачность каждого слоя
+-- запоминаем при первом касании, иначе после первого же затухания «исходником» стало
+-- бы затухшее значение и череп больше не вернулся бы к прежней плотности.
+local skullLayerBase: { [ImageLabel]: number } = {}
+local function skullLayers(model: Model): { ImageLabel }
+	local list: { ImageLabel } = {}
+	for _, d in model:GetDescendants() do
+		if d:IsA("ImageLabel") then
+			if skullLayerBase[d] == nil then
+				skullLayerBase[d] = d.ImageTransparency
+			end
+			table.insert(list, d)
+		end
+	end
+	return list
+end
+
+local function setSkullFade(model: Model, fade: number)
+	for _, g in skullLayers(model) do
+		local base = skullLayerBase[g] or 0
+		g.ImageTransparency = math.clamp(base + (1 - base) * fade, 0, 1)
+	end
 end
 
 -- Найти маркер чекпоинта: череп помечен атрибутом cpN (один череп может обслуживать
@@ -225,44 +243,23 @@ end
 
 -- Внешний вид плашки-черепа: «свой» следующий (active) — чуть крупнее и плотнее,
 -- свет ярче; прочие — сильно полупрозрачные (призрачные), свет спокойный.
--- Прозрачность плашки. Череп — призрак, а не белая наклейка: сквозь него видно
--- трассу. Билборд стоит с LightInfluence=0, поэтому он «светится сам» и одинаково
--- читается и в сумерках, и в глубокой ночи (LightInfluence=0 у билборда).
--- 2026-07-26, второй проход: череп должен быть ВОЗДУШНЫМ — почти дымка. Плотные
--- 0.32/0.6 из первого прохода юзер забраковал («не такие плотные»), а ореолы
--- (PointLight, аддитивный спрайт) выброшены совсем — они и были тем «белым круглым
--- мутным облаком». Свой чекпоинт различается РАЗМЕРОМ и дыханием, а не плотностью.
--- Юзер: «черепа-чеки должны светиться как стрелки на старте, только менее интенсивно».
--- Стрелки — Neon с прозрачностью 0.15. Череп светится тем же способом (LightInfluence
--- = 0: не темнеет ночью и попадает в bloom), плотность у него теперь ощутимая, но
--- заведомо ниже стрелок: свой чекпоинт 0.34, чужие 0.55 — то есть свой отчётливо
--- горит впереди, а остальные читаются вдоль трассы, не забивая кадр.
-local SKULL_ALPHA_IDLE = 0.55 -- чужие чекпоинты — видно, но приглушённо
-local SKULL_ALPHA_ACTIVE = 0.34 -- свой следующий — горит (стрелки старта: 0.15)
-local SKULL_PULSE = 0.08 -- амплитуда «дыхания» прозрачности у своего чекпоинта
+-- ПЛОТНОСТЬ ЧЕРЕПА. Прежние абзацы про «прозрачность плашки», билборд и ореолы
+-- сняты вместе с самой плашкой: череп теперь неоновая геометрия (RaceScene).
+-- Свой чекпоинт горит РОВНО как стрелки старта (fade = 0, то есть неон 0.15),
+-- чужие приглушены. Дальше по трассе их дюжина, и если жечь все в полную силу,
+-- горизонт превращается в гирлянду.
+local SKULL_FADE_ACTIVE = 0 -- как построено: Neon 0.15 — один в один со стрелками
+local SKULL_FADE_IDLE = 0.34 -- чужие чекпоинты — тот же неон, но приглушённый
+local SKULL_PULSE = 0.07 -- амплитуда «дыхания» у своего чекпоинта
+local SKULL_SCALE_ACTIVE = 1.22 -- свой ещё и крупнее: видно, к какому едешь
 
-local skullBaseSize: { [Instance]: UDim2 } = {} -- исходный размер билборда каждого черепа
 local skullHome: { [Model]: CFrame } = {} -- «дом» каждого черепа (парение + сброс после сбора)
 local collecting: { [Model]: boolean } = {} -- череп сейчас «улетает» вверх → парение его не трогает
 local function applySkullState(model: Model, active: boolean)
 	if collecting[model] then return end -- «улетающий» череп не трогаем (иначе перебьёт растворение)
-	local img = skullFaceImage(model)
-	if img then
-		img.ImageTransparency = active and SKULL_ALPHA_ACTIVE or SKULL_ALPHA_IDLE
-	end
-	local anchor = model.PrimaryPart
-	if anchor then
-		local face = anchor:FindFirstChild("Face")
-		if face and face:IsA("BillboardGui") then
-			local base = skullBaseSize[face]
-			if not base then
-				base = face.Size
-				skullBaseSize[face] = base
-			end
-			local k = active and 1.5 or 1.0 -- Size в Scale → масштабируется с расстоянием как объект
-			face.Size = UDim2.fromScale(base.X.Scale * k, base.Y.Scale * k)
-		end
-	end
+	setSkullFade(model, active and SKULL_FADE_ACTIVE or SKULL_FADE_IDLE)
+	-- ScaleTo задаёт АБСОЛЮТНЫЙ масштаб, поэтому повторные вызовы не накапливаются
+	model:ScaleTo(active and SKULL_SCALE_ACTIVE or 1)
 end
 
 -- ПРЕВРАЩЕНИЕ ЧЕРЕПА В ДЫМ. Запускается НА ПОДЛЁТЕ (цикл парения ниже), а не по
@@ -288,10 +285,7 @@ local function collectSkull(index: number)
 	-- реплицируется и перебивало твин улёта у второго игрока (у него анимация «не
 	-- срабатывала»). Клон сервер не знает — его никто не перебьёт; у каждого одинаково.
 	collecting[model] = true -- локальное парение общий череп не трогает (applySkullState тоже пропустит)
-	local sharedImg = skullFaceImage(model)
-	if sharedImg then
-		sharedImg.ImageTransparency = 1 -- спрятать общий череп локально на время улёта
-	end
+	setSkullFade(model, 1) -- спрятать общий череп локально на время улёта
 
 	local ghost = model:Clone()
 	for _, d in ghost:GetDescendants() do
@@ -304,44 +298,52 @@ local function collectSkull(index: number)
 	ghost.Parent = workspace -- вне RaceMarkers → цикл парения его не трогает; клиент-локально
 	local gAnchor = ghost.PrimaryPart
 
-	local RISE = 1.0 -- дольше: юзеру нужна ВИДИМАЯ анимация превращения, а не мигание
+	-- Юзер: «анимацию черепа при прохождении чека (дымок) сделай по S-образной
+	-- траектории и быстрее». Было 1.0с по прямой вверх.
+	local RISE = 0.6
 
+	-- S-ОБРАЗНЫЙ УЛЁТ + РАСПАД. Прямой твин Position змейку не даёт — ведём вручную:
+	-- вверх с разгоном, поперёк — одна полная синусоида (вправо-назад-влево-назад).
+	-- Поперечную ось берём от КАМЕРЫ, иначе с половины ракурсов змейка уходит «в
+	-- экран» и читается как прямая. Амплитуда к концу сходит на нет, череп при этом
+	-- закручивается вокруг своей оси и сжимается — то есть на глазах превращается в
+	-- струйку. Никаких частиц: любой размытый спрайт на этой сцене читается как пятно,
+	-- превращается САМ ЧЕРЕП.
 	if gAnchor then
-		-- вверх с ускорением (в мировом Y)
-		TweenService:Create(gAnchor, TweenInfo.new(RISE, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-			{ Position = home.Position + Vector3.new(0, 20, 0) }):Play()
+		local cam = workspace.CurrentCamera
+		local side = cam and cam.CFrame.RightVector or Vector3.xAxis
+		side = Vector3.new(side.X, 0, side.Z)
+		side = side.Magnitude > 1e-3 and side.Unit or Vector3.xAxis
+		local twist = (math.random() < 0.5 and -1 or 1) * 46 -- градусы, закрутка плашки
+		local layers = skullLayers(ghost)
+		local startScale = ghost:GetScale()
+		task.spawn(function()
+			local t0 = os.clock()
+			while ghost.Parent do
+				local a = (os.clock() - t0) / RISE
+				if a >= 1 then break end
+				local up = 20 * a * a -- разгон вверх, как прежний Quad In
+				local sway = math.sin(a * math.pi * 2) * 2.8 * (1 - a * 0.55)
+				ghost:PivotTo(home + Vector3.new(0, up, 0) + side * sway)
+				ghost:ScaleTo(math.max(0.12, startScale * (1 - a * 0.82)))
+				-- плашка билбордная, поэтому «закрутка» — это поворот самой картинки
+				for _, g in layers do
+					g.Rotation = twist * a
+				end
+				task.wait()
+			end
+		end)
 	end
 
-	-- САМ РАСПАД — и это ЕДИНСТВЕННОЕ, что здесь происходит. Никаких частиц: любой
-	-- размытый спрайт (smoke_main, аддитивный ореол) на этой сцене читался как «белое
-	-- круглое мутное облако», которое юзер требовал убрать. Превращается сам силуэт:
-	-- плашка ЗАКРУЧИВАЕТСЯ (ImageLabel.Rotation) и ВЫТЯГИВАЕТСЯ — ширина сходится
-	-- почти в ноль, высота растёт втрое, — то есть череп на глазах превращается в
-	-- струйку и гаснет. Стартуем ровно с той прозрачности, какой череп висел: вспышки
-	-- быть не должно.
-	local gImg = skullFaceImage(ghost)
-	if gImg then
-		gImg.ImageTransparency = SKULL_ALPHA_ACTIVE
-		local twist = (math.random() < 0.5 and -1 or 1) * math.random(34, 52)
-		-- гаснет не сразу: сначала видно, КАК он тянется, и только к концу исчезает
-		TweenService:Create(gImg, TweenInfo.new(RISE, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+	-- гаснет не сразу: сначала видно, КАК он тянется, и только к концу исчезает
+	for _, g in skullLayers(ghost) do
+		TweenService:Create(g, TweenInfo.new(RISE, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
 			{ ImageTransparency = 1 }):Play()
-		TweenService:Create(gImg, TweenInfo.new(RISE, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
-			{ Rotation = twist }):Play()
-		local gFace = gImg.Parent
-		if gFace and gFace:IsA("BillboardGui") then
-			local base = gFace.Size -- клон: стартуем с того размера, каким череп висел
-			TweenService:Create(gFace, TweenInfo.new(RISE, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-				Size = UDim2.fromScale(base.X.Scale * 0.1, base.Y.Scale * 2.9),
-			}):Play()
-		end
 	end
 
-	task.delay(RISE + 0.35, function()
+	task.delay(RISE + 0.2, function()
 		ghost:Destroy()
-		if sharedImg then
-			sharedImg.ImageTransparency = SKULL_ALPHA_IDLE -- снова призрачно виден к след. кругу
-		end
+		setSkullFade(model, SKULL_FADE_IDLE) -- снова виден к следующему кругу
 		collecting[model] = nil
 	end)
 end
@@ -428,10 +430,7 @@ RunService.Heartbeat:Connect(function()
 			-- «дыхание» плотности у своего черепа: живой, но всё равно воздушный
 			local idx = activeSkullIndex
 			if idx and m:GetAttribute("cp" .. idx) == true then
-				local img = skullFaceImage(m)
-				if img then
-					img.ImageTransparency = SKULL_ALPHA_ACTIVE + math.sin(t * 2.1) * SKULL_PULSE
-				end
+				setSkullFade(m, math.max(0, SKULL_FADE_ACTIVE + math.sin(t * 2.1) * SKULL_PULSE))
 				local char = player.Character
 				local root = char and char.PrimaryPart
 				if root and (root.Position - home.Position).Magnitude < TRANSFORM_DIST then

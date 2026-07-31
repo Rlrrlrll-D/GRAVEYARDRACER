@@ -26,6 +26,9 @@ local markerFolder = Instance.new("Folder")
 markerFolder.Name = "RaceMarkers"
 markerFolder.Parent = workspace
 local ORB_COLOR = Color3.fromRGB(120, 255, 200) -- магический сине-зелёный (в тон "green beacons")
+-- Череп-чекпоинт: юзер попросил бело-голубой («только цвет бело-голубой»). Отдельно
+-- от ORB_COLOR: тот держит зелёные маяки/трейлы старого стиля, их трогать незачем.
+local SKULL_COLOR = Color3.fromRGB(196, 228, 255)
 -- Плашка-череп: точный силуэт из SVG пользователя (белый, мягкие края, глазницы/
 -- зубы вырезаны насквозь), загружен как image-ассет — без EditableImage/верификации.
 local SKULL_IMAGE = "rbxassetid://79551611166203"
@@ -96,11 +99,9 @@ local function buildOrb(cp: Vector3, i: number)
 	bob:Play()
 end
 
--- череп-Каспер: плоская полупрозрачная плашка (силуэт из SVG пользователя —
--- мягкие размытые края, глазницы и промежутки между зубами вырезаны насквозь).
--- Рисуется билбордом (всегда «лицом» к камере). Само изображение (EditableImage)
--- накладывает клиент (UIController) — оно client-side и не реплицируется; сервер
--- держит каркас: невидимый якорь + BillboardGui с пустым ImageLabel + свет + «дух».
+-- череп-Каспер: плоская плашка-силуэт (SVG юзера — мягкие края, глазницы и
+-- промежутки между зубами вырезаны насквозь), нарисованная билбордом, то есть всегда
+-- лицом к камере. Плюс ореол из копий той же плашки — см. подробности ниже.
 local function buildSkull(cp: Vector3, i: number): Model
 	local centre = Vector3.new(cp.X, MARKER_Y, cp.Z)
 
@@ -121,34 +122,51 @@ local function buildSkull(cp: Vector3, i: number): Model
 	anchor.Parent = skull
 	skull.PrimaryPart = anchor
 
-	-- НИ ЛАМП, НИ ОРЕОЛОВ, НИ ЧАСТИЦ (2026-07-26, требование юзера). Всё, что он
-	-- называл «пятном» и «белым круглым мутным облаком», — это были по очереди:
-	-- PointLight (светил на дорогу, а не сам череп), аддитивный спрайт Halo и залп
-	-- Spirit текстурой smoke_main (она и есть размытый круглый шар). Любой софт-спрайт
-	-- на этой сцене читается как пятно, поэтому маркер = ОДИН силуэт черепа, а
-	-- «дымок» — это анимация превращения самой плашки (UIController.collectSkull).
-
-	-- плоская плашка-череп: чёткий силуэт. Тон холодный призрачный, а не белый —
-	-- белая плашка ночью читалась как «пятно».
+	-- ПЛАШКА-СИЛУЭТ (та самая, из SVG юзера) + СВЕЧЕНИЕ ЕЁ ЖЕ ФОРМОЙ.
+	--
+	-- Почему свечение нарисовано, а не «включено материалом». Стрелки старта светятся
+	-- потому, что они Part с Material = Neon: неон рисуется в HDR ярче единицы и
+	-- проходит порог BloomEffect.Threshold = 1.5 (замерено в этом плейсе). Пиксель UI
+	-- физически не может быть ярче 1.0, поэтому BillboardGui не даёт блюма НИКОГДА —
+	-- проверено на месте: плашка при любой яркости остаётся без ореола, а неоновая
+	-- деталь светится. Подпирать плашку неоновым шаром нельзя: получается светящийся
+	-- шар вместо черепа (юзер это забраковал).
+	--
+	-- Поэтому ореол собран из САМОЙ ПЛАШКИ: три копии того же силуэта под основной,
+	-- крупнее и прозрачнее. Свет получается формы черепа — с рогами глазниц и
+	-- челюстью, — то есть читается как свечение ЕГО, а не как пятно позади него.
 	local face = Instance.new("BillboardGui")
 	face.Name = "Face"
-	face.Size = UDim2.fromScale(4.2, 4.7) -- Scale (относительно якоря 0.6): ~2.5 studs, масштабируется с расстоянием как объект (offset давал постоянный экранный размер → казался «наоборот»)
+	face.Size = UDim2.fromScale(4.2, 4.7) -- Scale относительно якоря 0.6 → ~2.5 studs
 	face.LightInfluence = 0 -- полноярко: не темнеет ночью
 	face.Parent = anchor
+
+	-- слои ореола: {во сколько раз крупнее, прозрачность}
+	local HALO = { { 1.62, 0.90 }, { 1.34, 0.80 }, { 1.15, 0.64 } }
+	for k, layer in HALO do
+		local halo = Instance.new("ImageLabel")
+		halo.Name = "Halo" .. k
+		halo.AnchorPoint = Vector2.new(0.5, 0.5)
+		halo.Position = UDim2.fromScale(0.5, 0.5)
+		halo.Size = UDim2.fromScale(layer[1], layer[1])
+		halo.BackgroundTransparency = 1
+		halo.Image = SKULL_IMAGE
+		halo.ImageColor3 = SKULL_COLOR
+		halo.ImageTransparency = layer[2]
+		halo.ZIndex = k -- чем крупнее, тем дальше назад
+		halo.Parent = face
+	end
+
 	local img = Instance.new("ImageLabel")
 	img.Name = "Img"
-	img.Size = UDim2.new(1, 0, 1, 0)
+	img.AnchorPoint = Vector2.new(0.5, 0.5)
+	img.Position = UDim2.fromScale(0.5, 0.5)
+	img.Size = UDim2.fromScale(1, 1)
 	img.BackgroundTransparency = 1
 	img.Image = SKULL_IMAGE
-	img.ImageColor3 = ORB_COLOR -- призрачно-зелёный, не белый
-	-- Юзер: «сделай, чтобы черепа-чеки светились как стрелки на старте, только менее
-	-- интенсивно». Стрелки — это Neon с прозрачностью 0.15, то есть почти сплошной
-	-- свет. Череп светится тем же приёмом, что и они: `LightInfluence = 0` уже стоит,
-	-- значит плашка не темнеет ночью и сама попадает в bloom, — не хватало только
-	-- плотности: 0.82 читалось как «едва намёк». 0.55 — заметно слабее стрелок, но
-	-- уже свечение. Живое значение ставит клиент (UIController: SKULL_ALPHA_*), это —
-	-- стартовое, до первого его касания.
-	img.ImageTransparency = 0.55
+	img.ImageColor3 = SKULL_COLOR -- бело-голубой
+	img.ImageTransparency = 0.15 -- ровно как у стрелок старта
+	img.ZIndex = #HALO + 1
 	img.Parent = face
 
 	skull.Parent = markerFolder

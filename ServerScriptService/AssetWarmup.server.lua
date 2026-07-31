@@ -41,7 +41,7 @@ local RUNTIME_SOUNDS = {
 
 -- Картинки/меши, которые тоже рождаются из кода, а не лежат инстансами.
 local RUNTIME_IMAGES = {
-	"rbxassetid://79551611166203", -- RaceScene: плашка-череп чекпоинта
+	"rbxassetid://79551611166203", -- RaceScene: плашка-череп чекпоинта (и слои ореола)
 }
 
 local sounds: { [string]: boolean } = {}
