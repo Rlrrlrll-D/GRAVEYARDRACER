@@ -28,11 +28,12 @@ local SoundService = game:GetService("SoundService")
 -- найти. ДОБАВЛЯЕШЬ звук в код — добавь id и сюда, иначе он снова будет тянуться
 -- по сети посреди заезда.
 local RUNTIME_SOUNDS = {
-	"rbxassetid://135385970610304", -- UIController: звон чекпоинта
+	"rbxassetid://9114228524", -- UIController: шёпот на чекпоинте
 	"rbxassetid://4961240438", -- UIController: финиш / GraveyardAmbience: гром
 	"rbxassetid://88311346538102", -- TurretAimClient: выстрел
 	"rbxassetid://130598693233260", -- DrivingMusic: музыка заезда
-	"rbxassetid://9113994447", -- BatFX: визг стаи (скример)
+	"rbxassetid://9125386815", -- BatFX: залп крыльев колонии (скример)
+	"rbxassetid://9117009021", -- BatFX: визг стаи (скример)
 	"rbxassetid://9112764040", -- GraveyardAmbience: сверчки
 	"rbxassetid://121066883602737", -- ZombieAI: рык при замахе
 	"rbxassetid://9116771817", -- ZombieAI: лязг по кузову

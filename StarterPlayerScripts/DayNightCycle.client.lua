@@ -18,9 +18,9 @@ local RunService = game:GetService("RunService")
 local EnvironmentConfig = require(ReplicatedStorage:WaitForChild("EnvironmentConfig"))
 local night = EnvironmentConfig.Atmosphere
 local dusk = EnvironmentConfig.Dusk
-local day = EnvironmentConfig.Day
+local evening = EnvironmentConfig.Evening
 
--- NightAnchor: 0 — ночь (базовое состояние сервера), < 0 — держим ДЕНЬ (лобби),
+-- NightAnchor: 0 — ночь (базовое состояние сервера), < 0 — держим ВЕЧЕР (лобби),
 -- > 0 — идёт переход, значение = серверное время его начала.
 local anchor = ReplicatedStorage:WaitForChild("NightAnchor") :: NumberValue
 
@@ -38,14 +38,15 @@ end
 local atmosphere: Atmosphere = waitForEffect("Atmosphere")
 local colorCorrection: ColorCorrectionEffect = waitForEffect("ColorCorrectionEffect")
 
--- ДУГА СУТОК: три опоры вместо двух (юзер: «начало игры днём, сумерки и темнеть
--- должно медленно, не сразу»). Раньше заезд стартовал сразу с сумерек, и дня в
--- игре не было вовсе. Теперь день → сумерки → ночь, сумерки стоят на доле DuskAt.
+-- ДУГА СУТОК: три опоры вместо двух («темнеть должно медленно, не сразу»). Первой
+-- опорой был ПОЛДЕНЬ, но юзер: «надо сделать начало с сумерек, день — это ярковато
+-- для такого жанра», — теперь это ранний вечер. Дуга: вечер → сумерки → ночь,
+-- сумерки стоят на доле DuskAt.
 --
--- ClockTime идёт ЧЕРЕЗ полночь: 13.2 → 17.9 → 24.7, на выходе берём остаток от 24.
+-- ClockTime идёт ЧЕРЕЗ полночь: 16.6 → 17.9 → 24.7, на выходе берём остаток от 24.
 -- Иначе интерполяция к 0.7 отмотала бы сутки назад, через полдень.
 local KEYS = {
-	{ at = 0, cfg = day, clock = day.ClockTime },
+	{ at = 0, cfg = evening, clock = evening.ClockTime },
 	{ at = math.clamp(dusk.DuskAt, 0.05, 0.95), cfg = dusk, clock = dusk.ClockTime },
 	{ at = 1, cfg = night, clock = night.ClockTime + 24 },
 }

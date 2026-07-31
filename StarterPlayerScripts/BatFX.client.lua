@@ -29,7 +29,17 @@ local player = game:GetService("Players").LocalPlayer
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local batScare = Net.get(Net.Events.BatScare)
 
-local SCREECH_ID = "rbxassetid://9113994447" -- залп крыльев (ProSoundEffects «Creature Wings 24», bat flaps 2.1с); пусто = без звука
+-- ЗВУК СКРИМЕРА (юзер: «сопроводи вылет мышей на скримере каким-то соответствующим
+-- звуком»). Звук был и раньше, но один слой и не тот: «Creature Wings 24» — ровный
+-- шелест крыльев с описанием «bat OR flying insect», под рой в лицо он читался как
+-- шорох, а не как испуг. Теперь два слоя из той же библиотеки ProSoundEffects:
+--   WINGS  — «Bat Noises, Bursts of Wings Flapping, Fast Aways» (2.6с): залп крыльев
+--            целой колонии, а не одиночный взмах;
+--   SQUEAL — «Mouse Vocal, Rapid Chatter, Squeaky, Shrill» (2.0с): собственно визг,
+--            он и пугает. Задран по высоте — иначе слышно крысу, а не летучую мышь.
+-- Пустая строка у любого из двух = этот слой молчит.
+local WINGS_ID = "rbxassetid://9125386815"
+local SQUEAL_ID = "rbxassetid://9117009021"
 local POOL_SIZE = 48 -- рой (до 34) + эмбиент + запас: занятую мышь НИКОГДА не отбираем
 local PARK = Vector3.new(0, -900, 0) -- «гараж» простаивающих клонов, под картой
 local BAT_SCALE = 2.2 -- мышь крупнее: экран накрывает размером, а не подлезанием к камере
@@ -50,10 +60,15 @@ local folder = Instance.new("Folder")
 folder.Name = "BatFX"
 folder.Parent = workspace.CurrentCamera
 
-local screech = Instance.new("Sound")
-screech.SoundId = SCREECH_ID
-screech.Volume = 1
-screech.Parent = SoundService
+local wings = Instance.new("Sound")
+wings.SoundId = WINGS_ID
+wings.Volume = 1
+wings.Parent = SoundService
+
+local squeal = Instance.new("Sound")
+squeal.SoundId = SQUEAL_ID
+squeal.Volume = 0.85
+squeal.Parent = SoundService
 
 -- Части модели вместе с корнем (шаблон может быть и Model, и одиночным MeshPart).
 local function partsOf(inst: Instance): { BasePart }
@@ -210,7 +225,7 @@ task.spawn(function()
 		task.wait() -- растягиваем создание по кадрам: сам прогрев не должен дёргать
 	end
 	pcall(function()
-		ContentProvider:PreloadAsync({ template, screech })
+		ContentProvider:PreloadAsync({ template, wings, squeal })
 	end)
 	warmSwarm()
 end)
@@ -338,7 +353,16 @@ batScare.OnClientEvent:Connect(function(origin: Vector3, count: number, kind: st
 	end
 	if kind == "swarm" then
 		if not jumpscaresOn then return end -- уважаем пугливых
-		if SCREECH_ID ~= "" then screech:Play() end
+		-- крылья и визг одновременно: залп крыльев даёт «масса рванула», визг — испуг.
+		-- Высота визга каждый раз своя, иначе третий скример за заезд звучит заученно.
+		if WINGS_ID ~= "" then
+			wings.PlaybackSpeed = 0.95 + math.random() * 0.15
+			wings:Play()
+		end
+		if SQUEAL_ID ~= "" then
+			squeal.PlaybackSpeed = 1.18 + math.random() * 0.22
+			squeal:Play()
+		end
 		for _ = 1, count do
 			launchOne(origin, true)
 		end

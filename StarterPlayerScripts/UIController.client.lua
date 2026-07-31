@@ -16,11 +16,15 @@ local UITheme = require(ReplicatedStorage:WaitForChild("UITheme"))
 
 local player = Players.LocalPlayer
 
--- Звон при прохождении чекпоинта (magic-orb). Twinkle08 — free Creator Store.
+-- Чекпоинт (юзер: «поменяй звук прохода чекпоинтов на что-нибудь ghost-образное»).
+-- Был волшебный звон Twinkle08 — сказочный, из другой игры. Теперь «Eerie Whispering,
+-- Reverberant» (ProSoundEffects, 2.3с): шёпот с эхом, будто на скорости проскочил
+-- сквозь кого-то. Длительность выбрана не на слух: чекпоинтов 12 на 3128 studs, то
+-- есть на скорости они идут раз в ~2.9с — звук длиннее наложился бы сам на себя.
 local SoundService = game:GetService("SoundService")
 local checkpointSound = Instance.new("Sound")
-checkpointSound.SoundId = "rbxassetid://135385970610304"
-checkpointSound.Volume = 0.5
+checkpointSound.SoundId = "rbxassetid://9114228524"
+checkpointSound.Volume = 0.6
 checkpointSound.Parent = SoundService
 
 local finishSound = Instance.new("Sound")
