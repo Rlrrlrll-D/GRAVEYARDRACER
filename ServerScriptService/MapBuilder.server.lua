@@ -399,17 +399,38 @@ local CEM_YAW = 0 -- единый разворот всех камней
 
 -- Веса типов: свои меши по одной детали — основа поля; магазинные крупные
 -- памятники редкими акцентами, они дороже по деталям и заметно больше.
+-- Восемь форм, и ни одна не доминирует: юзер сказал «надгробья сплошь одинаковые» —
+-- прежние веса отдавали больше половины поля двум своим мешам. Добавлены кресты
+-- (кельтский и на плинте) — именно силуэт креста ломает монотонность ряда.
+-- `Tombstone_D` выброшен совсем: на нём были авторские подписи из стора
+-- (`SurfaceGui`/`SIGN` — «RIP Dienyans main account»), а детали лежали повёрнутыми
+-- на 90°, отчего памятник выглядел опрокинутым.
 local CEM_KINDS = {
-	{ name = "Tombstone", weight = 30, sMin = 1.0, sMax = 2.6 },
-	{ name = "Tombstone_B", weight = 22, sMin = 1.0, sMax = 2.4 },
-	{ name = "Tombstone_C", weight = 14, sMin = 0.9, sMax = 1.8 },
+	{ name = "Tombstone", weight = 18, sMin = 1.0, sMax = 2.4 },
+	{ name = "Tombstone_B", weight = 15, sMin = 1.0, sMax = 2.2 },
+	{ name = "Tombstone_H", weight = 14, sMin = 0.9, sMax = 1.8 }, -- кельтский крест
+	{ name = "Tombstone_C", weight = 13, sMin = 0.9, sMax = 1.8 },
+	{ name = "Tombstone_J", weight = 13, sMin = 1.0, sMax = 1.9 }, -- крест на плинте
 	{ name = "Tombstone_G", weight = 12, sMin = 1.2, sMax = 2.6 },
 	{ name = "Tombstone_F", weight = 10, sMin = 0.9, sMax = 1.6 },
-	{ name = "Tombstone_E", weight = 8, sMin = 0.6, sMax = 1.0 }, -- обелиск, высокий
-	-- Плита широкая (11 studs): в полный рост читается как стена поперёк участка,
-	-- поэтому и вес маленький, и масштаб срезан — она тут семейный склеп, не забор.
-	{ name = "Tombstone_D", weight = 3, sMin = 0.45, sMax = 0.7 }
+	{ name = "Tombstone_E", weight = 5, sMin = 0.6, sMax = 1.0 }, -- обелиск, высокий
 }
+
+-- Камень одного тона на всё поле тоже читается как копипаста, поэтому у каждого
+-- памятника свой оттенок серого, а один из шести — замшелый, позеленевший от сырости.
+local CEM_STONE = Color3.fromRGB(163, 162, 165)
+local function stoneTone(): Color3
+	if RNG:NextNumber() < 0.17 then
+		local g = RNG:NextInteger(96, 128)
+		return Color3.fromRGB(g - 18, g, g - 26) -- мох
+	end
+	local t = RNG:NextInteger(-26, 14)
+	return Color3.fromRGB(
+		math.clamp(163 + t, 0, 255),
+		math.clamp(162 + t, 0, 255),
+		math.clamp(165 + math.floor(t * 0.85), 0, 255)
+	)
+end
 local CEM_WEIGHT_TOTAL = 0
 for _, k in CEM_KINDS do
 	CEM_WEIGHT_TOTAL += k.weight
@@ -458,17 +479,22 @@ do
 				continue
 			end
 			local kind = pickKind()
-			local tmpl = getTemplateVariant(kind.name)
+			-- ТОЧНЫЙ шаблон, не `getTemplateVariant`: тот сам случайно выбирает среди
+			-- всех `Tombstone_*` и затирает веса — в первой сборке из-за этого «Tombstone»
+			-- с весом 18% получил 3% поля, а раздача типов шла почти поровну.
+			local tmpl = getTemplate(kind.name)
 			if tmpl then
 				local model = tmpl:Clone()
 				model:ScaleTo(RNG:NextNumber(kind.sMin, kind.sMax))
 				dropToGround(model, g, CEM_YAW) -- разворот ОДИН на всех: ряды параллельны
+				local tone = stoneTone()
 				for _, part in model:GetDescendants() do
 					if part:IsA("BasePart") then
 						part.Anchored = true
 						part.CanCollide = true
 						part.CollisionGroup = "Obstacles"
 						part.CastShadow = false
+						part.Color = tone
 					end
 				end
 				model.Parent = mapFolder
