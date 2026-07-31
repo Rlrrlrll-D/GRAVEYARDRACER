@@ -26,12 +26,9 @@ local markerFolder = Instance.new("Folder")
 markerFolder.Name = "RaceMarkers"
 markerFolder.Parent = workspace
 local ORB_COLOR = Color3.fromRGB(120, 255, 200) -- магический сине-зелёный (в тон "green beacons")
--- Череп-чекпоинт: юзер попросил бело-голубой («только цвет бело-голубой»). Отдельно
--- от ORB_COLOR: тот держит зелёные маяки/трейлы старого стиля, их трогать незачем.
-local SKULL_COLOR = Color3.fromRGB(196, 228, 255)
--- Плашка-череп: точный силуэт из SVG пользователя (белый, мягкие края, глазницы/
--- зубы вырезаны насквозь), загружен как image-ассет — без EditableImage/верификации.
-local SKULL_IMAGE = "rbxassetid://79551611166203"
+-- Цвет и форма черепа-чекпоинта живут у КЛИЕНТА (UIController: SKULL_COLOR + меш из
+-- ReplicatedStorage.SkullShape) — здесь они больше не нужны, сервер держит лишь якорь.
+-- Прежний ассет-силуэт, если понадобится вернуть: rbxassetid://79551611166203
 
 -- magic-orb: полая мерцающая сфера + орбитальные светящиеся ленты
 local function buildOrb(cp: Vector3, i: number)
@@ -122,53 +119,18 @@ local function buildSkull(cp: Vector3, i: number): Model
 	anchor.Parent = skull
 	skull.PrimaryPart = anchor
 
-	-- ПЛАШКА-СИЛУЭТ (та самая, из SVG юзера) + СВЕЧЕНИЕ ЕЁ ЖЕ ФОРМОЙ.
+	-- ВИД ЧЕРЕПА СОБИРАЕТ КЛИЕНТ, здесь только невидимый якорь.
 	--
-	-- Почему свечение нарисовано, а не «включено материалом». Стрелки старта светятся
-	-- потому, что они Part с Material = Neon: неон рисуется в HDR ярче единицы и
-	-- проходит порог BloomEffect.Threshold = 1.5 (замерено в этом плейсе). Пиксель UI
-	-- физически не может быть ярче 1.0, поэтому BillboardGui не даёт блюма НИКОГДА —
-	-- проверено на месте: плашка при любой яркости остаётся без ореола, а неоновая
-	-- деталь светится. Подпирать плашку неоновым шаром нельзя: получается светящийся
-	-- шар вместо черепа (юзер это забраковал).
+	-- Юзер: «ты можешь сделать плашку неоновой как стрелки?». Может, но силуэт для
+	-- этого обязан быть ДЕТАЛЬЮ: Material = Neon есть у детали, у ImageLabel его нет,
+	-- а блюм берёт только то, что ярче единицы (BloomEffect.Threshold = 1.5 в этом
+	-- плейсе) — пиксель UI ярче 1.0 не бывает. Поэтому плашка теперь меш, собранный
+	-- из силуэта (ReplicatedStorage.SkullShape) через EditableMesh.
 	--
-	-- Поэтому ореол собран из САМОЙ ПЛАШКИ: три копии того же силуэта под основной,
-	-- крупнее и прозрачнее. Свет получается формы черепа — с рогами глазниц и
-	-- челюстью, — то есть читается как свечение ЕГО, а не как пятно позади него.
-	local face = Instance.new("BillboardGui")
-	face.Name = "Face"
-	face.Size = UDim2.fromScale(4.2, 4.7) -- Scale относительно якоря 0.6 → ~2.5 studs
-	face.LightInfluence = 0 -- полноярко: не темнеет ночью
-	face.Parent = anchor
-
-	-- слои ореола: {во сколько раз крупнее, прозрачность}
-	local HALO = { { 1.62, 0.90 }, { 1.34, 0.80 }, { 1.15, 0.64 } }
-	for k, layer in HALO do
-		local halo = Instance.new("ImageLabel")
-		halo.Name = "Halo" .. k
-		halo.AnchorPoint = Vector2.new(0.5, 0.5)
-		halo.Position = UDim2.fromScale(0.5, 0.5)
-		halo.Size = UDim2.fromScale(layer[1], layer[1])
-		halo.BackgroundTransparency = 1
-		halo.Image = SKULL_IMAGE
-		halo.ImageColor3 = SKULL_COLOR
-		halo.ImageTransparency = layer[2]
-		halo.ZIndex = k -- чем крупнее, тем дальше назад
-		halo.Parent = face
-	end
-
-	local img = Instance.new("ImageLabel")
-	img.Name = "Img"
-	img.AnchorPoint = Vector2.new(0.5, 0.5)
-	img.Position = UDim2.fromScale(0.5, 0.5)
-	img.Size = UDim2.fromScale(1, 1)
-	img.BackgroundTransparency = 1
-	img.Image = SKULL_IMAGE
-	img.ImageColor3 = SKULL_COLOR -- бело-голубой
-	img.ImageTransparency = 0.15 -- ровно как у стрелок старта
-	img.ZIndex = #HALO + 1
-	img.Parent = face
-
+	-- А строит его КЛИЕНТ (UIController), потому что меш из EditableMesh НЕ
+	-- реплицируется: собери его сервер — игроки увидели бы пустое место. Сервер
+	-- держит якорь, теги и атрибуты (по ним работают логика гонки, компас и подсветка),
+	-- клиент навешивает вид.
 	skull.Parent = markerFolder
 	-- парение/изображение/подсветка — на клиенте (UIController skull-bob).
 	return skull

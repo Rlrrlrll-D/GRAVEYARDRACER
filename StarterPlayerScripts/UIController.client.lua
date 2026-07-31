@@ -200,29 +200,132 @@ type RacePayload = {
 	Needed: number?,
 }
 
--- Череп — плашка-силуэт плюс слои ореола из неё же (RaceScene.buildSkull). Плотность
--- ведём ОДНОЙ величиной fade: 0 — как построено сервером (основная плашка 0.15, слои
--- ореола 0.64/0.80/0.90), 1 — исчез совсем. Авторскую прозрачность каждого слоя
--- запоминаем при первом касании, иначе после первого же затухания «исходником» стало
--- бы затухшее значение и череп больше не вернулся бы к прежней плотности.
-local skullLayerBase: { [ImageLabel]: number } = {}
-local function skullLayers(model: Model): { ImageLabel }
-	local list: { ImageLabel } = {}
-	for _, d in model:GetDescendants() do
-		if d:IsA("ImageLabel") then
-			if skullLayerBase[d] == nil then
-				skullLayerBase[d] = d.ImageTransparency
-			end
-			table.insert(list, d)
-		end
+-- // ПЛАШКА-ЧЕРЕП КАК НАСТОЯЩАЯ НЕОНОВАЯ ДЕТАЛЬ ------------------------------
+--
+-- Юзер: «ты можешь сделать плашку неоновой как стрелки?». Может — но только если
+-- силуэт перестанет быть картинкой. Material = Neon есть у ДЕТАЛИ, у ImageLabel его
+-- нет и быть не может, а блюм берёт лишь то, что ярче единицы (BloomEffect.Threshold
+-- = 1.5 в этом плейсе): пиксель UI ярче 1.0 не бывает, потому у плашки и не было
+-- ореола, сколько её ни высветляй.
+--
+-- Поэтому силуэт снят с исходника (ReplicatedStorage.SkullShape: 208 прямоугольников,
+-- полученных из D:\VECTOR\skull.svg — который, вопреки расширению, оказался обёрткой
+-- вокруг встроенного PNG) и собирается в МЕШ прямо на клиенте через EditableMesh.
+-- Загружать ассет не нужно, верификация не нужна — проверено в этом плейсе.
+--
+-- ПОЧЕМУ НА КЛИЕНТЕ, а не на сервере: меш, построенный из EditableMesh, не
+-- реплицируется — сервер собрал бы его себе, а игроки увидели бы пустоту. Сервер
+-- поэтому держит только невидимый якорь (RaceScene), а вид навешивает каждый клиент.
+local AssetService = game:GetService("AssetService")
+local SKULL_COLOR = Color3.fromRGB(196, 228, 255) -- бело-голубой, как просил юзер
+local SKULL_WIDTH = 2.6 -- ширина плашки в studs
+local plateTemplate: BasePart? = nil
+local plateTried = false
+
+local function buildPlateTemplate(): BasePart?
+	if plateTried then
+		return plateTemplate
 	end
-	return list
+	plateTried = true
+	local okShape, shape = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("SkullShape", 10))
+	end)
+	if not okShape or type(shape) ~= "table" then
+		warn("[UIController] SkullShape не найден — плашка-череп не собрана")
+		return nil
+	end
+	local ok, part = pcall(function()
+		local em = AssetService:CreateEditableMesh()
+		local gw, gh = shape.GridW, shape.GridH
+		local step = 1 / gw
+		local halfT = step * 2 -- толщина плиты: тонкая, но не нулевая
+		for _, r in shape.Rects do
+			local x0 = (r[1] - gw / 2) * step
+			local x1 = (r[1] + r[3] - gw / 2) * step
+			-- в сетке Y растёт ВНИЗ, в мире — вверх
+			local y0 = (gh / 2 - (r[2] + r[4])) * step
+			local y1 = (gh / 2 - r[2]) * step
+			for _, z in { halfT, -halfT } do
+				local a = em:AddVertex(Vector3.new(x0, y0, z))
+				local b = em:AddVertex(Vector3.new(x1, y0, z))
+				local c = em:AddVertex(Vector3.new(x1, y1, z))
+				local d = em:AddVertex(Vector3.new(x0, y1, z))
+				if z > 0 then -- лицевая сторона против часовой, тыльная наоборот
+					em:AddTriangle(a, b, c)
+					em:AddTriangle(a, c, d)
+				else
+					em:AddTriangle(a, c, b)
+					em:AddTriangle(a, d, c)
+				end
+			end
+		end
+		return AssetService:CreateMeshPartAsync(Content.fromObject(em))
+	end)
+	if not ok or typeof(part) ~= "Instance" then
+		warn("[UIController] меш черепа не собрался: " .. tostring(part))
+		return nil
+	end
+	local plate = part :: MeshPart
+	plate.Name = "Plate"
+	if plate.Size.X > 0 then
+		plate.Size = plate.Size * (SKULL_WIDTH / plate.Size.X)
+	end
+	plate.Material = Enum.Material.Neon -- ровно как стрелки старта
+	plate.Color = SKULL_COLOR
+	plate.Transparency = 0.15 -- и ровно та же прозрачность
+	plate.Anchored = true
+	plate.CanCollide = false
+	plate.CanQuery = false
+	plate.CanTouch = false
+	plate.CastShadow = false
+	plateTemplate = plate
+	return plate
 end
 
+-- Навесить плашку на череп, если её там ещё нет (у каждого клиента своя).
+local function ensurePlate(model: Model): BasePart?
+	local existing = model:FindFirstChild("Plate")
+	if existing and existing:IsA("BasePart") then
+		return existing
+	end
+	local template = buildPlateTemplate()
+	if not template then
+		return nil
+	end
+	local plate = template:Clone()
+	plate.CFrame = model:GetPivot() -- стартовое; дальше каждый кадр ставит aimPlate
+	plate.Parent = model
+	return plate
+end
+
+-- Плашка — деталь, а не билборд, поэтому «лицом к камере» её ставим сами. Двенадцать
+-- CFrame за кадр — цена никакая, зато силуэт всегда развёрнут к водителю, как и был.
+-- roll (градусы) — закрутка вокруг оси взгляда, ею пользуется растворение.
+local function aimPlate(model: Model, roll: number?)
+	local plate = model:FindFirstChild("Plate")
+	if not (plate and plate:IsA("BasePart")) then
+		return
+	end
+	local cam = workspace.CurrentCamera
+	if not cam then
+		return
+	end
+	-- Позицию берём ОТ ПИВОТА МОДЕЛИ, а не от самой плашки. Так надёжнее: плашка
+	-- создаётся клиентом в произвольный момент, и в первом заходе она осталась в
+	-- начале координат — модель к тому времени ещё не была на месте. Раз мы всё равно
+	-- трогаем её CFrame каждый кадр, пусть он и задаёт положение: тогда любой сдвиг
+	-- черепа (парение, улёт) плашка подхватывает сама.
+	local pivot = model:GetPivot().Position
+	local cf = CFrame.lookAt(pivot, cam.CFrame.Position)
+	plate.CFrame = roll and (cf * CFrame.Angles(0, 0, math.rad(roll))) or cf
+end
+
+-- Плотность ведём ОДНОЙ величиной fade: 0 — как построено (неон 0.15), 1 — исчез.
+local SKULL_BASE_ALPHA = 0.15
 local function setSkullFade(model: Model, fade: number)
-	for _, g in skullLayers(model) do
-		local base = skullLayerBase[g] or 0
-		g.ImageTransparency = math.clamp(base + (1 - base) * fade, 0, 1)
+	local plate = ensurePlate(model)
+	if plate then
+		plate.Transparency = math.clamp(SKULL_BASE_ALPHA + (1 - SKULL_BASE_ALPHA) * fade, 0, 1)
 	end
 end
 
@@ -315,7 +418,6 @@ local function collectSkull(index: number)
 		side = Vector3.new(side.X, 0, side.Z)
 		side = side.Magnitude > 1e-3 and side.Unit or Vector3.xAxis
 		local twist = (math.random() < 0.5 and -1 or 1) * 46 -- градусы, закрутка плашки
-		local layers = skullLayers(ghost)
 		local startScale = ghost:GetScale()
 		task.spawn(function()
 			local t0 = os.clock()
@@ -326,19 +428,17 @@ local function collectSkull(index: number)
 				local sway = math.sin(a * math.pi * 2) * 2.8 * (1 - a * 0.55)
 				ghost:PivotTo(home + Vector3.new(0, up, 0) + side * sway)
 				ghost:ScaleTo(math.max(0.12, startScale * (1 - a * 0.82)))
-				-- плашка билбордная, поэтому «закрутка» — это поворот самой картинки
-				for _, g in layers do
-					g.Rotation = twist * a
-				end
+				aimPlate(ghost, twist * a) -- лицом к камере и с закруткой
 				task.wait()
 			end
 		end)
 	end
 
 	-- гаснет не сразу: сначала видно, КАК он тянется, и только к концу исчезает
-	for _, g in skullLayers(ghost) do
-		TweenService:Create(g, TweenInfo.new(RISE, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-			{ ImageTransparency = 1 }):Play()
+	local gPlate = ghost:FindFirstChild("Plate")
+	if gPlate and gPlate:IsA("BasePart") then
+		TweenService:Create(gPlate, TweenInfo.new(RISE, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+			{ Transparency = 1 }):Play()
 	end
 
 	task.delay(RISE + 0.2, function()
@@ -427,6 +527,7 @@ RunService.Heartbeat:Connect(function()
 			local phase = (id and tonumber(id) or 0) * 0.7
 			local y = math.sin(t * 1.3 + phase) * 0.9
 			m:PivotTo(home + Vector3.new(0, y, 0))
+			aimPlate(m) -- плашка-деталь сама к камере не поворачивается
 			-- «дыхание» плотности у своего черепа: живой, но всё равно воздушный
 			local idx = activeSkullIndex
 			if idx and m:GetAttribute("cp" .. idx) == true then
