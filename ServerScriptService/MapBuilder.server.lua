@@ -202,6 +202,11 @@ for _, data in MapLayout.Graves do
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
 			part.Anchored = true
+			-- Группа как у ВСЕГО остального декора. Эти 14 камней её не получали и
+			-- оставались в Default, а Zombies↔Default = true — то есть надгробие
+			-- работало для зомби полом: замер поймал живого, стоящего на +4.61 над
+			-- землёй. В Obstacles зомби проходит сквозь камень, машину камень держит.
+			part.CollisionGroup = "Obstacles"
 		end
 	end
 	CollectionService:AddTag(model, "Grave")

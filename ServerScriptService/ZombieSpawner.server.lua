@@ -112,7 +112,18 @@ end
 -- Freezes the zombie underground, then eases it up to its final CFrame.
 -- Runs synchronously within the caller's task so ZombieAI only starts once
 -- the zombie has fully emerged.
-local function riseFromGrave(zombie: Model, finalCFrame: CFrame)
+--
+-- ПРЕРЫВАЕТСЯ СМЕРТЬЮ. Юзер: «зомби зависают над чистой дорогой», и добивка была
+-- именно эта: «зомби гибнут от выстрелов, а не от столкновения». Турель достаёт
+-- зомби на 40-90 studs, то есть чаще всего РОВНО В МОМЕНТ, когда он лезет из
+-- могилы, — подъём идёт 1.2с. Дальше два кода дрались за одно тело: `PlayDeath`
+-- якорил детали и укладывал труп, а этот цикл продолжал тянуть его по своей дуге
+-- и в конце ставил стоймя в `finalCFrame` и СНИМАЛ ЯКОРЯ. Раз-якоренный труп с
+-- мёртвым Humanoid уезжал куда попало, а `sinkUnderground` потом якорил его там,
+-- где застало. Замер по 8 расстрелянным: у кого якоря уцелели (7/7) — зазор ровно
+-- +0.35, у кого сняты (0/7) — от +0.10 до +2.24, вот эти и «висят».
+-- Возвращает true, если зомби дожил до конца подъёма (тогда запускается ИИ).
+local function riseFromGrave(zombie: Model, finalCFrame: CFrame): boolean
 	local buriedCFrame = finalCFrame * CFrame.new(0, -BURY_DEPTH, 0)
 	zombie:PivotTo(buriedCFrame)
 
@@ -129,12 +140,25 @@ local function riseFromGrave(zombie: Model, finalCFrame: CFrame)
 		humanoid.PlatformStand = true
 	end
 
+	-- `Dead` ставит PlayDeath первым же действием — тот же сигнал, по которому
+	-- обрывается недоигранный замах. Humanoid.Health проверяем на случай, если
+	-- смерть случилась раньше, чем PlayDeath успел выставить атрибут.
+	local function dead(): boolean
+		return zombie:GetAttribute("Dead") == true or (humanoid ~= nil and humanoid.Health <= 0)
+	end
+
 	local startTime = os.clock()
 	while os.clock() - startTime < RISE_DURATION do
+		if dead() then
+			return false -- тело теперь целиком за PlayDeath: не двигаем и не раз-якориваем
+		end
 		local alpha = math.clamp((os.clock() - startTime) / RISE_DURATION, 0, 1)
 		local eased = alpha * alpha * (3 - 2 * alpha) -- smoothstep easing
 		zombie:PivotTo(buriedCFrame:Lerp(finalCFrame, eased))
 		task.wait()
+	end
+	if dead() then
+		return false
 	end
 	zombie:PivotTo(finalCFrame)
 
@@ -144,6 +168,7 @@ local function riseFromGrave(zombie: Model, finalCFrame: CFrame)
 	if humanoid then
 		humanoid.PlatformStand = false
 	end
+	return true
 end
 
 local function onZombieDied(zombie: Model, humanoid: Humanoid)
@@ -181,9 +206,19 @@ local function spawnZombie()
 		end
 	end
 
-	-- Rest the zombie's feet exactly on top of the grave point.
+	-- Ноги — НА ГРУНТ, а не на «центр детали-надгробия». `grave.Position` — это центр
+	-- части с тегом Grave, и у камня он гуляет как угодно: замер дал и +4.15 над землёй
+	-- (зомби появлялся в воздухе и потом падал), и -2.31 под ней. Опору ищем лучом ОТ
+	-- ЛИЦА ЗОМБИ (группа Zombies): сквозь декор он всё равно ходит, значит крышка
+	-- надгробия ему не пол — нужна земля под ней.
+	local groundParams = RaycastParams.new()
+	groundParams.FilterType = Enum.RaycastFilterType.Exclude
+	groundParams.CollisionGroup = "Zombies"
+	groundParams.FilterDescendantsInstances = { zombie }
+	local groundHit = workspace:Raycast(grave.Position + Vector3.new(0, 60, 0), Vector3.new(0, -200, 0), groundParams)
+	local footY = groundHit and groundHit.Position.Y or grave.Position.Y
 	local _, size = zombie:GetBoundingBox()
-	local finalCFrame = CFrame.new(grave.Position + Vector3.new(0, size.Y / 2, 0))
+	local finalCFrame = CFrame.new(Vector3.new(grave.Position.X, footY + size.Y / 2, grave.Position.Z))
 
 	-- Bury BEFORE parenting: otherwise the clone flashes for a frame at the
 	-- template's stored ServerStorage CFrame before the rise task teleports it.
@@ -199,8 +234,9 @@ local function spawnZombie()
 	humanoid.BreakJointsOnDeath = false
 
 	task.spawn(function()
-		riseFromGrave(zombie, finalCFrame)
-		task.spawn(ZombieAI.Run, zombie)
+		if riseFromGrave(zombie, finalCFrame) then
+			task.spawn(ZombieAI.Run, zombie) -- не дожил до конца подъёма — ИИ незачем
+		end
 	end)
 	task.spawn(onZombieDied, zombie, humanoid)
 end
