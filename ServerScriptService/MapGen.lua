@@ -1,7 +1,7 @@
 --!strict
 -- ModuleScript: ServerScriptService.MapGen
 -- Генератор Terrain-дороги (веха 8, Phase 1): красит полотно по осевой
--- (безье-сегментам) — травяная плита-основание + дорога Ground цепочкой
+-- (безье-сегментам) — плита-основание поля + дорога цепочкой
 -- вертикальных цилиндров (гладко на поворотах, без стыковых дыр). ОДИН источник
 -- правды: форма трассы = данные `segments`, полотно строится из них. Снимает
 -- «двойной источник» (террейн рисовался вручную, данные — отдельно).
@@ -13,6 +13,25 @@
 local Terrain = workspace.Terrain
 
 local MapGen = {}
+
+-- // МАТЕРИАЛЫ ПОЛОТНА И ПОЛЯ -------------------------------------------------
+-- ОДИН ИСТОЧНИК ПРАВДЫ: этими же значениями MapBuilder отличает поле от дороги
+-- (`grassPosition` = рейкаст + сверка материала), поэтому менять их только тут.
+--
+-- Поле НЕ `Grass`: у травяного материала движок рисует объёмную декорацию —
+-- самую тяжёлую геометрию кадра (замер 2026-07-30: `Grass 438 852 tris / 100
+-- draws` против `Opaque 5 367 / 5`). Выключить её нечем — `Terrain.Decoration`
+-- в этой версии Roblox «not a valid member», проверено и из плагина, и из
+-- серверного скрипта. Замер 2026-07-31 на плите 400×400 показал, что декорацию
+-- движок вешает на ДВА материала — `Grass` и `LeafyGrass` (у обоих одинаковые
+-- 23 664 tris), а у `Mud`/`Ground`/`Slate` в этой категории ровно ноль. Значит
+-- единственный рычаг — материал, и поле красится `Mud`.
+--
+-- Чтобы поле при этом не выглядело чёрной грязью, MapBuilder тонирует `Mud`
+-- через `Terrain:SetMaterialColor` в жухлый оливково-серый (см. FIELD_COLOR):
+-- получается мёртвая трава кладбища без единого полигона травинок.
+MapGen.FieldMaterial = Enum.Material.Mud
+MapGen.RoadMaterial = Enum.Material.Ground
 
 export type PaintOpts = {
 	scale: number?, -- множитель координат (MapLayout.Scale)
@@ -45,7 +64,7 @@ function MapGen.paint(segments: { { Vector2 } }, opts: PaintOpts?)
 		local size = Vector3.new(o.area.X, slab, o.area.Y)
 		local cf = CFrame.new(origin.X, top - slab / 2, origin.Z)
 		Terrain:FillBlock(cf, size, Enum.Material.Air)
-		Terrain:FillBlock(cf, size, Enum.Material.Grass)
+		Terrain:FillBlock(cf, size, MapGen.FieldMaterial)
 	end
 
 	-- дорога — цепочка вертикальных цилиндров Ground по осевой
@@ -56,7 +75,7 @@ function MapGen.paint(segments: { { Vector2 } }, opts: PaintOpts?)
 				CFrame.new(p.X * scale + origin.X, top - slab / 2, p.Y * scale + origin.Z),
 				slab,
 				width / 2,
-				Enum.Material.Ground
+				MapGen.RoadMaterial
 			)
 		end
 	end
@@ -88,7 +107,7 @@ function MapGen.paintPolyline(points: { Vector2 }, opts: PaintOpts?)
 		Terrain:FillBlock(
 			CFrame.new(origin.X, top - slab / 2, origin.Z),
 			Vector3.new(o.area.X, slab, o.area.Y),
-			Enum.Material.Grass
+			MapGen.FieldMaterial
 		)
 	end
 
@@ -99,7 +118,7 @@ function MapGen.paintPolyline(points: { Vector2 }, opts: PaintOpts?)
 			local f = s / sub
 			local x = (a.X + (b.X - a.X) * f) * scale + origin.X
 			local z = (a.Y + (b.Y - a.Y) * f) * scale + origin.Z
-			Terrain:FillCylinder(CFrame.new(x, top - slab / 2, z), slab, width / 2, Enum.Material.Ground)
+			Terrain:FillCylinder(CFrame.new(x, top - slab / 2, z), slab, width / 2, MapGen.RoadMaterial)
 		end
 	end
 end

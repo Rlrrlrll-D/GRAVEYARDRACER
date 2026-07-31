@@ -24,17 +24,25 @@ mapFolder.Parent = workspace
 
 -- // Генерация Terrain-дороги по осевой (форма из Road.svg) -------------------
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
+local MapGen = require(script.Parent:WaitForChild("MapGen"))
 
--- ТРАВА ТЕРРЕЙНА: проверена и НЕ виновата в фризах (замер 2026-07-30). В кадре она
--- действительно самая тяжёлая по геометрии — `Stats.RenderBreakdown` на пустой карте
--- дал `Grass 438 852 tris / 100 draws` против `Opaque 5 367 / 5`, — но цена эта
--- РОВНАЯ, а не рывками: проезд камерой на 84 studs/с по свежеперезалитому полю (вся
--- трава пересобиралась заново) дал 2230 кадров с худшим 19 мс и ноль всплесков.
--- Выключить её всё равно нечем: `Terrain.Decoration` в этой версии Roblox — «not a
--- valid member» и из песочницы MCP, и из обычного серверного скрипта; трава идёт от
--- самого материала Grass. Если когда-нибудь понадобится убрать — менять материал поля.
+-- ТРАВА ТЕРРЕЙНА УБРАНА (2026-07-31, по требованию юзера «убирай траву с поля,
+-- если это облегчит кадр»). Она была самой тяжёлой геометрией кадра — замер
+-- 2026-07-30 дал `Grass 438 852 tris / 100 draws` против `Opaque 5 367 / 5`.
+-- Рывков она не давала (цена ровная), но платить 438 тысяч треугольников за фон
+-- на встроенной Intel Iris Xe незачем.
+--
+-- Выключателя у неё нет: `Terrain.Decoration` в этой версии Roblox — «not a valid
+-- member» и из песочницы MCP, и из серверного скрипта (перепроверено 31.07).
+-- Декорацию движок вешает на материал, причём на ДВА: замер на плите 400×400 дал
+-- одинаковые 23 664 tris у `Grass` и у `LeafyGrass` и ровно ноль у `Mud`, `Ground`,
+-- `Slate`. Поэтому поле теперь `MapGen.FieldMaterial` = Mud, а чтобы оно не стало
+-- чёрной грязью — тонируется в жухлый оливково-серый: мёртвая трава кладбища без
+-- единого полигона травинок.
+local FIELD_COLOR = Color3.fromRGB(78, 82, 58)
+workspace.Terrain:SetMaterialColor(MapGen.FieldMaterial, FIELD_COLOR)
+
 if GameConfig.Map.GenerateRoad and MapLayout.TrackPolyline and #MapLayout.TrackPolyline > 0 then
-	local MapGen = require(script.Parent:WaitForChild("MapGen"))
 	MapGen.paintPolyline(MapLayout.TrackPolyline, {
 		scale = MapLayout.Scale,
 		width = GameConfig.Map.RoadWidth,
@@ -61,12 +69,13 @@ local function groundPosition(x: number, z: number): Vector3
 	return Vector3.new(x, 0, z)
 end
 
--- Позиция травы (не дороги) под (x,z), либо nil если там дорога/ничего.
--- Дорога = Terrain Material Ground, трава = Grass.
+-- Позиция ПОЛЯ (не дороги) под (x,z), либо nil если там дорога/ничего.
+-- Поле и дорога различаются материалом террейна — оба берём из MapGen, чтобы
+-- источник правды был один: перекрасишь поле там, и весь декор поедет следом.
 local function grassPosition(x: number, z: number): Vector3?
 	local origin = Vector3.new(x, RAYCAST_HEIGHT, z)
 	local r = workspace:Raycast(origin, Vector3.new(0, -RAYCAST_HEIGHT * 2, 0), raycastParams)
-	if r and r.Instance == workspace.Terrain and r.Material == Enum.Material.Grass then
+	if r and r.Instance == workspace.Terrain and r.Material == MapGen.FieldMaterial then
 		return r.Position
 	end
 	return nil
@@ -448,7 +457,8 @@ local nTree = scatter("DeadTree", 230, 0.35, 3.6)
 --   * на прямых — аллеи мёртвых деревьев по обе стороны полотна.
 -- Замер 2026-07-30 такую добавку разрешает: весь статичный декор в кадре стоил
 -- `Opaque 31 547 tris / 26 draws` против `Grass 188 682 / 44` у одной только травы,
--- то есть надгробия почти ничего не стоят — тяжёлая тут земля, а не декор.
+-- то есть надгробия почти ничего не стоят. Тяжёлой тогда была земля — с 31.07
+-- трава с поля снята совсем (см. шапку), так что запас по кадру стал только больше.
 -- // РЕГУЛЯРНОЕ КЛАДБИЩЕ: ряды надгробий по всей площади, кроме трассы ----------
 -- Требование юзера: «расположение не хаотичное, но строго геометрически параллельно,
 -- размеры больше и разные, наполни карту максимально». Поэтому надгробия больше не
@@ -517,8 +527,9 @@ end
 
 local nCemetery = 0
 do
-	-- Дорога = Ground, поле = Grass, поэтому «занято ли место дорогой» решает тот же
-	-- рейкаст, что и у остальной расстановки: nil = полотно или дыра.
+	-- Дорога и поле — разные материалы террейна (см. MapGen), поэтому «занято ли
+	-- место дорогой» решает тот же рейкаст, что и у остальной расстановки:
+	-- nil = полотно или дыра.
 	local col = 0
 	for x = -CEM_HALF, CEM_HALF, CEM_COL do
 		col += 1
@@ -752,65 +763,13 @@ do
 	end
 end
 
--- // Трава: пучки-травинки выше terrain-травы, случайные высота/цвет/наклон ----
--- Terrain-трава короткая; добавляем более высокие пучки — гуще у оснований
--- объектов и по всей площади, чтобы придать картинке динамику.
-local function makeGrassTuft(): Model
-	local m = Instance.new("Model")
-	m.Name = "GrassTuft"
-	local blades = RNG:NextInteger(2, 4)
-	local baseTone = RNG:NextNumber(0, 1) -- общий оттенок пучка (зелёный..жухлый)
-	local root: BasePart? = nil
-	for _ = 1, blades do
-		local h = RNG:NextNumber(2.0, 5.0)
-		local blade = Instance.new("WedgePart")
-		blade.Anchored = true
-		blade.CanCollide = false
-		blade.CanQuery = false
-		blade.CanTouch = false
-		blade.CastShadow = false
-		blade.Material = Enum.Material.LeafyGrass
-		local dry = RNG:NextNumber(0, 1) * baseTone
-		blade.Color = Color3.fromRGB(
-			math.floor(46 + dry * 78),
-			math.floor(58 + RNG:NextNumber(0, 62)),
-			math.floor(26 + RNG:NextNumber(0, 26))
-		)
-		blade.Size = Vector3.new(0.12, h, RNG:NextNumber(0.35, 0.75))
-		local ang = math.rad(RNG:NextNumber(0, 360))
-		local off = RNG:NextNumber(0, 0.7)
-		blade.CFrame = CFrame.new(math.cos(ang) * off, h / 2, math.sin(ang) * off)
-			* CFrame.Angles(0, ang, 0)
-			* CFrame.Angles(math.rad(RNG:NextNumber(-8, 8)), 0, math.rad(RNG:NextNumber(6, 28)))
-		blade.Parent = m
-		root = root or blade
-	end
-	m.PrimaryPart = root
-	return m
-end
-
-local grassCount = 0
-local function placeGrassTuft(ground: Vector3, scale: number)
-	local t = makeGrassTuft()
-	t:ScaleTo(scale)
-	dropToGround(t, ground, RNG:NextNumber(0, 360))
-	t.Parent = mapFolder
-	grassCount += 1
-end
-
--- ОПТИМИЗАЦИЯ (2026-07-25): пучки-травинки дорогие — каждый 2-4 WedgePart. Раньше
--- их было ~490 (=~1500 деталей, БОЛЬШЕ ПОЛОВИНЫ всей сцены) → просадки/фризы,
--- кулеры. Оставляем лёгкую россыпь для переднего плана; фон держит terrain-материал
--- Grass (при желании — включить грасс-декорацию Terrain в свойствах, она бесплатна).
-local fieldTarget, ftries, fieldPlaced = 45, 0, 0
-while fieldPlaced < fieldTarget and ftries < fieldTarget * 12 do
-	ftries += 1
-	local g = grassPosition(RNG:NextNumber(-330, 330), RNG:NextNumber(-330, 330))
-	if g then
-		placeGrassTuft(g, RNG:NextNumber(1.0, 2.0))
-		fieldPlaced += 1
-	end
-end
+-- // Трава: УБРАНА СОВСЕМ (2026-07-31) ----------------------------------------
+-- Здесь жили пучки-травинки из WedgePart'ов. История: сперва их было ~490
+-- (=~1500 деталей, больше половины всей сцены) → просадки и фризы; 25.07 их
+-- срезали до 45 «для переднего плана». Теперь убраны и эти: юзер просил снять
+-- траву с поля ради кадра, а держать 45 моделей ради переднего плана бессмысленно,
+-- когда фоновой terrain-травы (см. FIELD_COLOR выше) больше нет — одинокие
+-- травинки на голом поле читались бы как мусор, а не как трава.
 
 -- // ЧИСТКА ДОРОГИ (2026-07-25): убираем ЛЮБОЙ декор, чей центр ближе
 -- (RoadWidth/2 + запас) к осевой трассы — плиты/деревья у обочины иногда нависают
@@ -976,5 +935,5 @@ print(
 	`[MapBuilder] Расставлено: {#MapLayout.Hazards} hazard'ов, {#MapLayout.Graves} могил, {#MapLayout.Lamps} фонарей, {#MapLayout.DeadTrees} деревьев (по карте). `
 		.. `Кладбище рядами: {nCemetery} надгробий (шаг {CEM_COL}×{CEM_ROW}, 7 типов). `
 		.. `Деревья: {nTree} по площади + {nAlleyTrees} в аллеях (тени только у {shadowTrees} вдоль трассы). Фонарей у дороги: {nClusterLamps}. `
-		.. `Травы: {grassCount} пучков. Ограда по периметру ±335.`
+		.. `Трава убрана: поле = {MapGen.FieldMaterial.Name} без декорации. Ограда по периметру ±335.`
 )

@@ -33,6 +33,19 @@ local THETA_WIND = 2.60    -- рад (~149°): руки высоко и наза
 local THETA_STRIKE = -0.70 -- рад (~-40°): руки вниз-вперёд (удар по машине). Полный
 -- мах замах→удар — около 190° через вертикаль: рубящий удар сверху.
 
+-- // Оси суставов R6 (замерены по C0 шаблона 2026-07-31) ----------------------
+-- Каждый Motor6D вращается вокруг осей СВОЕГО C0, а не торса, поэтому знаки тут
+-- неочевидны и один раз посчитаны из матриц:
+--   Плечи и бёдра: локальный Z смотрит в +X торса у правых и в -X у левых. Значит
+--     локальный Z = сагиттальная ось (мах вперёд/назад), и симметричное движение
+--     = +theta правому, -theta левому. Положительный угол уводит конечность ВПЕРЁД.
+--   Плечи, локальный X: +Z торса у левого, -Z у правого. Это ось «развести руки
+--     в стороны», и наружу обе руки уходят при ОТРИЦАТЕЛЬНОМ угле — у обеих.
+--   Шея, локальный X = -X торса, поэтому голова запрокидывается НАЗАД при
+--     отрицательном угле; локальный Y = +Z торса — это завал головы набок.
+--   Root Hip (корень→торс), локальный X = -X торса: отрицательный угол выгибает
+--     корпус назад.
+
 -- Поза рук через C0 плеч R6. Ось вращения (локальный Z плеча) = ось X торса,
 -- т.е. рука ходит в сагиттальной плоскости (вперёд/вверх/назад). Правой даём
 -- +theta, левой -theta — движение выходит симметричным.
@@ -41,16 +54,29 @@ local function poseArms(rs: Motor6D, ls: Motor6D, baseR: CFrame, baseL: CFrame, 
 	ls.C0 = baseL * CFrame.Angles(0, 0, -theta)
 end
 
-local function tweenArms(rs: Motor6D, ls: Motor6D, baseR: CFrame, baseL: CFrame, fromT: number, toT: number, duration: number)
+-- Прерывается не только удалением зомби, но и его смертью: атрибут `Dead` ставит
+-- PlayDeath, и незавершённый мах обязан отпустить руки, иначе он продолжит тянуть
+-- C0 плеч поверх позы трупа и мертвец будет махать из положения лёжа.
+local function tweenArms(
+	zombie: Model,
+	rs: Motor6D,
+	ls: Motor6D,
+	baseR: CFrame,
+	baseL: CFrame,
+	fromT: number,
+	toT: number,
+	duration: number
+)
 	local t0 = os.clock()
 	while os.clock() - t0 < duration do
 		if not rs.Parent or not ls.Parent then return end -- зомби удалён посреди маха
+		if zombie:GetAttribute("Dead") then return end
 		local a = (os.clock() - t0) / duration
 		a = a * a * (3 - 2 * a) -- smoothstep
 		poseArms(rs, ls, baseR, baseL, fromT + (toT - fromT) * a)
 		task.wait()
 	end
-	if rs.Parent and ls.Parent then
+	if rs.Parent and ls.Parent and not zombie:GetAttribute("Dead") then
 		poseArms(rs, ls, baseR, baseL, toT)
 	end
 end
@@ -83,20 +109,249 @@ end
 
 local ZombieAI = {}
 
--- Короткая анимация погружения в землю, затем удаление зомби.
-local function despawn(zombie: Model)
-	CollectionService:RemoveTag(zombie, "Zombie")
+-- Прокрутить фазу анимации: alpha 0→1 за duration, ease сглаживает. Возвращает
+-- false, если зомби исчез посреди фазы — вызывающий на этом заканчивает.
+local function phase(zombie: Model, duration: number, ease: (number) -> number, apply: (number) -> ()): boolean
+	local t0 = os.clock()
+	while true do
+		if not zombie.Parent then
+			return false
+		end
+		local raw = (os.clock() - t0) / duration
+		if raw >= 1 then
+			break
+		end
+		apply(ease(raw))
+		task.wait()
+	end
+	apply(1)
+	return true
+end
+
+local function easeSmooth(a: number): number
+	return a * a * (3 - 2 * a)
+end
+local function easeOut(a: number): number -- резкий старт, мягкий конец (рывок)
+	return 1 - (1 - a) * (1 - a)
+end
+local function easeIn(a: number): number -- разгон, как под тяжестью (падение)
+	return a * a
+end
+
+-- Погружение тела под землю и удаление. Сдвиг СТРОГО в мировой вертикали
+-- (`CFrame.new(0,-d,0) * start`, а не `start * ...`): после падения тело лежит
+-- повёрнутым почти на 90°, и локальный «вниз» увёл бы труп вбок сквозь поле.
+local function sinkUnderground(zombie: Model, depth: number, duration: number)
 	for _, part in zombie:GetDescendants() do
 		if part:IsA("BasePart") then
 			part.Anchored = true
 		end
 	end
 	local start = zombie:GetPivot()
-	for t = 0.05, 1, 0.05 do
-		zombie:PivotTo(start * CFrame.new(0, -5 * t, 0))
-		task.wait(0.05)
-	end
+	phase(zombie, duration, easeIn, function(a)
+		zombie:PivotTo(CFrame.new(0, -depth * a, 0) * start)
+	end)
 	zombie:Destroy()
+end
+
+-- Короткая анимация погружения в землю, затем удаление зомби.
+local function despawn(zombie: Model)
+	CollectionService:RemoveTag(zombie, "Zombie")
+	sinkUnderground(zombie, 5, 1)
+end
+
+-- // СМЕРТЬ: процедурное падение --------------------------------------------
+-- Требование юзера — анимация ОБЪЕКТА, не частицы. Поэтому зомби не рассыпается
+-- на детали (`BreakJointsOnDeath` выключен в ZombieSpawner) и не улетает тряпкой:
+-- он честно оседает и валится через опорную линию стоп, тем же приёмом, что и
+-- замах, — позами Motor6D + разворотом всей модели.
+--
+-- Четыре фазы, и каждая нужна: без рывка не читается ПОПАДАНИЕ, без подламывания
+-- ног тело падает доской, без разгона падение выглядит тюленем, а без отскока
+-- труп «прилипает» к земле без веса.
+local DEATH_HIT_TIME = 0.10 -- рывок от попадания: голова назад, руки врозь
+local DEATH_BUCKLE_TIME = 0.30 -- ноги подламываются, тело проседает
+local DEATH_FALL_TIME = 0.40 -- падение через стопы (с разгоном)
+local DEATH_BOUNCE_TIME = 0.14 -- короткий отскок о землю
+local DEATH_LIE_TIME = 1.30 -- сколько труп лежит, прежде чем уйти под землю
+local DEATH_SINK_TIME = 1.10
+local DEATH_SINK_DEPTH = 6
+
+local DEATH_FALL_ANGLE = math.rad(84) -- добить почти до земли, но не перевернуть
+local DEATH_BOUNCE_ANGLE = math.rad(6) -- перелёт, который тут же отыгрывается назад
+local DEATH_BUCKLE_DROP = 0.45 -- на сколько studs просесть, пока подгибаются ноги
+local DEATH_PIVOT_LIFT = 1.0 -- ось наклона выше стоп: отвечает за ДУГУ падения, не за высоту
+-- Габарит снимается со СТОЯЧЕГО зомби, а руки в позе трупа разведены, поэтому
+-- расчётная опора выходит чуть оптимистичной: замер дал -0.19 у торса и -0.40 у
+-- ног. Приподнимаем на эту разницу, иначе ноги наполовину в грунте.
+local DEATH_REST_CLEARANCE = 0.35
+
+-- Гасим всё, что спорит с позой трупа. `Animate` крутит ходьбу через
+-- Motor6D.Transform ПОВЕРХ наших C0, так что мало остановить дорожки — надо
+-- отключить сам скрипт и обнулить Transform, иначе мертвец продолжает семенить.
+local function silenceAnimation(zombie: Model, humanoid: Humanoid)
+	local animate = zombie:FindFirstChild("Animate")
+	if animate and animate:IsA("BaseScript") then
+		animate.Disabled = true
+	end
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if animator then
+		for _, track in animator:GetPlayingAnimationTracks() do
+			track:Stop(0)
+		end
+	end
+	for _, d in zombie:GetDescendants() do
+		if d:IsA("Motor6D") then
+			d.Transform = CFrame.identity
+		end
+	end
+end
+
+-- Проигрывает смерть и удаляет тело. Вызывается из ZombieSpawner по Humanoid.Died.
+function ZombieAI.PlayDeath(zombie: Model)
+	local humanoid = zombie:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		zombie:Destroy()
+		return
+	end
+	zombie:SetAttribute("Dead", true) -- недоигранный замах увидит это и отпустит руки
+	CollectionService:RemoveTag(zombie, "Zombie")
+	silenceAnimation(zombie, humanoid)
+
+	-- Заморозить физику. Humanoid в состоянии Dead роняет тело сам, и без якорей
+	-- он борется с нашей анимацией за позу; заодно труп перестаёт быть препятствием.
+	for _, d in zombie:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Anchored = true
+			d.CanCollide = false
+		end
+	end
+
+	local torso = zombie:FindFirstChild("Torso")
+	local root = zombie:FindFirstChild("HumanoidRootPart")
+	local function joint(parent: Instance?, name: string): Motor6D?
+		local j = parent and parent:FindFirstChild(name)
+		return (j and j:IsA("Motor6D")) and j or nil
+	end
+	local neck = joint(torso, "Neck")
+	local rs, ls = joint(torso, "Right Shoulder"), joint(torso, "Left Shoulder")
+	local rh, lh = joint(torso, "Right Hip"), joint(torso, "Left Hip")
+	local spine = joint(root, "Root Hip")
+
+	local base: { [Motor6D]: CFrame } = {}
+	for _, j in { neck, rs, ls, rh, lh, spine } do
+		if j then
+			base[j] = j.C0
+		end
+	end
+	local function set(j: Motor6D?, rx: number, ry: number, rz: number)
+		if j then
+			j.C0 = base[j] * CFrame.Angles(rx, ry, rz)
+		end
+	end
+
+	-- Куда валиться. Источник урона кладёт `DeathPush` (горизонтальное направление
+	-- удара) — пуля толкает от стрелка, машина сбивает по ходу движения. Без
+	-- подсказки роняем назад: зомби всегда лицом к машине, падать вперёд ему не с чего.
+	local startPivot = zombie:GetPivot()
+	local push = (zombie:GetAttribute("DeathPush") :: Vector3?) or -startPivot.LookVector
+	push = Vector3.new(push.X, 0, push.Z)
+	push = push.Magnitude > 1e-3 and push.Unit
+		or Vector3.new(-startPivot.LookVector.X, 0, -startPivot.LookVector.Z).Unit
+	-- Ось наклона перпендикулярна направлению падения; поворот вокруг неё уводит
+	-- макушку в сторону push (проверено по правилу правой руки для up × push).
+	local tipAxis = Vector3.yAxis:Cross(push)
+
+	local _, bbSize = zombie:GetBoundingBox()
+	local feetY = startPivot.Position.Y - bbSize.Y / 2
+	local pivotPoint = Vector3.new(startPivot.Position.X, feetY + DEATH_PIVOT_LIFT, startPivot.Position.Z)
+
+	-- Положение всей модели: поворот на angle вокруг мировой точки pivotPoint
+	-- плюс просадка drop по мировой вертикали.
+	local function bodyCF(angle: number, drop: number): CFrame
+		local spin = CFrame.new(pivotPoint) * CFrame.fromAxisAngle(tipAxis, angle) * CFrame.new(-pivotPoint)
+		return CFrame.new(0, -drop, 0) * spin * startPivot
+	end
+
+	-- Насколько низко опустится габарит модели, если поставить её в cf. Габарит
+	-- снят СТОЯЧИМ и поворачивается вместе с телом, поэтому проекция его полуразмера
+	-- на мировую вертикаль считается через модули строк матрицы поворота.
+	local bbCF, bbSize = zombie:GetBoundingBox()
+	local relBox = startPivot:ToObjectSpace(bbCF)
+	local function lowestY(cf: CFrame): number
+		local box = cf * relBox
+		local r = box - box.Position
+		local half = 0.5
+			* (
+				math.abs(r.XVector.Y) * bbSize.X
+				+ math.abs(r.YVector.Y) * bbSize.Y
+				+ math.abs(r.ZVector.Y) * bbSize.Z
+			)
+		return box.Position.Y - half
+	end
+
+	-- Куда тело ляжет по высоте — НЕ константа. Первый заход ронял труп на 1.8
+	-- studs ПОД землю (замер 2026-07-31): поворот вокруг линии стоп кладёт тело
+	-- туда, куда получится, а у рига свои габариты и земля под ним неровная.
+	-- Поэтому конечную просадку считаем: сколько не хватает, чтобы габарит лёг
+	-- ровно на грунт. Значение бывает и отрицательным — тогда тело приподнимаем.
+	local groundParams = RaycastParams.new()
+	groundParams.FilterType = Enum.RaycastFilterType.Exclude
+	groundParams.FilterDescendantsInstances = { zombie }
+	local groundHit = workspace:Raycast(startPivot.Position, Vector3.new(0, -50, 0), groundParams)
+	local groundY = groundHit and groundHit.Position.Y or lowestY(startPivot)
+	local restDrop = lowestY(bodyCF(DEATH_FALL_ANGLE, 0)) - groundY - DEATH_REST_CLEARANCE
+
+	playSoundAt(GROWL_SOUND_ID, startPivot.Position, 0.75, 0.5, 0.62) -- предсмертный хрип: ниже и длиннее рыка
+
+	-- 1. РЫВОК: голова запрокидывается, руки вскидываются врозь, корпус выгибает.
+	if not phase(zombie, DEATH_HIT_TIME, easeOut, function(a)
+		set(neck, -0.55 * a, 0, 0)
+		set(spine, -0.30 * a, 0, 0)
+		set(rs, -0.85 * a, 0, 1.15 * a)
+		set(ls, -0.85 * a, 0, -0.95 * a) -- левая чуть иначе: симметрия читается как робот
+	end) then
+		return
+	end
+
+	-- 2. НОГИ ПОДКОСИЛИСЬ: бёдра складываются вперёд, тело проседает.
+	if not phase(zombie, DEATH_BUCKLE_TIME, easeSmooth, function(a)
+		set(rh, 0, 0, 0.70 * a)
+		set(lh, 0, 0, -0.55 * a)
+		set(neck, -0.55 + 0.25 * a, 0.18 * a, 0)
+		set(rs, -0.85 + 0.45 * a, 0, 1.15 - 0.55 * a)
+		set(ls, -0.85 + 0.45 * a, 0, -0.95 + 0.40 * a)
+		zombie:PivotTo(bodyCF(0, DEATH_BUCKLE_DROP * a))
+	end) then
+		return
+	end
+
+	-- 3. ПАДЕНИЕ: с разгоном (easeIn), руки и голова доболтываются следом.
+	if not phase(zombie, DEATH_FALL_TIME, easeIn, function(a)
+		set(neck, -0.30 - 0.20 * a, 0.18 + 0.22 * a, 0)
+		set(rs, -0.40 - 0.50 * a, 0, 0.60 - 0.35 * a)
+		set(ls, -0.40 - 0.35 * a, 0, -0.55 + 0.30 * a)
+		set(rh, 0, 0, 0.70 - 0.45 * a)
+		set(lh, 0, 0, -0.55 + 0.30 * a)
+		zombie:PivotTo(bodyCF(DEATH_FALL_ANGLE * a, DEATH_BUCKLE_DROP + (restDrop - DEATH_BUCKLE_DROP) * a))
+	end) then
+		return
+	end
+
+	-- 4. ОТСКОК: перелёт на пару градусов и возврат — вес тела на удар о землю.
+	if not phase(zombie, DEATH_BOUNCE_TIME, easeSmooth, function(a)
+		local over = math.sin(a * math.pi) -- 0 → 1 → 0
+		zombie:PivotTo(bodyCF(DEATH_FALL_ANGLE + DEATH_BOUNCE_ANGLE * over, restDrop))
+		set(rs, -0.90 + 0.12 * over, 0, 0.25)
+		set(neck, -0.50, 0.40 + 0.10 * over, 0)
+	end) then
+		return
+	end
+
+	task.wait(DEATH_LIE_TIME)
+	if zombie.Parent then
+		sinkUnderground(zombie, DEATH_SINK_DEPTH, DEATH_SINK_TIME)
+	end
 end
 
 local function findNearestVehicle(position: Vector3): (Model?, number)
@@ -149,10 +404,10 @@ function ZombieAI.Run(zombie: Model)
 	local function playSwing()
 		if not (rShoulder and lShoulder) then return end
 		local rs, ls = rShoulder, lShoulder
-		tweenArms(rs, ls, baseR, baseL, 0, THETA_WIND, WINDUP_TIME)
-		tweenArms(rs, ls, baseR, baseL, THETA_WIND, THETA_STRIKE, STRIKE_TIME)
+		tweenArms(zombie, rs, ls, baseR, baseL, 0, THETA_WIND, WINDUP_TIME)
+		tweenArms(zombie, rs, ls, baseR, baseL, THETA_WIND, THETA_STRIKE, STRIKE_TIME)
 		task.spawn(function()
-			tweenArms(rs, ls, baseR, baseL, THETA_STRIKE, 0, RECOVER_TIME)
+			tweenArms(zombie, rs, ls, baseR, baseL, THETA_STRIKE, 0, RECOVER_TIME)
 		end)
 	end
 

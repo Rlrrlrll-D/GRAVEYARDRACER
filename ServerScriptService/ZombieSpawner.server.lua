@@ -158,8 +158,13 @@ local function onZombieDied(zombie: Model, humanoid: Humanoid)
 		end
 	end
 
-	CollectionService:RemoveTag(zombie, "Zombie")
-	Debris:AddItem(zombie, 3) -- leave the body briefly, then clean up
+	-- Смерть отыгрывает ZombieAI: тело складывается и валится, лежит и уходит под
+	-- землю (тег снимает он же). Раньше тут стоял `Debris:AddItem(zombie, 3)` —
+	-- Humanoid ломал суставы, и от зомби оставался мешок деталей, лежавший три
+	-- секунды. Debris теперь только страховка: если анимация оборвётся на ошибке,
+	-- труп всё равно не останется на трассе навсегда.
+	Debris:AddItem(zombie, 15)
+	ZombieAI.PlayDeath(zombie)
 end
 
 local function spawnZombie()
@@ -189,6 +194,9 @@ local function spawnZombie()
 	local humanoid = zombie:FindFirstChildOfClass("Humanoid") :: Humanoid
 	humanoid.MaxHealth = GameConfig.Zombie.MaxHealth
 	humanoid.Health = GameConfig.Zombie.MaxHealth
+	-- ОБЯЗАТЕЛЬНО до смерти: иначе Humanoid на Died разрывает все Motor6D, риг
+	-- распадается на отдельные детали и анимировать падение уже нечем.
+	humanoid.BreakJointsOnDeath = false
 
 	task.spawn(function()
 		riseFromGrave(zombie, finalCFrame)

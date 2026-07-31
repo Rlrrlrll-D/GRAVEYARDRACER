@@ -256,6 +256,51 @@ local function giveTurretOwnership(car: Model, player: Player)
 	end
 end
 
+-- // ФАРЫ: наводим луч на дорогу ----------------------------------------------
+-- Жалоба юзера: «свет от фар ломается при езде — пятно режется изгибом дороги или
+-- объектом, на который проецируется». Разбор в Play-режиме (снимки сверху-сзади,
+-- 2026-07-31) показал, в чём дело: аттачменты `HeadlightL/R` в шаблоне стоят с
+-- нулевым поворотом, то есть луч идёт СТРОГО ГОРИЗОНТАЛЬНО на высоте ~3.5 studs
+-- над полотном. Такой конус не освещает дорогу — он лишь чиркает по ней вскользь
+-- далеко впереди, и на землю ложится не луч, а оторванный от машины блин с жёсткой
+-- кромкой: у бампера темно, пятно висит в 15 studs, край обрывается по Range.
+-- Любая неровность или надгробие на пути такого касательного света выкусывает из
+-- блина кусок — это и читается как «пятно режется».
+--
+-- Лечится наведением, а не мощностью: небольшой наклон вниз сажает конус на
+-- полотно от самого бампера, а более широкий и длинный конус даёт мягкий спад
+-- вместо обрыва. Проверено съёмкой до/после на том же кадре.
+--
+-- Настройка живёт ЗДЕСЬ, а не в шаблоне: `VehicleTemplate` лежит в .rbxl, который
+-- не под гитом, и правка в нём потерялась бы при любой пересборке машины.
+local HEADLIGHT_PITCH = math.rad(-9) -- наклон луча вниз (минус = вниз, ось X кузова)
+local HEADLIGHT_ANGLE = 68 -- шире исходных 55°: пятно накрывает полотно целиком
+local HEADLIGHT_RANGE = 60 -- дальше исходных 45: обрыв по дальности уходит из кадра
+local HEADLIGHT_BRIGHTNESS = 2.6
+
+local function tuneHeadlights(car: Model)
+	local body = car:FindFirstChild("BuggyBody")
+	if not (body and body:IsA("BasePart")) then
+		return
+	end
+	for _, at in body:GetChildren() do
+		if at:IsA("Attachment") and at.Name:match("^Headlight") then
+			local light = at:FindFirstChildOfClass("SpotLight")
+			if light then
+				-- позицию аттачмента не трогаем — она выставлена по фарам меша,
+				-- меняем только НАПРАВЛЕНИЕ и параметры конуса
+				at.CFrame = CFrame.new(at.CFrame.Position) * CFrame.Angles(HEADLIGHT_PITCH, 0, 0)
+				light.Angle = HEADLIGHT_ANGLE
+				light.Range = HEADLIGHT_RANGE
+				light.Brightness = HEADLIGHT_BRIGHTNESS
+				-- Тени у фар выключены намеренно: с ними каждый камень у обочины
+				-- начинает резать пятно по-настоящему, и кадр дорожает на ровном месте.
+				light.Shadows = false
+			end
+		end
+	end
+end
+
 local function mountTurret(car: Model, player: Player?)
 	local t = template
 	local tSeat = t and t:FindFirstChild("DriveSeat")
@@ -334,6 +379,7 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 	if seat and seat:IsA("VehicleSeat") then
 		seat.HeadsUpDisplay = false -- нативный Roblox-спидометр (CoreGui.VehicleHudFrame) не нужен: свой HUD
 	end
+	tuneHeadlights(car) -- до Parent: свет приедет клиенту уже наведённым
 	car:PivotTo(seatCFrame * pivotFromSeat) -- ДО Parent: VehicleController запомнит «дом»
 	-- A-Chassis + StreamingEnabled: под ModelStreamingMode.Default машину клиенту
 	-- реплицирует ПО ЧАСТЯМ, и скопированный в PlayerGui Drive рвётся на

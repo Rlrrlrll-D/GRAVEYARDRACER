@@ -256,6 +256,15 @@ local function setupVehicle(vehicle: Model)
 			if killer then
 				zombieModel:SetAttribute("KilledBy", killer.UserId)
 			end
+			-- Куда опрокинуть тело, если сбили насмерть: машина уносит зомби ПО ХОДУ
+			-- движения (ZombieAI.PlayDeath читает атрибут). Берём именно скорость
+			-- сборки, а не «от машины к зомби»: на касании вскользь второе дало бы
+			-- падение вбок, хотя зомби явно подсекло капотом вперёд.
+			local vel = driveSeat.AssemblyLinearVelocity
+			local flat = Vector3.new(vel.X, 0, vel.Z)
+			if flat.Magnitude > 1 then
+				zombieModel:SetAttribute("DeathPush", flat.Unit)
+			end
 			humanoid:TakeDamage(GameConfig.Vehicle.CrushDamageToZombie)
 		else
 			local health = (vehicle:GetAttribute("Health") :: number?) or GameConfig.Vehicle.MaxHealth

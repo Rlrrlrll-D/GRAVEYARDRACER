@@ -49,6 +49,9 @@ fireWeapon.OnServerEvent:Connect(function(player: Player, origin: unknown, direc
 			local humanoid = zombieModel:FindFirstChildOfClass("Humanoid")
 			if humanoid and humanoid.Health > 0 then
 				zombieModel:SetAttribute("KilledBy", player.UserId)
+				-- Куда опрокинуть тело, если этот выстрел окажется смертельным:
+				-- пуля толкает зомби ОТ стрелка (ZombieAI.PlayDeath читает атрибут).
+				zombieModel:SetAttribute("DeathPush", Vector3.new(directionVec.X, 0, directionVec.Z))
 				humanoid:TakeDamage(GameConfig.Weapon.Damage)
 			end
 		end
