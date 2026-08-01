@@ -408,11 +408,12 @@ local SKULL_SCALE_ACTIVE = 1.22 -- свой ещё и крупнее: видно
 
 local skullHome: { [Model]: CFrame } = {} -- «дом» каждого черепа (парение + сброс после сбора)
 local collecting: { [Model]: boolean } = {} -- череп сейчас «улетает» вверх → парение его не трогает
+local spent: { [Model]: boolean } = {} -- уже собран: прячем, пока игрок не отъедет
 local function applySkullState(model: Model, active: boolean)
-	if collecting[model] then return end -- «улетающий» череп не трогаем (иначе перебьёт растворение)
+	if collecting[model] or spent[model] then return end -- улетающий и собранный не трогаем
 	setSkullFade(model, active and SKULL_FADE_ACTIVE or SKULL_FADE_IDLE)
-	-- ScaleTo задаёт АБСОЛЮТНЫЙ масштаб, поэтому повторные вызовы не накапливаются
-	model:ScaleTo(active and SKULL_SCALE_ACTIVE or 1)
+	-- Масштаб здесь НЕ трогаем: им управляет цикл парения, он держит угловой размер
+	-- (дальний череп крупнее, чтобы линия на экране оставалась той же толщины).
 end
 
 -- ПРЕВРАЩЕНИЕ ЧЕРЕПА В ДЫМ. Запускается НА ПОДЛЁТЕ (цикл парения ниже), а не по
@@ -498,8 +499,13 @@ local function collectSkull(index: number)
 
 	task.delay(RISE + 0.2, function()
 		ghost:Destroy()
-		setSkullFade(model, SKULL_FADE_IDLE) -- снова виден к следующему кругу
 		collecting[model] = nil
+		-- НЕ показываем сразу. Юзер: «после улёта я успеваю увидеть возвращённый
+		-- череп» — так и было: улёт кончался за 0.8с от триггера, то есть ровно у
+		-- чекпоинта, и череп вспыхивал прямо перед носом. Теперь он остаётся
+		-- спрятанным, а вернёт его цикл парения, когда игрок отъедет на RESTORE_DIST.
+		spent[model] = true
+		setSkullFade(model, 1)
 	end)
 end
 
@@ -562,14 +568,34 @@ end
 -- Парение черепов-чекпоинтов — локально у каждого клиента (server держит их
 -- статичными). Первый кадр фиксирует «дом» (GetPivot), дальше — синусоида по Y.
 -- Череп в процессе распада (collecting) не парит — им управляет collectSkull.
--- Здесь же ТРИГГЕР ПОДЛЁТА: как только «свой» череп ближе TRANSFORM_DIST, он
--- начинает превращаться в дым — чтобы анимацию было видно, а не угадывать по
--- облачку в зеркале. Расстояние подобрано так, чтобы облако успело раскрыться
--- к моменту, когда машина в него влетает (60+ studs/с × ~0.5с распада).
-local TRANSFORM_DIST = 46
+-- РАЗМЕР ДЕРЖИМ УГЛОВОЙ. Юзер: «издалека свечения не видно». Виноват не блюм, а
+-- толщина: линия 0.18 studs на 200+ studs тоньше пикселя — движку нечего рисовать,
+-- а блюм берёт уже нарисованные пиксели, так что размывать ему тоже нечего.
+-- Поэтому дальше SKULL_REF_DIST череп растёт пропорционально расстоянию: на экране
+-- он всегда одного размера, и линия — одной толщины в пикселях. Ближе REF масштаб
+-- держим на единице, чтобы у самого чекпоинта череп рос естественно, как предмет.
+-- REF считан из ТОЛЩИНЫ ЛИНИИ НА ЭКРАНЕ, а не на глаз. Юзер подбирал образец в
+-- ~16 studs от камеры: там череп занимал ~84 пикселя по высоте кадра, линия — около
+-- 4 пикселей, и это ровно то, что он утвердил. Экранный размер = SKULL_WIDTH /
+-- (2 * d * tan(FOV/2)) * высота кадра; при FOV 70 и 474 px четырёхпиксельной линии
+-- отвечает d ≈ 20. На прежних 55 линия выходила В ОДИН пиксель — вот её и «не было
+-- видно издалека», блюму нечего размывать, когда рисовать нечего.
+local SKULL_REF_DIST = 20 -- на этой дистанции череп ровно SKULL_WIDTH studs
+local SKULL_MAX_GROW = 10 -- то есть угловой размер держится до ~200 studs
+local SKULL_HALF_HEIGHT = SKULL_WIDTH * 1.139 / 2 -- 1.139 = отношение сторон рисунка
+-- Собранный череп возвращаем, только когда игрок отъехал (см. collectSkull).
+local RESTORE_DIST = 90
+-- ТРИГГЕР ПОДЛЁТА: как только «свой» череп ближе TRANSFORM_DIST, он начинает
+-- превращаться в дым — чтобы анимацию было видно, а не угадывать по облачку в
+-- зеркале. 30, а не прежние 46: на 46 весь улёт (0.8с) заканчивался ЕЩЁ ДО
+-- чекпоинта, и игрок приезжал к пустому месту. На 30 машина влетает в облако.
+local TRANSFORM_DIST = 30
 RunService.Heartbeat:Connect(function()
 	local folder = workspace:FindFirstChild("RaceMarkers")
 	if not folder then return end
+	local cam = workspace.CurrentCamera
+	local char = player.Character
+	local root = char and char.PrimaryPart
 	local t = os.clock()
 	for _, m in folder:GetChildren() do
 		if m:IsA("Model") and m.PrimaryPart and not collecting[m] then
@@ -578,19 +604,42 @@ RunService.Heartbeat:Connect(function()
 				home = m:GetPivot()
 				skullHome[m] = home
 			end
-			local id = m.Name:match("%d+")
-			local phase = (id and tonumber(id) or 0) * 0.7
-			local y = math.sin(t * 1.3 + phase) * 0.9
-			m:PivotTo(home + Vector3.new(0, y, 0))
-			aimPlate(m) -- плашка-деталь сама к камере не поворачивается
-			-- «дыхание» плотности у своего черепа: живой, но всё равно воздушный
-			local idx = activeSkullIndex
-			if idx and m:GetAttribute("cp" .. idx) == true then
-				setSkullFade(m, math.max(0, SKULL_FADE_ACTIVE + math.sin(t * 2.1) * SKULL_PULSE))
-				local char = player.Character
-				local root = char and char.PrimaryPart
-				if root and (root.Position - home.Position).Magnitude < TRANSFORM_DIST then
-					collectSkull(idx)
+			if spent[m] then
+				-- собран: висит спрятанным, пока игрок не отъехал
+				if not root or (root.Position - home.Position).Magnitude > RESTORE_DIST then
+					spent[m] = nil
+					setSkullFade(m, SKULL_FADE_IDLE)
+				end
+			else
+				local id = m.Name:match("%d+")
+				local phase = (id and tonumber(id) or 0) * 0.7
+				local y = math.sin(t * 1.3 + phase) * 0.9
+				local idx = activeSkullIndex
+				local isActive = idx ~= nil and m:GetAttribute("cp" .. idx) == true
+				local scale = m:GetScale()
+				if cam then
+					local dist = (home.Position - cam.CFrame.Position).Magnitude
+					local want = math.clamp(dist / SKULL_REF_DIST, 1, SKULL_MAX_GROW)
+						* (isActive and SKULL_SCALE_ACTIVE or 1)
+					-- ScaleTo обходит потомков, поэтому дёргаем его только на заметном
+					-- изменении: на 2% размера глаз всё равно не ловит.
+					if math.abs(scale - want) > want * 0.02 then
+						m:ScaleTo(want)
+						scale = want
+					end
+				end
+				-- Масштаб растит череп в ОБЕ стороны от пивота, поэтому дальний, раздутый
+				-- до 40 studs, уходил бы нижней половиной под террейн. Поднимаем ровно на
+				-- прирост половины высоты — низ остаётся там же, где у нераздутого.
+				y += SKULL_HALF_HEIGHT * (scale - 1)
+				m:PivotTo(home + Vector3.new(0, y, 0))
+				aimPlate(m) -- плашка-деталь сама к камере не поворачивается
+				if isActive then
+					-- «дыхание» плотности у своего черепа: живой, но всё равно воздушный
+					setSkullFade(m, math.max(0, SKULL_FADE_ACTIVE + math.sin(t * 2.1) * SKULL_PULSE))
+					if root and (root.Position - home.Position).Magnitude < TRANSFORM_DIST then
+						collectSkull(idx :: number)
+					end
 				end
 			end
 		end
