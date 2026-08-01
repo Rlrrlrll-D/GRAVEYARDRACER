@@ -208,10 +208,21 @@ type RacePayload = {
 -- = 1.5 в этом плейсе): пиксель UI ярче 1.0 не бывает, потому у плашки и не было
 -- ореола, сколько её ни высветляй.
 --
--- Поэтому силуэт лежит геометрией (ReplicatedStorage.SkullShape: 212 вершин и 214
--- треугольников, обведены в Blender по альфе исходного PNG) и собирается в МЕШ прямо
--- на клиенте через EditableMesh. Загружать ассет не нужно, верификация не нужна —
--- проверено в этом плейсе.
+-- ЧЕРЕП — ОБВОДКА, А НЕ ЗАЛИВКА. Юзер: «максимум свечения при минимуме толщины».
+-- Сплошная заливка читалась наклейкой именно потому, что она сплошная: у стрелки
+-- старта ровно те же Neon и цвет, но она узкая полоса — глаз видит ЛИНИЮ СВЕТА, а
+-- не пятно. Поэтому череп теперь тонкая лента по контуру, принцип детали тот же.
+--
+-- Контур взят из НАСТОЯЩЕГО вектора (ReplicatedStorage.SkullOutline, разобран из
+-- D:\VECTOR\skull.ai — три замкнутых контура, 32 кривые Безье). Прежний SkullShape —
+-- заливка, траченная по пикселям PNG; для линии она не годится: обводка полигона со
+-- ступеньками даёт рваную толщину, а из кривых лента ровная на любой ширине.
+--
+-- ЧИСЛА ПОДОБРАНЫ ЮЗЕРОМ ЖИВЬЁМ (временный _NeonTune, клавиши в плей), потому что
+-- ореол рисует только BloomEffect, а он не попадает в мои захваты экрана: авто-
+-- качество в нефокусном окне Studio выкидывает блюм из конвейера, и увидеть его мог
+-- только живой глаз. Снятые показания: толщина 0.18, размер 4, цвет как у стрелок,
+-- прозрачность 0, Bloom Intensity 1.0 (последнее — в EnvironmentConfig).
 --
 -- ПОЧЕМУ НА КЛИЕНТЕ, а не на сервере: меш, построенный из EditableMesh, не
 -- реплицируется — сервер собрал бы его себе, а игроки увидели бы пустоту. Сервер
@@ -221,7 +232,8 @@ local AssetService = game:GetService("AssetService")
 -- «и цвет сделай как у стрелок и все остальные параметры». Бело-голубой вариант
 -- (110,190,255) остался в истории: вернуть — поменять эту строку.
 local SKULL_COLOR = Color3.fromRGB(110, 255, 170)
-local SKULL_WIDTH = 2.6 -- ширина плашки в studs
+local SKULL_WIDTH = 4 -- ширина черепа в studs
+local SKULL_STROKE = 0.18 -- толщина линии в studs
 local plateTemplate: BasePart? = nil
 local plateTried = false
 
@@ -231,43 +243,80 @@ local function buildPlateTemplate(): BasePart?
 	end
 	plateTried = true
 	local okShape, shape = pcall(function()
-		return require(ReplicatedStorage:WaitForChild("SkullShape", 10))
+		return require(ReplicatedStorage:WaitForChild("SkullOutline", 10))
 	end)
 	if not okShape or type(shape) ~= "table" then
-		warn("[UIController] SkullShape не найден — плашка-череп не собрана")
+		warn("[UIController] SkullOutline не найден — череп-чекпоинт не собран")
+		return nil
+	end
+	-- EditableMesh НЕЛЬЗЯ уничтожать, пока жива собранная из него деталь: MeshPart
+	-- продолжает ссылаться на этот объект (`MeshContent = SourceType=Object`), и после
+	-- `em:Destroy()` деталь перестаёт рисоваться совсем — размер и MeshSize остаются
+	-- прежними, а в кадре пусто. Проверено A/B: два одинаковых черепа рядом, виден
+	-- только тот, у которого меш живой. Поэтому держим его до конца сессии.
+	--
+	-- Обратная сторона: у EditableMesh свой бюджет памяти, и он невелик — замер дал
+	-- ~8 таких мешей, дальше CreateEditableMesh молча возвращает nil. Здесь сборка
+	-- одна на клиента, так что это безопасно; а вот пересобирать меш в цикле нельзя
+	-- без освобождения ПРЕДЫДУЩЕГО (так сделано во временной подкрутке _NeonTune).
+	local em = AssetService:CreateEditableMesh()
+	if not em then
+		warn("[UIController] EditableMesh не выдан — бюджет памяти исчерпан")
 		return nil
 	end
 	local ok, part = pcall(function()
-		local em = AssetService:CreateEditableMesh()
-		local halfT = 0.012 -- полутолщина плиты в долях ширины: тонкая, но не нулевая
+		-- Лента по каждому контуру: в каждой точке берём нормаль к линии (касательная,
+		-- повёрнутая на 90°) и отступаем на полтолщины в обе стороны — получаются две
+		-- кромки, между ними квадами и идёт лента. Толщина здесь в ДОЛЯХ ширины черепа:
+		-- меш живёт в нормированных координатах, в studs его переводит Size.
+		--
 		-- Обе стороны из одного контура: вершины дублируются на +z и -z, треугольники
 		-- у тыльной стороны идут в обратном порядке, иначе она отсекается по нормали.
-		-- Y с минусом: в Blender строки картинки идут снизу вверх, обводка это уже
-		-- учитывала — и в мире череп вставал вверх ногами (челюсть сверху). Намотке
-		-- зеркало не вредит: каждый треугольник и так добавляется в обе стороны.
-		local front, back = {}, {}
-		for i, v in shape.Verts do
-			front[i] = em:AddVertex(Vector3.new(v[1], -v[2], halfT))
-			back[i] = em:AddVertex(Vector3.new(v[1], -v[2], -halfT))
-		end
-		for _, t in shape.Tris do
-			em:AddTriangle(front[t[1]], front[t[2]], front[t[3]])
-			em:AddTriangle(back[t[1]], back[t[3]], back[t[2]])
+		local halfT = 0.006 -- полутолщина ленты «в глубину»: тонкая, но не нулевая
+		local w = SKULL_STROKE / SKULL_WIDTH
+		for _, loop in ipairs(shape.Loops) do
+			local n = #loop
+			local innerF, outerF, innerB, outerB = {}, {}, {}, {}
+			for k = 1, n do
+				local cur = loop[k]
+				local prev = loop[(k - 2) % n + 1]
+				local nxt = loop[k % n + 1]
+				local tx, ty = nxt[1] - prev[1], nxt[2] - prev[2]
+				local len = math.sqrt(tx * tx + ty * ty)
+				if len < 1e-9 then
+					tx, ty, len = 1, 0, 1
+				end
+				local nx, ny = -ty / len, tx / len
+				local ix, iy = cur[1] - nx * w / 2, cur[2] - ny * w / 2
+				local ox, oy = cur[1] + nx * w / 2, cur[2] + ny * w / 2
+				innerF[k] = em:AddVertex(Vector3.new(ix, iy, halfT))
+				outerF[k] = em:AddVertex(Vector3.new(ox, oy, halfT))
+				innerB[k] = em:AddVertex(Vector3.new(ix, iy, -halfT))
+				outerB[k] = em:AddVertex(Vector3.new(ox, oy, -halfT))
+			end
+			for k = 1, n do
+				local j = k % n + 1
+				em:AddTriangle(innerF[k], outerF[k], outerF[j])
+				em:AddTriangle(innerF[k], outerF[j], innerF[j])
+				em:AddTriangle(innerB[k], outerB[j], outerB[k])
+				em:AddTriangle(innerB[k], innerB[j], outerB[j])
+			end
 		end
 		return AssetService:CreateMeshPartAsync(Content.fromObject(em))
 	end)
 	if not ok or typeof(part) ~= "Instance" then
+		em:Destroy() -- деталь не создана, ссылаться на меш некому — можно освободить
 		warn("[UIController] меш черепа не собрался: " .. tostring(part))
 		return nil
 	end
 	local plate = part :: MeshPart
 	plate.Name = "Plate"
-	if plate.Size.X > 0 then
-		plate.Size = plate.Size * (SKULL_WIDTH / plate.Size.X)
-	end
+	-- Меш нормирован к ширине рисунка 1, поэтому множим на ширину в studs напрямую
+	-- (лента добавляет к габариту свою полтолщины — ровно так и подбиралось живьём).
+	plate.Size = plate.Size * SKULL_WIDTH
 	plate.Material = Enum.Material.Neon -- ровно как стрелки старта
 	plate.Color = SKULL_COLOR
-	plate.Transparency = 0.15 -- и ровно та же прозрачность
+	plate.Transparency = 0 -- по подбору: линии тонкие, гасить их прозрачностью нечем
 	plate.Anchored = true
 	plate.CanCollide = false
 	plate.CanQuery = false
@@ -315,8 +364,8 @@ local function aimPlate(model: Model, roll: number?)
 	plate.CFrame = roll and (cf * CFrame.Angles(0, 0, math.rad(roll))) or cf
 end
 
--- Плотность ведём ОДНОЙ величиной fade: 0 — как построено (неон 0.15), 1 — исчез.
-local SKULL_BASE_ALPHA = 0.15
+-- Плотность ведём ОДНОЙ величиной fade: 0 — как построено (неон в полную силу), 1 — исчез.
+local SKULL_BASE_ALPHA = 0
 local function setSkullFade(model: Model, fade: number)
 	local plate = ensurePlate(model)
 	if plate then
@@ -352,7 +401,7 @@ end
 -- ЯРКОСТЬЮ. Разводить есть чем и без неё: свой крупнее (SKULL_SCALE_ACTIVE), и это
 -- ровно то различие, которое стояло здесь исторически. Вернуть приглушение — поднять
 -- SKULL_FADE_IDLE, вернуть дыхание — SKULL_PULSE.
-local SKULL_FADE_ACTIVE = 0 -- 0 = как построено: Neon + Transparency 0.15
+local SKULL_FADE_ACTIVE = 0 -- 0 = как построено: Neon + Transparency 0
 local SKULL_FADE_IDLE = 0 -- столько же: приглушённых стрелок на старте не бывает
 local SKULL_PULSE = 0 -- стрелки не «дышат»
 local SKULL_SCALE_ACTIVE = 1.22 -- свой ещё и крупнее: видно, к какому едешь

@@ -80,7 +80,9 @@ local EnvironmentConfig: EnvironmentConfigType = {
 		ColorCorrectionSaturation = -0.35,   -- приглушаем цвета
 		ColorCorrectionContrast = 0.08,
 		ColorCorrectionTintColor = Color3.fromRGB(210, 225, 255), -- лёгкий холодный оттенок
-		BloomIntensity = 0.4,
+		-- 1.0, а не прежние 0.4: подобрано юзером живьём под неоновую обводку черепа
+		-- (порог 1.5 не трогали). Влияет на ВСЮ сцену — фары, стрелки старта, огни.
+		BloomIntensity = 1.0,
 		StarCount = 4000,
 	},
 	-- РАННИЙ ВЕЧЕР: с него начинается игра. Раньше тут стоял полдень (ClockTime 13.2,
