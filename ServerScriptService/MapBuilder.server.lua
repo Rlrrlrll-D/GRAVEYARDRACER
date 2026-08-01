@@ -39,7 +39,10 @@ local MapGen = require(script.Parent:WaitForChild("MapGen"))
 -- `Slate`. Поэтому поле теперь `MapGen.FieldMaterial` = Mud, а чтобы оно не стало
 -- чёрной грязью — тонируется в жухлый оливково-серый: мёртвая трава кладбища без
 -- единого полигона травинок.
-local FIELD_COLOR = Color3.fromRGB(78, 82, 58)
+-- Поле снова травяное (см. MapGen.FieldMaterial). Тон держим кладбищенский — сухая,
+-- нездоровая зелень, а не сочный газон: по умолчанию Grass у Roblox слишком свежий
+-- для ночного кладбища.
+local FIELD_COLOR = Color3.fromRGB(92, 98, 62)
 workspace.Terrain:SetMaterialColor(MapGen.FieldMaterial, FIELD_COLOR)
 
 if GameConfig.Map.GenerateRoad and MapLayout.TrackPolyline and #MapLayout.TrackPolyline > 0 then
