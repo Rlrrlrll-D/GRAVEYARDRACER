@@ -133,21 +133,88 @@ run() -- на случай, если метка уже стоит (зашли п
 -- УМНОЖЕНИЕМ текущей яркости, а не записью абсолютного значения. Пока флэш жил на
 -- сервере, он читал серверную (всегда ночную) яркость и возвращал её всем — первая
 -- же молния гасила сумерки в ночь.
+-- Юзер: «гром я слышу, а вспышек не вижу». Две причины, обе тут.
+--
+-- 1) Обработчик выходил по `if not progress() then return end`. progress() = nil,
+--    пока сервер не провёл ни одного заезда (метка NightAnchor = 0) — то есть В
+--    ЛОББИ вспышки не было вовсе, а звук сервер играет всегда.
+-- 2) Даже когда рисовалась, её не было видно: boost 1.6 на ночной яркости 0.9 даёт
+--    1.44 — подмигивание, а не молния. И трогалась ОДНА Brightness, отчего кадр
+--    менялся почти незаметно.
+--
+-- Теперь: вспышка рисуется всегда (если дугу ведём мы — через apply, иначе
+-- множим то, что стоит, и возвращаем назад), идёт КОНВЕРТОМ в два удара, как
+-- настоящая молния, и поднимает не только яркость, но и экспозицию с окружающим
+-- светом — именно это читается как «полыхнуло», а не «лампочка мигнула».
 local thunder = EnvironmentConfig.Thunder
 local flashSignal = ReplicatedStorage:WaitForChild("ThunderFlash", 30)
-if flashSignal and flashSignal:IsA("NumberValue") then
-	flashSignal.Changed:Connect(function()
-		local t = progress()
-		if not t then
-			return -- светом заведует сервер, не вмешиваемся
+
+-- Огибающая вспышки: {доля времени, множитель}. Два удара с провалом между ними.
+local FLASH_ENVELOPE = {
+	{ 0.00, 3.6 },
+	{ 0.10, 1.6 },
+	{ 0.18, 2.8 },
+	{ 0.45, 1.25 },
+	{ 1.00, 1.0 },
+}
+local FLASH_TIME = 0.42 -- полная длительность обоих ударов
+
+local function envelopeAt(a: number): number
+	for i = 1, #FLASH_ENVELOPE - 1 do
+		local p, n = FLASH_ENVELOPE[i], FLASH_ENVELOPE[i + 1]
+		if a <= n[1] then
+			local span = n[1] - p[1]
+			local f = span > 1e-6 and (a - p[1]) / span or 0
+			return p[2] + (n[2] - p[2]) * f
 		end
-		flashBoost = thunder.FlashBrightnessBoost
-		apply(t)
-		task.wait(thunder.FlashDuration)
+	end
+	return 1
+end
+
+if flashSignal and flashSignal:IsA("NumberValue") then
+	local flashing = false
+	flashSignal.Changed:Connect(function()
+		if flashing then
+			return -- раскат уже идёт, второй сигнал не наслаиваем
+		end
+		flashing = true
+		-- Снимок на случай, если дугу ведёт сервер: тогда apply() нам не поможет и
+		-- писать придётся прямо в Lighting, а по концовке — вернуть как было.
+		local baseBrightness = Lighting.Brightness
+		local baseExposure = Lighting.ExposureCompensation
+		local baseAmbient = Lighting.OutdoorAmbient
+		local t0 = os.clock()
+		while true do
+			local a = (os.clock() - t0) / FLASH_TIME
+			if a >= 1 then
+				break
+			end
+			local boost = envelopeAt(a)
+			local t = progress()
+			if t then
+				flashBoost = boost
+				apply(t) -- дуга сама впишет яркость с множителем
+			else
+				Lighting.Brightness = baseBrightness * boost
+			end
+			-- экспозиция и окружающий свет — поверх любой ветки: без них молния
+			-- читается как изменение лампы, а не как вспышка на всё небо
+			local over = math.max(0, boost - 1)
+			Lighting.ExposureCompensation = baseExposure + over * 0.45
+			Lighting.OutdoorAmbient = baseAmbient:Lerp(Color3.fromRGB(198, 214, 255), math.min(over * 0.5, 0.85))
+			Lighting.Ambient = Lighting.OutdoorAmbient
+			RunService.RenderStepped:Wait()
+		end
 		flashBoost = 1
+		Lighting.ExposureCompensation = baseExposure
 		local after = progress()
 		if after then
-			apply(after)
+			apply(after) -- дуга вернёт и яркость, и окружающий свет
+		else
+			Lighting.Brightness = baseBrightness
+			Lighting.OutdoorAmbient = baseAmbient
+			Lighting.Ambient = baseAmbient
 		end
+		flashing = false
 	end)
 end

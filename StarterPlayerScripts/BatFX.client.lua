@@ -266,12 +266,14 @@ local function launchOne(origin: Vector3, fast: boolean)
 		-- почти за край кадра, центральные накрывают его целиком. Задержек почти нет:
 		-- стая появляется в лице за 0.13-0.22с, то есть «мгновенно».
 		local ang = math.random() * 6.28
-		local rad = 1.5 + math.random() * 6.5
+		-- Радиус шире прежнего (было 1.5-8): вместе с ранним разлётом (см. шаг стаи)
+		-- это и даёт «уже разлетелись по всему экрану» до того, как стая дойдёт до лица.
+		local rad = 2 + math.random() * 10
 		bat.start = origin
 			+ Vector3.new((math.random() - 0.5) * 22, (math.random() - 0.5) * 12, (math.random() - 0.5) * 22)
 		bat.offset = Vector3.new(math.cos(ang) * rad, math.sin(ang) * rad * 0.7, -5.0)
-		bat.delay = math.random() * 0.04
-		bat.flight = 0.13 + math.random() * 0.09
+		bat.delay = math.random() * 0.03
+		bat.flight = 0.16 + math.random() * 0.09
 		bat.life = bat.delay + bat.flight + 0.14 -- + короткий пронос ЗА игрока
 		bat.speed = 190 -- пронос: уходит за спину, а не дрейфует перед носом
 		bat.dir = camera and camera.CFrame.LookVector or Vector3.zAxis
@@ -306,12 +308,24 @@ RunService.RenderStepped:Connect(function()
 				if bat.swarm and camera then
 					local target = camera.CFrame * bat.offset -- цель едет вместе с камерой
 					local a = math.clamp((age - bat.delay) / bat.flight, 0, 1)
+					-- РАЗЛЁТ ИДЁТ ВПЕРЕДИ ПОДЛЁТА. Юзер: «мыши не успевают разлететься,
+					-- в лицо летит куча — надо, чтобы до этого момента уже разлетелись по
+					-- всему экрану». Причина была в том, что подход и разлёт шли ОДНОЙ
+					-- интерполяцией с разгоном (a²): пока стая далеко, она сжата в точку,
+					-- а весь угловой разлёт набегал в последние ~30 мс — то есть ровно
+					-- тогда, когда она уже проносилась мимо. Теперь это две составляющие:
+					-- вперёд — по-прежнему с разгоном, вбок — по a^0.3, то есть боковое
+					-- смещение почти целиком набирается в первой трети пути.
+					local face = camera.CFrame * Vector3.new(0, 0, bat.offset.Z)
+					local lateral = camera.CFrame:VectorToWorldSpace(
+						Vector3.new(bat.offset.X, bat.offset.Y, 0)
+					)
 					if a <= 0 then
 						pos = bat.start -- ждёт своей очереди в волне
 						dir = (target - bat.start).Unit
 					elseif a < 1 then
 						local eased = a * a * 1.15 -- разгон к лицу, не равномерно
-						pos = bat.start:Lerp(target, math.min(eased, 1))
+						pos = bat.start:Lerp(face, math.min(eased, 1)) + lateral * (a ^ 0.3)
 						dir = (target - pos).Magnitude > 1e-3 and (target - pos).Unit or bat.dir
 						bat.dir = dir
 					else

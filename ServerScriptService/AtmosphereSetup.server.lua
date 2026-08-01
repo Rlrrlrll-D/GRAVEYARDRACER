@@ -19,6 +19,9 @@ Lighting.FogStart = cfg.FogStart
 Lighting.FogEnd = cfg.FogEnd
 Lighting.GlobalShadows = true
 Lighting.ShadowSoftness = 0.4
+-- Широта задаёт наклон небесной дуги: на 0 солнце и луна ходят через зенит и в
+-- кадр водителя не попадают. Держим их низко над горизонтом (см. EnvironmentConfig).
+Lighting.GeographicLatitude = cfg.GeographicLatitude
 Lighting.EnvironmentDiffuseScale = 0.6
 Lighting.EnvironmentSpecularScale = 0.3
 

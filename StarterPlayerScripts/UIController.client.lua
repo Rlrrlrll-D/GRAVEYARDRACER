@@ -452,33 +452,47 @@ local function collectSkull(index: number)
 	ghost.Parent = workspace -- вне RaceMarkers → цикл парения его не трогает; клиент-локально
 	local gAnchor = ghost.PrimaryPart
 
-	-- Юзер: «анимацию черепа при прохождении чека (дымок) сделай по S-образной
-	-- траектории и быстрее». Было 1.0с по прямой вверх.
-	local RISE = 0.6
+	-- Юзер: «нужно, чтобы S-образное искажение читалось СРАЗУ ПО ФОРМЕ ЧЕРЕПА и
+	-- проходило быстрее». Было 0.6с и равномерное сжатие клона: змейку рисовала одна
+	-- траектория, а сам силуэт до конца оставался черепом — то есть искажения по форме
+	-- не было вовсе, и за 0.6с на скорости его читать было некогда.
+	local RISE = 0.34
 
 	-- S-ОБРАЗНЫЙ УЛЁТ + РАСПАД. Прямой твин Position змейку не даёт — ведём вручную:
 	-- вверх с разгоном, поперёк — одна полная синусоида (вправо-назад-влево-назад).
 	-- Поперечную ось берём от КАМЕРЫ, иначе с половины ракурсов змейка уходит «в
-	-- экран» и читается как прямая. Амплитуда к концу сходит на нет, череп при этом
-	-- закручивается вокруг своей оси и сжимается — то есть на глазах превращается в
-	-- струйку. Никаких частиц: любой размытый спрайт на этой сцене читается как пятно,
-	-- превращается САМ ЧЕРЕП.
+	-- экран» и читается как прямая. Никаких частиц: любой размытый спрайт на этой
+	-- сцене читается как пятно, превращается САМ ЧЕРЕП.
+	local gPlate = ghost:FindFirstChild("Plate")
+	local baseSize = gPlate and gPlate:IsA("BasePart") and gPlate.Size or nil
+
 	if gAnchor then
 		local cam = workspace.CurrentCamera
 		local side = cam and cam.CFrame.RightVector or Vector3.xAxis
 		side = Vector3.new(side.X, 0, side.Z)
 		side = side.Magnitude > 1e-3 and side.Unit or Vector3.xAxis
-		local twist = (math.random() < 0.5 and -1 or 1) * 46 -- градусы, закрутка плашки
-		local startScale = ghost:GetScale()
+		local twist = (math.random() < 0.5 and -1 or 1) * 70 -- градусы, закрутка плашки
+		local width = baseSize and baseSize.X or 4
 		task.spawn(function()
 			local t0 = os.clock()
 			while ghost.Parent do
 				local a = (os.clock() - t0) / RISE
 				if a >= 1 then break end
-				local up = 20 * a * a -- разгон вверх, как прежний Quad In
-				local sway = math.sin(a * math.pi * 2) * 2.8 * (1 - a * 0.55)
+				local up = 26 * a * a -- разгон вверх, как прежний Quad In
+				-- Амплитуду ведём ОТ ШИРИНЫ ЧЕРЕПА и НЕ гасим к концу: змейка должна
+				-- быть видна на всей дистанции, а не затухать на второй половине.
+				local sway = math.sin(a * math.pi * 2) * width * 0.85
 				ghost:PivotTo(home + Vector3.new(0, up, 0) + side * sway)
-				ghost:ScaleTo(math.max(0.12, startScale * (1 - a * 0.82)))
+				-- ИСКАЖЕНИЕ ПО ФОРМЕ: череп не просто уменьшается, а вытягивается в
+				-- струйку — ширина сходится почти в ноль, высота растёт втрое. Именно
+				-- это делает S читаемым силуэтом, а не только траекторией.
+				if gPlate and baseSize then
+					gPlate.Size = Vector3.new(
+						math.max(0.05, baseSize.X * (1 - 0.88 * a)),
+						baseSize.Y * (1 + 2.1 * a),
+						baseSize.Z
+					)
+				end
 				aimPlate(ghost, twist * a) -- лицом к камере и с закруткой
 				task.wait()
 			end
@@ -486,7 +500,6 @@ local function collectSkull(index: number)
 	end
 
 	-- гаснет не сразу: сначала видно, КАК он тянется, и только к концу исчезает
-	local gPlate = ghost:FindFirstChild("Plate")
 	if gPlate and gPlate:IsA("BasePart") then
 		-- ОБЯЗАТЕЛЬНО вернуть плотность: клон снят уже ПОСЛЕ того, как общий череп
 		-- спрятан (setSkullFade(model, 1)), то есть родился полностью прозрачным —
@@ -618,9 +631,14 @@ RunService.Heartbeat:Connect(function()
 				local isActive = idx ~= nil and m:GetAttribute("cp" .. idx) == true
 				local scale = m:GetScale()
 				if cam then
-					local dist = (home.Position - cam.CFrame.Position).Magnitude
-					local want = math.clamp(dist / SKULL_REF_DIST, 1, SKULL_MAX_GROW)
-						* (isActive and SKULL_SCALE_ACTIVE or 1)
+					-- Угловой размер держим ТОЛЬКО «своему» чекпоинту (решение юзера):
+					-- он навигационный маркер, его и надо видеть издалека. Остальные —
+					-- обычные предметы, физического размера, иначе полкадра в черепах.
+					local want = 1
+					if isActive then
+						local dist = (home.Position - cam.CFrame.Position).Magnitude
+						want = math.clamp(dist / SKULL_REF_DIST, 1, SKULL_MAX_GROW) * SKULL_SCALE_ACTIVE
+					end
 					-- ScaleTo обходит потомков, поэтому дёргаем его только на заметном
 					-- изменении: на 2% размера глаз всё равно не ловит.
 					if math.abs(scale - want) > want * 0.02 then
