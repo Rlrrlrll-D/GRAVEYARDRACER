@@ -73,11 +73,17 @@ local EnvironmentConfig: EnvironmentConfigType = {
 		Decay = Color3.fromRGB(40, 45, 60),
 		Glare = 0,
 		Haze = 3,
-		FogColor = Color3.fromRGB(35, 40, 55),
+		-- НОЧЬ ТЕМНЕЕ (просьба юзера). Тронуты три величины, и все три — потолок
+		-- «сколько света в сцене вообще»: сила луны (Brightness), общий подсвет теней
+		-- (OutdoorAmbient) и цвет тумана, который на дальнем плане заменяет собой всё.
+		-- Прежние 0.9 / (45,50,65) / (35,40,55) давали читаемую, но явно «синюю
+		-- вечернюю» картинку. Ниже опускать нельзя: фары светят вперёд, а на что не
+		-- падает их конус — читается только по этому фону, и на нуле трасса теряется.
+		FogColor = Color3.fromRGB(20, 24, 34),
 		FogStart = 40,
 		FogEnd = 400,
-		Brightness = 0.9,
-		OutdoorAmbient = Color3.fromRGB(45, 50, 65),
+		Brightness = 0.45,
+		OutdoorAmbient = Color3.fromRGB(24, 27, 38),
 		ColorCorrectionSaturation = -0.35,   -- приглушаем цвета
 		ColorCorrectionContrast = 0.08,
 		ColorCorrectionTintColor = Color3.fromRGB(210, 225, 255), -- лёгкий холодный оттенок

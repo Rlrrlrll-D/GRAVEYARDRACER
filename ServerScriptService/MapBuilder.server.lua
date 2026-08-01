@@ -1065,8 +1065,13 @@ end
 -- у крупных участков — два пучка с разных сторон. Потолок поднят соразмерно: пучок
 -- это три плоские дощечки без теней, весь ковёр стоил 130 треугольников в кадре
 -- против 129 тысяч у самих надгробий.
-local GRASS_EVERY = 2 -- у каждого N-го надгробия
-local GRASS_MAX = 420 -- жёсткий потолок: кадр важнее плотности
+-- ТРАВА МЕЖДУ МОГИЛАМИ (2026-08-01, просьба юзера «накинуть травы между могилками»).
+-- Прежняя росла только вплотную к камню, и с дороги кладбище читалось как ряды плит
+-- на голом грунте. Добавлен второй проход: пучок садится в ПРОМЕЖУТКЕ, на 1.5-3.0
+-- радиуса участка от центра камня — то есть ровно туда, где раньше был пустой грунт.
+local GRASS_EVERY = 2 -- у каждого N-го надгробия — пучок у подножия
+local GRASS_GAP_EVERY = 2 -- и у каждого N-го — ещё один в промежутке между могилами
+local GRASS_MAX = 700 -- жёсткий потолок на оба прохода: кадр важнее плотности
 local grassCount = 0
 do
 	local function makeTuft(scale: number): Model
@@ -1131,6 +1136,29 @@ do
 				tuft.Parent = mapFolder
 				grassCount += 1
 			end
+		end
+	end
+
+	-- Второй проход: промежутки. Отступ 1.5-3.0 радиуса уводит пучок с самого участка
+	-- на пустой грунт между рядами; попадание к соседнему камню не портит картину —
+	-- трава у подножия и так уместна. Смещение по фазе (i + 1), чтобы кусты второго
+	-- прохода не садились у тех же камней, что и первого, и ряд не выходил полосатым.
+	for i, spot in cemeterySpots do
+		if grassCount >= GRASS_MAX then
+			break
+		end
+		if (i + 1) % GRASS_GAP_EVERY ~= 0 then
+			continue
+		end
+		local a = math.rad(RNG:NextNumber(0, 360))
+		local d = spot.r * RNG:NextNumber(1.5, 3.0)
+		local gx, gz = spot.x + math.cos(a) * d, spot.z + math.sin(a) * d
+		local g = grassPosition(gx, gz)
+		if g then
+			local tuft = makeTuft(RNG:NextNumber(0.8, 1.4)) -- в промежутке чуть мельче
+			tuft:PivotTo(CFrame.new(gx, g.Y, gz) * CFrame.Angles(0, RNG:NextNumber(0, 6.28), 0))
+			tuft.Parent = mapFolder
+			grassCount += 1
 		end
 	end
 end
