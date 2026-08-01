@@ -159,6 +159,24 @@ local FLASH_ENVELOPE = {
 }
 local FLASH_TIME = 0.42 -- полная длительность обоих ударов
 
+-- ОТДЕЛЬНЫЙ ПОСТ-ЭФФЕКТ ПОД ВСПЫШКУ. Замер показал, что сигнал с сервера доходит и
+-- Lighting.Brightness честно прыгает (2.15 → 7.6 и обратно) — а юзер вспышки всё
+-- равно не видит. Так и должно быть: Brightness — это сила солнца/луны, она красит
+-- ПОВЕРХНОСТИ, а небо от неё почти не меняется. Молния же читается как вспышка НА
+-- ВЕСЬ КАДР, вместе с небом. Это умеет только пост-обработка, поэтому заводим свой
+-- ColorCorrection: чужой (общий, из AtmosphereSetup) трогать нельзя — его каждый
+-- кадр переписывает дуга суток, и наши значения затирались бы.
+local flashCC = Lighting:FindFirstChild("ThunderFlashCC") :: ColorCorrectionEffect?
+if not flashCC then
+	flashCC = Instance.new("ColorCorrectionEffect")
+	flashCC.Name = "ThunderFlashCC"
+	flashCC.Parent = Lighting
+end
+flashCC.Brightness = 0
+flashCC.Contrast = 0
+flashCC.Saturation = 0
+flashCC.TintColor = Color3.new(1, 1, 1)
+
 local function envelopeAt(a: number): number
 	for i = 1, #FLASH_ENVELOPE - 1 do
 		local p, n = FLASH_ENVELOPE[i], FLASH_ENVELOPE[i + 1]
@@ -200,12 +218,20 @@ if flashSignal and flashSignal:IsA("NumberValue") then
 			-- экспозиция и окружающий свет — поверх любой ветки: без них молния
 			-- читается как изменение лампы, а не как вспышка на всё небо
 			local over = math.max(0, boost - 1)
-			Lighting.ExposureCompensation = baseExposure + over * 0.45
+			-- Силу подбирал кадром: на 0.32/0.45 пик выбеливал экран в белый лист
+			-- (сцены не видно вообще), на 0.17/0.22 вспыхивает всё, включая небо, но
+			-- кладбище остаётся читаемым — это и есть молния, а не засветка.
+			Lighting.ExposureCompensation = baseExposure + over * 0.22
 			Lighting.OutdoorAmbient = baseAmbient:Lerp(Color3.fromRGB(198, 214, 255), math.min(over * 0.5, 0.85))
 			Lighting.Ambient = Lighting.OutdoorAmbient
+			-- вот это и есть видимая молния: белит ВЕСЬ кадр вместе с небом
+			flashCC.Brightness = math.min(over * 0.17, 0.45)
+			flashCC.TintColor = Color3.new(1, 1, 1):Lerp(Color3.fromRGB(214, 228, 255), math.min(over * 0.4, 0.7))
 			RunService.RenderStepped:Wait()
 		end
 		flashBoost = 1
+		flashCC.Brightness = 0
+		flashCC.TintColor = Color3.new(1, 1, 1)
 		Lighting.ExposureCompensation = baseExposure
 		local after = progress()
 		if after then
