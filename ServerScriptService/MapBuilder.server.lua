@@ -1074,7 +1074,31 @@ local GRASS_GAP_EVERY = 2 -- и у каждого N-го — ещё один в 
 local GRASS_MAX = 700 -- жёсткий потолок на оба прохода: кадр важнее плотности
 local grassCount = 0
 do
-	local function makeTuft(scale: number): Model
+	-- ПУЧОК = ОДИН МЕШ (2026-08-01). Юзер про прежний вариант: «2-3 треугольника
+	-- непонятной формы» — и это честно: пучок собирался из четырёх WedgePart, а клин
+	-- шириной в полстада читается угловатым осколком, не травой. Тоньше делать нельзя,
+	-- уже пробовали: на 0.12 studs лезвие превращается в иглу в пиксель и пропадает с
+	-- трёх метров. Форму, которую примитивами не собрать, должен давать меш.
+	--
+	-- Шаблон `MapTemplates.GrassTuft` — низкополигональный пучок из стора (asset
+	-- 88196712273495), нормирован по высоте к 1 и с пивотом в НИЗУ, поэтому сажается
+	-- прямо на грунт, а масштаб задаётся здесь. Заодно вчетверо легче: ОДНА деталь на
+	-- пучок вместо четырёх (замер: было 697 пучков = 2788 деталей, стало 697).
+	--
+	-- Запасной вариант с клиньями оставлен на случай, если шаблона в плейсе нет
+	-- (он живёт в .rbxl, а не в git): лучше угловатая трава, чем никакой.
+	local grassTemplate = templates and templates:FindFirstChild("GrassTuft")
+
+	local function makeTuft(scale: number): Instance
+		if grassTemplate and grassTemplate:IsA("BasePart") then
+			local p = grassTemplate:Clone()
+			p.Name = "GraveGrass"
+			p.Size = grassTemplate.Size * (scale * 2.4) -- 2.4: шаблон высотой 1 stud
+			-- PivotOffset НЕ масштабируется вместе с Size, поэтому пересчитываем его
+			-- после смены размера: иначе пучок повиснет над грунтом или утонет в нём.
+			p.PivotOffset = CFrame.new(0, -p.Size.Y / 2, 0)
+			return p
+		end
 		local m = Instance.new("Model")
 		m.Name = "GraveGrass"
 		local root: BasePart? = nil
