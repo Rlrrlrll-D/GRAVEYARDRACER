@@ -65,14 +65,20 @@ export type EnvironmentConfigType = {
 }
 
 local EnvironmentConfig: EnvironmentConfigType = {
+	-- ТУМАНА БОЛЬШЕ (просьба юзера, вариант выбран по кадрам). Гуще стала вся дуга
+	-- суток в одинаковой пропорции: Density примерно ×1.55, дальняя граница тумана
+	-- ×0.65. Крутили именно атмосферу и дальность, а НЕ частицы GroundFog: спрайты
+	-- юзер читает как мутное пятно, а плотность воздуха даёт настоящую глубину.
+	-- FogStart и Haze дуга не интерполирует — их ставит один раз AtmosphereSetup,
+	-- поэтому они общие для вечера, сумерек и ночи.
 	Atmosphere = {
 		ClockTime = 0.7,             -- ~00:42, глубокая ночь
-		Density = 0.45,
+		Density = 0.70,              -- было 0.45
 		Offset = 0.25,
 		Color = Color3.fromRGB(150, 160, 170),
 		Decay = Color3.fromRGB(40, 45, 60),
 		Glare = 0,
-		Haze = 3,
+		Haze = 5,                    -- было 3
 		-- НОЧЬ ТЕМНЕЕ (просьба юзера). Тронуты три величины, и все три — потолок
 		-- «сколько света в сцене вообще»: сила луны (Brightness), общий подсвет теней
 		-- (OutdoorAmbient) и цвет тумана, который на дальнем плане заменяет собой всё.
@@ -80,8 +86,11 @@ local EnvironmentConfig: EnvironmentConfigType = {
 		-- вечернюю» картинку. Ниже опускать нельзя: фары светят вперёд, а на что не
 		-- падает их конус — читается только по этому фону, и на нуле трасса теряется.
 		FogColor = Color3.fromRGB(20, 24, 34),
-		FogStart = 40,
-		FogEnd = 400,
+		-- Туман начинается почти от капота (было 40) и глушит всё к 260 студам (было
+		-- 400): дальний лес растворяется, ближние кресты и фонари ещё читаются —
+		-- по кадрам это оказалось той гранью, за которой гонка становится вслепую.
+		FogStart = 18,
+		FogEnd = 260,
 		Brightness = 0.45,
 		OutdoorAmbient = Color3.fromRGB(24, 27, 38),
 		ColorCorrectionSaturation = -0.35,   -- приглушаем цвета
@@ -111,9 +120,9 @@ local EnvironmentConfig: EnvironmentConfigType = {
 	-- светит вкось, тени длинные. Полный закат (18.0) отдан следующей опоре.
 	Evening = {
 		ClockTime = 17.3,
-		Density = 0.23,              -- дымка гуще полуденной: воздух уже вечерний
+		Density = 0.36,              -- было 0.23: та же прибавка тумана, что и у ночи
 		FogColor = Color3.fromRGB(100, 92, 96),
-		FogEnd = 950,
+		FogEnd = 620,                -- было 950: даже вечером горизонт уже в дымке
 		Brightness = 2.15,
 		OutdoorAmbient = Color3.fromRGB(112, 104, 108),
 		ColorCorrectionSaturation = -0.11,
@@ -121,9 +130,9 @@ local EnvironmentConfig: EnvironmentConfigType = {
 	},
 	Dusk = {
 		ClockTime = 17.9,            -- солнце у горизонта: густые сумерки, трассу видно
-		Density = 0.28,              -- дымка реже, чем ночью — дальше видно
+		Density = 0.44,              -- было 0.28; дымка всё ещё реже ночной
 		FogColor = Color3.fromRGB(78, 68, 78),   -- тёплый закатный сумрак
-		FogEnd = 900,                -- туман отодвинут: видно, кто где застрял
+		FogEnd = 585,                -- было 900; дальше ночи, но горизонт уже съеден
 		Brightness = 2.1,
 		OutdoorAmbient = Color3.fromRGB(105, 98, 110),
 		ColorCorrectionSaturation = -0.12,
