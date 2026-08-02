@@ -25,6 +25,10 @@ UITheme.Palette = {
 	Red   = Color3.fromRGB(150, 30, 30),   -- кровь / опасность / здоровье
 	Green = Color3.fromRGB(34, 64, 44),    -- замшелый тёмно-зелёный (фон панелей)
 	Bone  = Color3.fromRGB(224, 214, 170), -- жёлтый ближе к кости (тёплый костяной)
+	-- Светло-зелёный. НЕ придуман здесь: этим цветом кнопка PLAY показывала готовность
+	-- (LobbyUI), он же теперь работает во всём меню — плашка готового гонщика, включённый
+	-- тумблер. Рядом с Green (тёмным) даёт пару «светлое действие / тёмный фон».
+	GreenLight = Color3.fromRGB(52, 90, 64),
 }
 UITheme.Ink = Color3.fromRGB(224, 214, 170)  -- костяной текст по умолчанию (= Bone)
 UITheme.Shadow = Color3.fromRGB(12, 19, 14)  -- тёмно-мховая обводка/подложка (был почти чёрный)
@@ -37,6 +41,45 @@ UITheme.Cycle = { UITheme.Palette.Red, UITheme.Palette.Green, UITheme.Palette.Bo
 function UITheme.cycleColor(i: number): Color3
 	local c = UITheme.Cycle
 	return c[((i - 1) % #c) + 1]
+end
+
+-- // Масштаб меню под окно ---------------------------------------------------
+-- Заставка свёрстана в пикселях (тайтл 170, панель опций 456) под экран высотой
+-- RefHeight. В окне ниже — маленькое окно Studio, ноутбучный экран — блоки лезут
+-- друг на друга и обрезаются снизу. Один UIScale на корне переносит вёрстку
+-- целиком, пропорции не плывут. Выше RefHeight не растягиваем: и так читается.
+UITheme.RefHeight = 780
+
+-- Повесить на контейнер UIScale и держать его в согласии с размером окна.
+-- Контейнер должен быть рамкой во весь экран: UIScale множит и его самого,
+-- поэтому размер тут же задаётся обратной величиной (1/s · s = 1) — иначе рамка
+-- съёживается вместе с содержимым и всё, что привязано к её долям (кнопки по
+-- центру, затемнение), уезжает в левый верхний угол.
+function UITheme.fitToScreen(container: GuiObject): UIScale
+	local scale = container:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
+	scale.Name = "FitScale"
+	scale.Parent = container
+
+	local function apply()
+		local cam = workspace.CurrentCamera
+		if cam then
+			local s = math.clamp(cam.ViewportSize.Y / UITheme.RefHeight, 0.5, 1)
+			scale.Scale = s
+			container.Size = UDim2.fromScale(1 / s, 1 / s)
+		end
+	end
+
+	local function watch()
+		apply()
+		local cam = workspace.CurrentCamera
+		if cam then
+			cam:GetPropertyChangedSignal("ViewportSize"):Connect(apply)
+		end
+	end
+
+	watch()
+	workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watch)
+	return scale
 end
 
 -- Применить тему к TextLabel/TextButton одним вызовом.

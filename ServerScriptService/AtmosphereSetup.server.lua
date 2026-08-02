@@ -14,9 +14,6 @@ Lighting.ClockTime = cfg.ClockTime
 Lighting.Brightness = cfg.Brightness
 Lighting.OutdoorAmbient = cfg.OutdoorAmbient
 Lighting.Ambient = cfg.OutdoorAmbient
-Lighting.FogColor = cfg.FogColor
-Lighting.FogStart = cfg.FogStart
-Lighting.FogEnd = cfg.FogEnd
 Lighting.GlobalShadows = true
 Lighting.ShadowSoftness = 0.4
 -- Широта задаёт наклон небесной дуги: на 0 солнце и луна ходят через зенит и в

@@ -200,8 +200,25 @@ bulletFired.OnClientEvent:Connect(function(origin: Vector3, hitPosition: Vector3
 	playGunshot(origin)
 end)
 
--- // Crosshair (виден, пока игрок за рулём; следует за прицелом-мышью) -------
+-- // Crosshair (виден, пока идёт заезд; следует за прицелом-мышью) -----------
+-- ПРИЗНАК ЗАЕЗДА — ВКЛЮЧЁННЫЙ HUD, А НЕ НАЛИЧИЕ МАШИНЫ. Раньше крест зажигался
+-- по одному «машина существует», а сервер отпускает её победителю только через
+-- RESULTS_SECONDS — уже ПОСЛЕ полноэкранного итога. Крест висел поверх «YOU WIN!»,
+-- да ещё и прятал системный курсор. HUD же гасится и в лобби, и на экране итога,
+-- и у зрителя, поэтому он тут единственный источник правды.
 local playerGui = player:WaitForChild("PlayerGui")
+local hudGui: ScreenGui? = nil
+task.spawn(function()
+	local g = playerGui:WaitForChild("GraveyardHUD", 30)
+	if g and g:IsA("ScreenGui") then
+		hudGui = g
+	end
+end)
+local function raceOnScreen(): boolean
+	local g = hudGui
+	return g ~= nil and g.Parent ~= nil and g.Enabled
+end
+
 local crossGui = Instance.new("ScreenGui")
 crossGui.Name = "WeaponCrosshair"
 crossGui.ResetOnSpawn = false
@@ -253,7 +270,7 @@ end
 -- на луче от дула — иначе крест «плавал» бы при повороте турели.
 RunService.RenderStepped:Connect(function()
 	local vehicle = findMyVehicle()
-	if not vehicle then
+	if not vehicle or not raceOnScreen() then
 		if crossGui.Enabled then
 			crossGui.Enabled = false
 			UserInputService.MouseIconEnabled = true

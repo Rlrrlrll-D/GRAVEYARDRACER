@@ -13,7 +13,6 @@
 -- StatsService can all read/write them without extra coupling.
 
 local CollectionService = game:GetService("CollectionService")
-local PhysicsService = game:GetService("PhysicsService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -36,7 +35,7 @@ local function setupVehicle(vehicle: Model)
 
 	for _, part in vehicle:GetDescendants() do
 		if part:IsA("BasePart") then
-			PhysicsService:SetPartCollisionGroup(part, "Vehicles")
+			part.CollisionGroup = "Vehicles"
 		end
 	end
 

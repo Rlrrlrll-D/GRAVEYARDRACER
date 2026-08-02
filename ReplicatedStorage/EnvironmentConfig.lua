@@ -11,9 +11,6 @@ export type EnvironmentConfigType = {
 		Decay: Color3,
 		Glare: number,
 		Haze: number,
-		FogColor: Color3,
-		FogStart: number,
-		FogEnd: number,
 		Brightness: number,
 		OutdoorAmbient: Color3,
 		ColorCorrectionSaturation: number,
@@ -31,8 +28,6 @@ export type EnvironmentConfigType = {
 	Evening: {
 		ClockTime: number,
 		Density: number,
-		FogColor: Color3,
-		FogEnd: number,
 		Brightness: number,
 		OutdoorAmbient: Color3,
 		ColorCorrectionSaturation: number,
@@ -41,8 +36,6 @@ export type EnvironmentConfigType = {
 	Dusk: {
 		ClockTime: number, -- ClockTime растёт до Atmosphere.ClockTime + 24 (через полночь)
 		Density: number,
-		FogColor: Color3,
-		FogEnd: number,
 		Brightness: number,
 		OutdoorAmbient: Color3,
 		ColorCorrectionSaturation: number,
@@ -65,23 +58,35 @@ export type EnvironmentConfigType = {
 }
 
 local EnvironmentConfig: EnvironmentConfigType = {
+	-- ТУМАНА БОЛЬШЕ (просьба юзера, плотность выбрана по кадрам).
+	--
+	-- СТАРОГО ТУМАНА ЗДЕСЬ БОЛЬШЕ НЕТ, И ЭТО НЕ ЭКОНОМИЯ. Пока в Lighting лежит объект
+	-- Atmosphere, движок ИГНОРИРУЕТ Lighting.FogStart/FogEnd/FogColor. Проверено в
+	-- лоб: FogEnd = 45 и ярко-КРАСНЫЙ FogColor не изменили кадр ни на пиксель — дальние
+	-- деревья остались на месте, краснота не появилась. Поля выброшены отсюда и из
+	-- AtmosphereSetup/DayNightCycle, чтобы никто больше не крутил их, ожидая эффекта.
+	--
+	-- Плотность воздуха задают ТРИ ручки Atmosphere:
+	--   Density — сколько мглы вообще (0..1);
+	--   Haze    — как сильно она съедает горизонт и красит даль;
+	--   Offset  — на какой высоте туман стоит стеной, а не стелется по земле.
+	-- Частицы GroundFog при этом не трогаем: спрайты юзер читает как мутное пятно.
+	-- Offset и Haze дуга суток не интерполирует — их ставит один раз AtmosphereSetup,
+	-- поэтому они общие для вечера, сумерек и ночи; меняется только Density.
 	Atmosphere = {
 		ClockTime = 0.7,             -- ~00:42, глубокая ночь
-		Density = 0.45,
-		Offset = 0.25,
+		Density = 0.85,              -- было 0.45
+		Offset = 0.40,               -- было 0.25: туман поднялся к уровню глаз
 		Color = Color3.fromRGB(150, 160, 170),
 		Decay = Color3.fromRGB(40, 45, 60),
 		Glare = 0,
-		Haze = 3,
+		Haze = 6.5,                  -- было 3
 		-- НОЧЬ ТЕМНЕЕ (просьба юзера). Тронуты три величины, и все три — потолок
 		-- «сколько света в сцене вообще»: сила луны (Brightness), общий подсвет теней
 		-- (OutdoorAmbient) и цвет тумана, который на дальнем плане заменяет собой всё.
 		-- Прежние 0.9 / (45,50,65) / (35,40,55) давали читаемую, но явно «синюю
 		-- вечернюю» картинку. Ниже опускать нельзя: фары светят вперёд, а на что не
 		-- падает их конус — читается только по этому фону, и на нуле трасса теряется.
-		FogColor = Color3.fromRGB(20, 24, 34),
-		FogStart = 40,
-		FogEnd = 400,
 		Brightness = 0.45,
 		OutdoorAmbient = Color3.fromRGB(24, 27, 38),
 		ColorCorrectionSaturation = -0.35,   -- приглушаем цвета
@@ -111,9 +116,9 @@ local EnvironmentConfig: EnvironmentConfigType = {
 	-- светит вкось, тени длинные. Полный закат (18.0) отдан следующей опоре.
 	Evening = {
 		ClockTime = 17.3,
-		Density = 0.23,              -- дымка гуще полуденной: воздух уже вечерний
-		FogColor = Color3.fromRGB(100, 92, 96),
-		FogEnd = 950,
+		-- 0.44 против прежних 0.23: держим ту же долю от ночной плотности, что была
+		-- раньше (вечер ≈ половина ночи), — иначе туман появлялся бы рывком к ночи.
+		Density = 0.44,
 		Brightness = 2.15,
 		OutdoorAmbient = Color3.fromRGB(112, 104, 108),
 		ColorCorrectionSaturation = -0.11,
@@ -121,9 +126,7 @@ local EnvironmentConfig: EnvironmentConfigType = {
 	},
 	Dusk = {
 		ClockTime = 17.9,            -- солнце у горизонта: густые сумерки, трассу видно
-		Density = 0.28,              -- дымка реже, чем ночью — дальше видно
-		FogColor = Color3.fromRGB(78, 68, 78),   -- тёплый закатный сумрак
-		FogEnd = 900,                -- туман отодвинут: видно, кто где застрял
+		Density = 0.53,              -- было 0.28; дымка всё ещё реже ночной
 		Brightness = 2.1,
 		OutdoorAmbient = Color3.fromRGB(105, 98, 110),
 		ColorCorrectionSaturation = -0.12,

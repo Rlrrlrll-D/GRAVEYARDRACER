@@ -7,7 +7,6 @@
 --   SpeedPenalty (number, 0-1) and Damage (number).
 
 local CollectionService = game:GetService("CollectionService")
-local PhysicsService = game:GetService("PhysicsService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
@@ -19,7 +18,7 @@ local cameraShake = remotes:WaitForChild("CameraShake") :: RemoteEvent
 local lastHitAt: {[Model]: number} = {}
 
 local function setupHazardPart(part: BasePart, hazardOwner: Instance)
-	PhysicsService:SetPartCollisionGroup(part, "Obstacles")
+	part.CollisionGroup = "Obstacles"
 
 	part.Touched:Connect(function(hit: BasePart)
 		local vehicle = hit:FindFirstAncestorOfClass("Model")
