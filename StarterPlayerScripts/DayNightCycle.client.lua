@@ -77,8 +77,6 @@ local function apply(t: number)
 	Lighting.Brightness = (ca.Brightness + (cb.Brightness - ca.Brightness) * f) * flashBoost
 	Lighting.OutdoorAmbient = ca.OutdoorAmbient:Lerp(cb.OutdoorAmbient, f)
 	Lighting.Ambient = Lighting.OutdoorAmbient
-	Lighting.FogColor = ca.FogColor:Lerp(cb.FogColor, f)
-	Lighting.FogEnd = ca.FogEnd + (cb.FogEnd - ca.FogEnd) * f
 	atmosphere.Density = ca.Density + (cb.Density - ca.Density) * f
 	colorCorrection.Saturation = ca.ColorCorrectionSaturation
 		+ (cb.ColorCorrectionSaturation - ca.ColorCorrectionSaturation) * f
