@@ -25,6 +25,45 @@ local returnToLobby = Net.get(Net.Events.ReturnToLobby)
 
 local GOLD = Color3.fromRGB(255, 210, 70)
 
+-- // Геймплейный HUD под нашими экранами -------------------------------------
+-- Итог и режим зрителя обязаны быть ЭКСКЛЮЗИВНЫМИ. Раньше HUD оставался включён:
+-- сквозь «YOU WIN!» светились спидометр, HEALTH, LIVES, стрелка чекпоинта и красный
+-- баннер «VEHICLE DESTROYED», напечатанный прямо по буквам итога, — да ещё и с
+-- цифрами, противоречащими итогу. Гасим его на время своих экранов и возвращаем на
+-- отсчёте следующего заезда. (В лобби им так же распоряжается LobbyUI.)
+--
+-- ОДНОГО ГАШЕНИЯ HUD МАЛО — НУЖЕН ФЛАГ. RaceUpdate от сервера идёт каждые 0.4с, и LobbyUI
+-- по нему вызывает setLobbyVisible(false), то есть ВКЛЮЧАЕТ HUD. Прилетев после
+-- MatchResult (это разные remote'ы, порядок между ними не гарантирован — ровно та же
+-- грабля, что описана ниже у сброса оверлея), такой апдейт зажигал HUD прямо поверх
+-- итога. Поэтому пока наш экран на месте, держим атрибут MatchOverlay, и LobbyUI его
+-- уважает.
+local OVERLAY_FLAG = "MatchOverlay"
+local hudGui: ScreenGui? = nil
+task.spawn(function()
+	local g = playerGui:WaitForChild("GraveyardHUD", 30)
+	if g and g:IsA("ScreenGui") then
+		hudGui = g
+	end
+end)
+-- Наш экран занял место: поднять флаг и убрать HUD.
+local function takeScreen()
+	player:SetAttribute(OVERLAY_FLAG, true)
+	local g = hudGui
+	if g and g.Parent then
+		g.Enabled = false
+	end
+end
+
+-- Наш экран ушёл. HUD тут НЕ включаем: включать его — дело того, кто знает фазу
+-- (LobbyUI в лобби, обработчик отсчёта ниже). Иначе на возврате в лобби два скрипта
+-- в одном кадре дёргали бы HUD в разные стороны.
+local function releaseScreen()
+	player:SetAttribute(OVERLAY_FLAG, false)
+end
+
+releaseScreen()
+
 -- // Каркас ------------------------------------------------------------------
 local gui = Instance.new("ScreenGui")
 gui.Name = "MatchResult"
@@ -109,6 +148,7 @@ local function startSpectating()
 	end
 	spectating = true
 	specBanner.Visible = true
+	takeScreen() -- смотрим чужую гонку: свои спидометр/жизни только путают
 	camera.CameraType = Enum.CameraType.Scriptable
 	specConn = RunService.RenderStepped:Connect(function()
 		local car = findLeaderCar()
@@ -172,15 +212,19 @@ local function emberBurst(color: Color3)
 	end
 end
 
+-- Гасим МГНОВЕННО, без затухания. Плавное было красиво само по себе, но приходило
+-- вместе с ReturnToLobby — а по нему LobbyUI в тот же кадр показывает заставку.
+-- Итог лежит выше (DisplayOrder 50 против 10), и полсекунды тайтл с кнопками
+-- проступали из-под угасающего «GAME OVER». Ждать затухания в LobbyUI нельзя:
+-- сервер тут же шлёт Idle, и заставка всё равно всплывёт раньше.
 local function hideResult()
-	TweenService:Create(backdrop, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
-	task.delay(0.4, function()
-		backdrop.Visible = false
-	end)
+	backdrop.Visible = false
+	backdrop.BackgroundTransparency = 1
 end
 
 local function showResult(outcome: string, winner: string?, zombies: number)
 	stopSpectating()
+	takeScreen() -- экран итога — единственное, что на экране
 
 	if outcome == "won" then
 		title.Text = "YOU WIN!"
@@ -219,11 +263,21 @@ raceUpdate.OnClientEvent:Connect(function(data)
 	if type(data) == "table" and data.Participant == true and data.Phase == "Countdown" then
 		stopSpectating()
 		backdrop.Visible = false
+		releaseScreen()
+		local g = hudGui
+		if g and g.Parent then
+			g.Enabled = true -- новый заезд: HUD обратно
+		end
 	end
 end)
 
 -- Сервер шлёт ReturnToLobby ОДИН раз, ~6с после MatchResult (не спамит, порядок
 -- надёжен) → гасим экран итога; дальше LobbyUI показывает заставку.
 returnToLobby.OnClientEvent:Connect(function()
+	-- stopSpectating ЗДЕСЬ ТОЖЕ. Обычно его вызывает showResult, но если MatchResult
+	-- до клиента не дошёл, в лобби оставались баннер «OUT OF LIVES — SPECTATING» и
+	-- камера в режиме Scriptable — то есть меню поверх чужой машины.
+	stopSpectating()
 	hideResult()
+	releaseScreen() -- экрана больше нет; HUD в лобби погасит LobbyUI
 end)

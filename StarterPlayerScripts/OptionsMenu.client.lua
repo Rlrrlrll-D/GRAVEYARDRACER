@@ -15,11 +15,16 @@ local UserInputService = game:GetService("UserInputService")
 local Audio = require(ReplicatedStorage:WaitForChild("Audio"))
 local UITheme = require(ReplicatedStorage:WaitForChild("UITheme"))
 local SettingsSchema = require(ReplicatedStorage:WaitForChild("SettingsSchema"))
+local SkullBadge = require(ReplicatedStorage:WaitForChild("SkullBadge"))
 
 local ENGRAVE = Color3.fromRGB(224, 214, 170) -- костяная гравировка
 local MOSS = UITheme.Palette.Green
-local TRACK_BG = Color3.fromRGB(22, 33, 27) -- тёмный мох под дорожкой слайдера
 local RED = UITheme.Palette.Red
+local GREEN_LIGHT = UITheme.Palette.GreenLight -- светло-зелёный проекта (готовность PLAY)
+-- КРАСНАЯ ТЕМА (просьба юзера): нижний слой шкалы под ползунками — красный, поверх
+-- него ложится мшистая заливка. Прежде подложка была тёмным мхом 22,33,27 и шкала
+-- целиком читалась одним пятном — теперь непройденная часть сразу видна.
+local TRACK_BG = RED
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -31,6 +36,16 @@ gui.ResetOnSpawn = false
 gui.DisplayOrder = 20 -- поверх заставки (LobbyUI = 10)
 gui.IgnoreGuiInset = true
 gui.Parent = playerGui
+
+-- Прозрачный корень нужен только ради UIScale: он ужимает панель под высоту окна
+-- так же, как заставку (UITheme.fitToScreen), — иначе в невысоком окне низ панели
+-- уезжает за экран. Клики не перехватывает: Active=false, фон прозрачный.
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.Size = UDim2.fromScale(1, 1)
+root.BackgroundTransparency = 1
+root.Parent = gui
+UITheme.fitToScreen(root)
 
 local function corner(inst: Instance, r: number)
 	local c = Instance.new("UICorner")
@@ -50,17 +65,20 @@ local function engrave(text: string): TextLabel
 	return l
 end
 
--- // Панель справа (симметрична ростеру: та же ширина/верх, зеркально) --------
+-- // Панель СЛЕВА (просьба юзера: опции и ростер поменялись сторонами) --------
+-- Высота 404 -> 456: семь строк опций кончаются на y=384, и внизу нужно место под
+-- кнопку RACERS, которая открывает ростер. В прежние 404 она не влезала.
 local PANEL_W = 280
+local PANEL_H = 456
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.Active = true -- перехватывает клики
-panel.Size = UDim2.new(0, PANEL_W, 0, 404)
-panel.Position = UDim2.new(1, -(PANEL_W + 28), 0.24, 0) -- 28px от правого края, повыше — влезает на низких окнах
+panel.Size = UDim2.new(0, PANEL_W, 0, PANEL_H)
+panel.Position = UDim2.new(0, 28, 0, 240) -- 28px от ЛЕВОГО края, под тайтлом заставки
 panel.BackgroundColor3 = UITheme.PanelBg
 panel.BackgroundTransparency = 0.2
 panel.Visible = false
-panel.Parent = gui
+panel.Parent = root
 corner(panel, 10)
 local edge = Instance.new("UIStroke")
 edge.Color = ENGRAVE
@@ -113,6 +131,7 @@ local function makeSlider(opt: SettingsSchema.Option, index: number)
 	local maxV = opt.max or 1
 
 	local cap = engrave(opt.label)
+	cap.TextColor3 = RED -- подписи над опциями красные (просьба юзера)
 	cap.Size = UDim2.new(1, -78, 0, 22)
 	cap.Position = UDim2.fromOffset(16, y)
 	cap.TextXAlignment = Enum.TextXAlignment.Left
@@ -146,12 +165,22 @@ local function makeSlider(opt: SettingsSchema.Option, index: number)
 	corner(fill, 6)
 	fill.Parent = track
 
+	-- РУЧКА: красный кружок с черепом (просьба юзера). Череп — плоский силуэт из
+	-- векторного файла, тот же ассет, что стоял у чекпоинтов; вписан с полем, иначе
+	-- на 20 px он упирается в края кружка и читается пятном.
 	local handle = Instance.new("Frame")
 	handle.AnchorPoint = Vector2.new(0.5, 0.5)
 	handle.Size = UDim2.fromOffset(20, 20)
-	handle.BackgroundColor3 = ENGRAVE
+	handle.BackgroundColor3 = RED
 	handle.ZIndex = 2
 	corner(handle, 10)
+	local rim = Instance.new("UIStroke") -- костяной ободок: красное на красном иначе тонет
+	rim.Color = ENGRAVE
+	rim.Transparency = 0.35
+	rim.Thickness = 1
+	rim.Parent = handle
+	-- череп из вектора юзера (тот же контур, что у чекпоинтов) — костяной на красной ручке
+	SkullBadge.build(handle, 12, ENGRAVE)
 	handle.Parent = track
 
 	-- t — позиция ползунка 0..1; значение опции = min + t*(max-min)
@@ -185,11 +214,14 @@ local function makeSlider(opt: SettingsSchema.Option, index: number)
 	end)
 end
 
--- тумблер: кнопка ON (мох) / OFF (тёмный)
+-- Тумблер-флаг: OFF красный / ON светло-зелёный. Прежде было мох/тёмный-мох — два
+-- почти одинаковых по светлоте цвета, состояние приходилось читать по надписи.
+-- Теперь переключение показывает КРАСНЫЙ (просьба юзера), тем же языком, что и PLAY.
 local function makeToggle(opt: SettingsSchema.Option, index: number)
 	local y = rowY(index)
 
 	local cap = engrave(opt.label)
+	cap.TextColor3 = RED -- подписи над опциями красные
 	cap.Size = UDim2.new(1, -104, 0, 24)
 	cap.Position = UDim2.fromOffset(16, y + 10)
 	cap.TextXAlignment = Enum.TextXAlignment.Left
@@ -215,7 +247,7 @@ local function makeToggle(opt: SettingsSchema.Option, index: number)
 	local function render()
 		local on = settings[opt.key] == true
 		btn.Text = on and "ON" or "OFF"
-		btn.BackgroundColor3 = on and MOSS or TRACK_BG
+		btn.BackgroundColor3 = on and GREEN_LIGHT or RED
 	end
 	btn.Activated:Connect(function()
 		settings[opt.key] = not (settings[opt.key] == true)
@@ -238,6 +270,44 @@ for i, opt in SettingsSchema.Options do
 		makeToggle(opt, i)
 	end
 end
+
+-- // RACERS: ростер переехал сюда (просьба юзера) ------------------------------
+-- Список гонщиков больше не висит слева постоянно — он открывается отсюда и
+-- появляется СПРАВА, на месте, где раньше были эти самые опции. Панель ростера
+-- живёт в чужом ScreenGui (LobbyUI), поэтому ищем её по имени — тем же приёмом,
+-- которым LobbyUI находит эту панель. Ростер лежит внутри безымянного корневого
+-- Frame, так что ищем рекурсивно.
+local racersBtn = Instance.new("TextButton")
+racersBtn.Name = "RacersToggle"
+racersBtn.Size = UDim2.new(1, -32, 0, 40)
+racersBtn.Position = UDim2.fromOffset(16, PANEL_H - 56)
+racersBtn.BackgroundColor3 = MOSS
+racersBtn.AutoButtonColor = true
+racersBtn.Font = UITheme.Font
+racersBtn.Text = "RACERS"
+racersBtn.TextScaled = true
+racersBtn.TextColor3 = ENGRAVE
+racersBtn.TextStrokeColor3 = UITheme.Shadow
+racersBtn.TextStrokeTransparency = 0.4
+corner(racersBtn, 8)
+local rbs = Instance.new("UIStroke")
+rbs.Color = ENGRAVE
+rbs.Transparency = 0.5
+rbs.Thickness = 1
+rbs.Parent = racersBtn
+racersBtn.Parent = panel
+
+local function rosterPanel(): GuiObject?
+	local lobby = playerGui:FindFirstChild("LobbyUI")
+	local r = lobby and lobby:FindFirstChild("Roster", true)
+	return (r and r:IsA("GuiObject")) and (r :: GuiObject) or nil
+end
+racersBtn.Activated:Connect(function()
+	local r = rosterPanel()
+	if r then
+		r.Visible = not r.Visible
+	end
+end)
 
 -- сохранённые опции пришли с сервера (вход в игру / эхо) → обновить строки UI
 ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("PushSettings").OnClientEvent:Connect(function(s)
@@ -267,4 +337,8 @@ end)
 
 closeBtn.Activated:Connect(function()
 	panel.Visible = false
+	local r = rosterPanel()
+	if r then
+		r.Visible = false -- закрыли опции — ростер, открытый отсюда, тоже уходит
+	end
 end)
