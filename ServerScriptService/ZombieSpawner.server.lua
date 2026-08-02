@@ -14,7 +14,6 @@
 -- at ground level next to it — either works, since only its Position is used.
 
 local CollectionService = game:GetService("CollectionService")
-local PhysicsService = game:GetService("PhysicsService")
 local ServerStorage = game:GetService("ServerStorage")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -202,7 +201,7 @@ local function spawnZombie()
 
 	for _, part in zombie:GetDescendants() do
 		if part:IsA("BasePart") then
-			PhysicsService:SetPartCollisionGroup(part, "Zombies")
+			part.CollisionGroup = "Zombies"
 		end
 	end
 

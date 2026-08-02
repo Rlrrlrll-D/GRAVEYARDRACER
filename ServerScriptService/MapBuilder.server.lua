@@ -13,7 +13,6 @@
 local ServerStorage = game:GetService("ServerStorage")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
-local PhysicsService = game:GetService("PhysicsService")
 
 local MapLayout = require(ReplicatedStorage:WaitForChild("MapLayout"))
 
@@ -57,6 +56,32 @@ if GameConfig.Map.GenerateRoad and MapLayout.TrackPolyline and #MapLayout.TrackP
 end
 
 local templates = ServerStorage:FindFirstChild("MapTemplates")
+
+-- ЧИСТКА ШАБЛОНОВ ОТ СКРИПТОВ, ПРИЕХАВШИХ ИЗ СТОРА.
+-- Модели из Creator Store таскают внутри загрузчики текстур (`Package` у пучка травы,
+-- `qTexture` у DeadTree_C). Первым же делом они делают `require(<asset id>)`, а это в
+-- нашем месте запрещено — «lacking capability LoadUnownedAsset». Скрипт умирает на
+-- этой строке, НИЧЕГО применить не успевает (вид держится на MeshId + Color + Material),
+-- зато каждый клон пишет ошибку в консоль: травы под 700 кустов — под 700 ошибок за
+-- сессию, и столько же живых Script с четырёхсекундным WaitForChild.
+-- Чистим шаблоны один раз при старте, чтобы это не вернулось при переимпорте ассета.
+local function stripStoreScripts(root: Instance): number
+	local killed = 0
+	for _, d in root:GetDescendants() do
+		if d:IsA("LuaSourceContainer") then
+			d:Destroy()
+			killed += 1
+		end
+	end
+	return killed
+end
+
+if templates then
+	local killed = stripStoreScripts(templates)
+	if killed > 0 then
+		print(`[MapBuilder] Из шаблонов убрано скриптов-загрузчиков: {killed}.`)
+	end
+end
 
 local raycastParams = RaycastParams.new()
 raycastParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -188,7 +213,7 @@ for _, data in MapLayout.Hazards do
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") then
 			part.Anchored = true
-			PhysicsService:SetPartCollisionGroup(part, "Obstacles")
+			part.CollisionGroup = "Obstacles"
 		end
 	end
 	CollectionService:AddTag(model, "Hazard")
