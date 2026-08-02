@@ -1,12 +1,19 @@
 --!strict
 -- LocalScript: StarterPlayerScripts.OptionsMenu
--- Компактная панель опций СПРАВА (симметрично ростеру RACERS слева в LobbyUI).
--- Открывается/закрывается кнопкой OPTIONS из заставки (LobbyUI переключает
--- OptionsMenu.Panel.Visible) — своей кнопки-переключателя у панели НЕТ.
+-- Панель опций СТРОГО ПО ЦЕНТРУ экрана. Открывается плашкой OPTIONS из заставки,
+-- закрывается своей плашкой BACK — то есть возвращает в меню. Пока панель открыта,
+-- меню заставки спрятано (см. LobbyUI): панели по центру, и иначе они легли бы
+-- поверх тайтла и плашек.
+--
+-- СВЯЗЬ С ЗАСТАВКОЙ — ЧЕРЕЗ АТРИБУТ ИГРОКА LobbyPanel ("" | "Options" | "Racers").
+-- Панель живёт в своём ScreenGui, и раньше меню искало её по имени через PlayerGui,
+-- а она в ответ так же искала ростер. Атрибуту не важен порядок запуска
+-- LocalScript'ов и не важно, кто кого успел создать.
+--
 -- Строки генерируются из SettingsSchema.Options: слайдеры + тумблеры. Громкости
 -- двигают SoundGroups через Audio сразу; остальное (тряска/скримеры/сенса) —
--- через эхо SaveSettings→PushSettings (SettingsService, DataStore). Шрифт —
--- только Creepster; палитра — кость/мох, красный только на «X» закрыть.
+-- через эхо SaveSettings→PushSettings (SettingsService, DataStore). Плашки и
+-- подложка — мазки кистью из PlateArt; рамка и скругления убраны (просьба юзера).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,8 +23,14 @@ local Audio = require(ReplicatedStorage:WaitForChild("Audio"))
 local UITheme = require(ReplicatedStorage:WaitForChild("UITheme"))
 local SettingsSchema = require(ReplicatedStorage:WaitForChild("SettingsSchema"))
 local SkullBadge = require(ReplicatedStorage:WaitForChild("SkullBadge"))
+local PlateArt = require(ReplicatedStorage:WaitForChild("PlateArt"))
 
-local ENGRAVE = Color3.fromRGB(224, 214, 170) -- костяная гравировка
+-- ПАНЕЛЬ ОПЦИЙ — КОСТЯНАЯ (просьба юзера): подложка цвета кости, буквы по ней
+-- тёмно-мховые. Ростер рядом остался тёмным — там строки сами цветные плашки, и
+-- на кости они бы спорили с фоном.
+local BONE = UITheme.Palette.Bone
+local DARK = UITheme.Shadow -- буквы и обводки поверх кости
+local ENGRAVE = BONE -- костяная надпись на ТЁМНЫХ плашках (тумблер, череп ручки)
 local MOSS = UITheme.Palette.Green
 local RED = UITheme.Palette.Red
 local GREEN_LIGHT = UITheme.Palette.GreenLight -- светло-зелёный проекта (готовность PLAY)
@@ -25,6 +38,8 @@ local GREEN_LIGHT = UITheme.Palette.GreenLight -- светло-зелёный п
 -- него ложится мшистая заливка. Прежде подложка была тёмным мхом 22,33,27 и шкала
 -- целиком читалась одним пятном — теперь непройденная часть сразу видна.
 local TRACK_BG = RED
+
+local PANEL_ATTR = "LobbyPanel"
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -53,65 +68,63 @@ local function corner(inst: Instance, r: number)
 	c.Parent = inst
 end
 
--- гравированный лейбл: кость + тёмная обводка (фаска резьбы)
+-- Надпись по костяной подложке: тёмная и БЕЗ обводки. Обводка нужна светлому тексту
+-- на тёмном, чтобы он не сливался; тёмному по светлому она только утолщает буквы.
 local function engrave(text: string): TextLabel
 	local l = Instance.new("TextLabel")
 	l.BackgroundTransparency = 1
 	l.Font = UITheme.Font
 	l.Text = text
-	l.TextColor3 = ENGRAVE
-	l.TextStrokeColor3 = UITheme.Shadow
-	l.TextStrokeTransparency = 0.35
+	l.TextColor3 = DARK
+	l.TextStrokeTransparency = 1
+	l.ZIndex = 2 -- поверх подложки-мазка
 	return l
 end
 
--- // Панель СЛЕВА (просьба юзера: опции и ростер поменялись сторонами) --------
--- Высота 404 -> 456: семь строк опций кончаются на y=384, и внизу нужно место под
--- кнопку RACERS, которая открывает ростер. В прежние 404 она не влезала.
-local PANEL_W = 280
-local PANEL_H = 456
+-- // Панель ПО ЦЕНТРУ ---------------------------------------------------------
+-- Размер тот же, что у ростера в LobbyUI: панели сменяют друг друга на одном месте.
+-- Панель крупная и с широкими полями (просьба юзера). Ширина растёт вместе с
+-- полем, поэтому под содержимое остаётся даже больше прежнего: 620 − 2×110 = 400.
+-- Поле 110, а не 70, потому что у подложки рваный край: сплошная краска начинается
+-- только с ~140-го пикселя, и при меньшем поле строки садились на «волоски» кисти,
+-- а глаз всё равно читал их как прижатые к краю.
+local PANEL_W = 620
+local PANEL_H = 580
+local PAD = 110
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.Active = true -- перехватывает клики
+panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Size = UDim2.new(0, PANEL_W, 0, PANEL_H)
-panel.Position = UDim2.new(0, 28, 0, 240) -- 28px от ЛЕВОГО края, под тайтлом заставки
-panel.BackgroundColor3 = UITheme.PanelBg
-panel.BackgroundTransparency = 0.2
+panel.Position = UDim2.fromScale(0.5, 0.5)
+panel.BackgroundTransparency = 1
 panel.Visible = false
 panel.Parent = root
-corner(panel, 10)
-local edge = Instance.new("UIStroke")
-edge.Color = ENGRAVE
-edge.Transparency = 0.6
-edge.Thickness = 2
-edge.Parent = panel
+
+-- Сплошная подложка вместо фона с рамкой: обводка и скругление убраны (просьба
+-- юзера), панель держит форму мазка — плотное нутро, рваные края.
+local backdrop = PlateArt.backdrop(BONE)
+backdrop.Size = UDim2.fromScale(1, 1)
+backdrop.ZIndex = 1
+backdrop.Parent = panel
 
 local title = engrave("OPTIONS")
-title.Size = UDim2.new(1, -48, 0, 36)
-title.Position = UDim2.fromOffset(16, 10)
+-- Заголовок крупный (просьба юзера): 50 -> 72 по высоте, при TextScaled буквы
+-- вырастают на ту же треть. Строки опций сдвинуты ниже, чтобы он в них не упёрся.
+title.Size = UDim2.new(1, -2 * PAD, 0, 72)
+title.Position = UDim2.fromOffset(PAD, 16)
 title.TextScaled = true
-title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextXAlignment = Enum.TextXAlignment.Center -- по центру (просьба юзера)
 title.Parent = panel
 
--- закрыть — единственный красный
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.fromOffset(28, 28)
-closeBtn.Position = UDim2.new(1, -38, 0, 12)
-closeBtn.BackgroundColor3 = RED
-closeBtn.Font = UITheme.Font
-closeBtn.Text = "X"
-closeBtn.TextScaled = true
-closeBtn.TextColor3 = UITheme.Ink
-closeBtn.TextStrokeColor3 = UITheme.Shadow
-closeBtn.TextStrokeTransparency = 0.4
-corner(closeBtn, 6)
-closeBtn.Parent = panel
-
 -- // Строки из SettingsSchema.Options -----------------------------------------
+-- Семь строк с шагом 56 идут от y=100 (под выросшим заголовком) и кончаются на 484,
+-- а BACK начинается с 496 — двенадцать пикселей зазора. Ради них BACK стал ниже
+-- (66 вместо 76): иначе последний ползунок упирался в него.
 local activeDrag: ((x: number) -> ())? = nil
-local ROW_H = 48
+local ROW_H = 56
 local function rowY(index: number): number
-	return 48 + (index - 1) * ROW_H
+	return 100 + (index - 1) * ROW_H
 end
 
 -- обновление строки извне (PushSettings: сохранённые опции пришли с сервера)
@@ -131,29 +144,29 @@ local function makeSlider(opt: SettingsSchema.Option, index: number)
 	local maxV = opt.max or 1
 
 	local cap = engrave(opt.label)
-	cap.TextColor3 = RED -- подписи над опциями красные (просьба юзера)
-	cap.Size = UDim2.new(1, -78, 0, 22)
-	cap.Position = UDim2.fromOffset(16, y)
+	cap.Size = UDim2.new(1, -2 * PAD - 76, 0, 26)
+	cap.Position = UDim2.fromOffset(PAD, y)
 	cap.TextXAlignment = Enum.TextXAlignment.Left
-	cap.TextSize = 20
+	cap.TextSize = 26
 	cap.Parent = panel
 
 	local pct = engrave("100")
-	pct.Size = UDim2.fromOffset(48, 22)
-	pct.Position = UDim2.new(1, -60, 0, y)
+	pct.Size = UDim2.fromOffset(60, 26)
+	pct.Position = UDim2.new(1, -PAD - 60, 0, y)
 	pct.TextXAlignment = Enum.TextXAlignment.Right
-	pct.TextSize = 20
+	pct.TextSize = 26
 	pct.Parent = panel
 
 	local track = Instance.new("TextButton") -- кнопка → клик перехватывается
 	track.Text = ""
 	track.AutoButtonColor = false
-	track.Size = UDim2.new(1, -32, 0, 12)
-	track.Position = UDim2.fromOffset(16, y + 28)
+	track.Size = UDim2.new(1, -2 * PAD, 0, 16)
+	track.Position = UDim2.fromOffset(PAD, y + 32)
 	track.BackgroundColor3 = TRACK_BG
-	corner(track, 6)
+	track.ZIndex = 2
+	corner(track, 8)
 	local groove = Instance.new("UIStroke")
-	groove.Color = ENGRAVE
+	groove.Color = DARK
 	groove.Transparency = 0.5
 	groove.Thickness = 1
 	groove.Parent = track
@@ -162,7 +175,8 @@ local function makeSlider(opt: SettingsSchema.Option, index: number)
 	local fill = Instance.new("Frame")
 	fill.BackgroundColor3 = MOSS
 	fill.BorderSizePixel = 0
-	corner(fill, 6)
+	fill.ZIndex = 2
+	corner(fill, 8)
 	fill.Parent = track
 
 	-- РУЧКА: красный кружок с черепом (просьба юзера). Череп — плоский силуэт из
@@ -170,17 +184,17 @@ local function makeSlider(opt: SettingsSchema.Option, index: number)
 	-- на 20 px он упирается в края кружка и читается пятном.
 	local handle = Instance.new("Frame")
 	handle.AnchorPoint = Vector2.new(0.5, 0.5)
-	handle.Size = UDim2.fromOffset(20, 20)
+	handle.Size = UDim2.fromOffset(26, 26)
 	handle.BackgroundColor3 = RED
-	handle.ZIndex = 2
-	corner(handle, 10)
-	local rim = Instance.new("UIStroke") -- костяной ободок: красное на красном иначе тонет
-	rim.Color = ENGRAVE
+	handle.ZIndex = 3
+	corner(handle, 13)
+	local rim = Instance.new("UIStroke") -- тёмный ободок: красное на кости иначе растекается
+	rim.Color = DARK
 	rim.Transparency = 0.35
 	rim.Thickness = 1
 	rim.Parent = handle
 	-- череп из вектора юзера (тот же контур, что у чекпоинтов) — костяной на красной ручке
-	SkullBadge.build(handle, 12, ENGRAVE)
+	SkullBadge.build(handle, 16, ENGRAVE)
 	handle.Parent = track
 
 	-- t — позиция ползунка 0..1; значение опции = min + t*(max-min)
@@ -217,37 +231,28 @@ end
 -- Тумблер-флаг: OFF красный / ON светло-зелёный. Прежде было мох/тёмный-мох — два
 -- почти одинаковых по светлоте цвета, состояние приходилось читать по надписи.
 -- Теперь переключение показывает КРАСНЫЙ (просьба юзера), тем же языком, что и PLAY.
+-- Плашка тумблера — такой же мазок, только узкий, поэтому поле у надписи меньше.
 local function makeToggle(opt: SettingsSchema.Option, index: number)
 	local y = rowY(index)
 
 	local cap = engrave(opt.label)
-	cap.TextColor3 = RED -- подписи над опциями красные
-	cap.Size = UDim2.new(1, -104, 0, 24)
-	cap.Position = UDim2.fromOffset(16, y + 10)
+	cap.Size = UDim2.new(1, -2 * PAD - 138, 0, 30)
+	cap.Position = UDim2.fromOffset(PAD, y + 10)
 	cap.TextXAlignment = Enum.TextXAlignment.Left
-	cap.TextSize = 20
+	cap.TextSize = 26
 	cap.Parent = panel
 
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.fromOffset(72, 34)
-	btn.Position = UDim2.new(1, -88, 0, y + 6)
-	btn.Font = UITheme.Font
-	btn.TextScaled = true
-	btn.TextColor3 = ENGRAVE
-	btn.TextStrokeColor3 = UITheme.Shadow
-	btn.TextStrokeTransparency = 0.4
-	corner(btn, 8)
-	local bs = Instance.new("UIStroke")
-	bs.Color = ENGRAVE
-	bs.Transparency = 0.5
-	bs.Thickness = 1
-	bs.Parent = btn
+	local btn = PlateArt.button(index, RED)
+	btn.Size = UDim2.fromOffset(126, 48)
+	btn.Position = UDim2.new(1, -PAD - 126, 0, y + 2)
+	btn.ZIndex = 2
+	local label = PlateArt.caption(btn, "OFF", ENGRAVE, 14)
 	btn.Parent = panel
 
 	local function render()
 		local on = settings[opt.key] == true
-		btn.Text = on and "ON" or "OFF"
-		btn.BackgroundColor3 = on and GREEN_LIGHT or RED
+		label.Text = on and "ON" or "OFF"
+		PlateArt.tint(btn, on and GREEN_LIGHT or RED)
 	end
 	btn.Activated:Connect(function()
 		settings[opt.key] = not (settings[opt.key] == true)
@@ -271,43 +276,43 @@ for i, opt in SettingsSchema.Options do
 	end
 end
 
--- // RACERS: ростер переехал сюда (просьба юзера) ------------------------------
--- Список гонщиков больше не висит слева постоянно — он открывается отсюда и
--- появляется СПРАВА, на месте, где раньше были эти самые опции. Панель ростера
--- живёт в чужом ScreenGui (LobbyUI), поэтому ищем её по имени — тем же приёмом,
--- которым LobbyUI находит эту панель. Ростер лежит внутри безымянного корневого
--- Frame, так что ищем рекурсивно.
-local racersBtn = Instance.new("TextButton")
-racersBtn.Name = "RacersToggle"
-racersBtn.Size = UDim2.new(1, -32, 0, 40)
-racersBtn.Position = UDim2.fromOffset(16, PANEL_H - 56)
-racersBtn.BackgroundColor3 = MOSS
-racersBtn.AutoButtonColor = true
-racersBtn.Font = UITheme.Font
-racersBtn.Text = "RACERS"
-racersBtn.TextScaled = true
-racersBtn.TextColor3 = ENGRAVE
-racersBtn.TextStrokeColor3 = UITheme.Shadow
-racersBtn.TextStrokeTransparency = 0.4
-corner(racersBtn, 8)
-local rbs = Instance.new("UIStroke")
-rbs.Color = ENGRAVE
-rbs.Transparency = 0.5
-rbs.Thickness = 1
-rbs.Parent = racersBtn
-racersBtn.Parent = panel
-
-local function rosterPanel(): GuiObject?
-	local lobby = playerGui:FindFirstChild("LobbyUI")
-	local r = lobby and lobby:FindFirstChild("Roster", true)
-	return (r and r:IsA("GuiObject")) and (r :: GuiObject) or nil
-end
-racersBtn.Activated:Connect(function()
-	local r = rosterPanel()
-	if r then
-		r.Visible = not r.Visible
-	end
+-- // BACK: возврат в меню -----------------------------------------------------
+-- Кнопка RACERS отсюда УБРАНА (просьба юзера): ростер вызывается своей плашкой в
+-- меню заставки, а не из опций. Красного «X» в углу тоже нет.
+--
+-- BACK — БЕЗ ПЛАШКИ (просьба юзера): на костяной подложке мазок под надписью читался
+-- как заплатка на краске. Осталась одна тёмная надпись; наведение подсвечивает её,
+-- иначе кнопка ничем не отзывается на мышь.
+local backBtn = Instance.new("TextButton")
+backBtn.Name = "BackPlate"
+backBtn.AnchorPoint = Vector2.new(0.5, 1)
+backBtn.Size = UDim2.fromOffset(340, 66)
+backBtn.Position = UDim2.new(0.5, 0, 1, -18)
+backBtn.BackgroundTransparency = 1
+backBtn.AutoButtonColor = false
+backBtn.Text = "BACK"
+backBtn.TextScaled = true
+backBtn.Font = UITheme.Font
+backBtn.TextColor3 = DARK
+backBtn.TextStrokeTransparency = 1
+backBtn.ZIndex = 2
+backBtn.Parent = panel
+backBtn.MouseEnter:Connect(function()
+	backBtn.TextColor3 = RED
 end)
+backBtn.MouseLeave:Connect(function()
+	backBtn.TextColor3 = DARK
+end)
+backBtn.Activated:Connect(function()
+	player:SetAttribute(PANEL_ATTR, "")
+end)
+
+-- Панель видна ровно тогда, когда меню просит именно её.
+local function applyPanel()
+	panel.Visible = player:GetAttribute(PANEL_ATTR) == "Options"
+end
+player:GetAttributeChangedSignal(PANEL_ATTR):Connect(applyPanel)
+applyPanel()
 
 -- сохранённые опции пришли с сервера (вход в игру / эхо) → обновить строки UI
 ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("PushSettings").OnClientEvent:Connect(function(s)
@@ -332,13 +337,5 @@ UserInputService.InputEnded:Connect(function(input)
 			activeDrag = nil
 			sendSave() -- слайдер отпущен → зафиксировать значение на сервере
 		end
-	end
-end)
-
-closeBtn.Activated:Connect(function()
-	panel.Visible = false
-	local r = rosterPanel()
-	if r then
-		r.Visible = false -- закрыли опции — ростер, открытый отсюда, тоже уходит
 	end
 end)
