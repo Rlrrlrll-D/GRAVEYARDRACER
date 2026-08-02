@@ -27,7 +27,7 @@ markerFolder.Name = "RaceMarkers"
 markerFolder.Parent = workspace
 local ORB_COLOR = Color3.fromRGB(120, 255, 200) -- магический сине-зелёный (в тон "green beacons")
 -- Цвет и форма черепа-чекпоинта живут у КЛИЕНТА (UIController: SKULL_COLOR + меш из
--- ReplicatedStorage.SkullShape) — здесь они больше не нужны, сервер держит лишь якорь.
+-- ReplicatedStorage.SkullOutline) — здесь они больше не нужны, сервер держит лишь якорь.
 -- Прежний ассет-силуэт, если понадобится вернуть: rbxassetid://79551611166203
 
 -- magic-orb: полая мерцающая сфера + орбитальные светящиеся ленты
@@ -125,7 +125,7 @@ local function buildSkull(cp: Vector3, i: number): Model
 	-- этого обязан быть ДЕТАЛЬЮ: Material = Neon есть у детали, у ImageLabel его нет,
 	-- а блюм берёт только то, что ярче единицы (BloomEffect.Threshold = 1.5 в этом
 	-- плейсе) — пиксель UI ярче 1.0 не бывает. Поэтому плашка теперь меш, собранный
-	-- из силуэта (ReplicatedStorage.SkullShape) через EditableMesh.
+	-- из силуэта (ReplicatedStorage.SkullOutline) через EditableMesh.
 	--
 	-- А строит его КЛИЕНТ (UIController), потому что меш из EditableMesh НЕ
 	-- реплицируется: собери его сервер — игроки увидели бы пустое место. Сервер
