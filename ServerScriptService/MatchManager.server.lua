@@ -28,6 +28,7 @@ local RaceCore = require(script.Parent:WaitForChild("RaceCore"))
 local RaceScene = require(script.Parent:WaitForChild("RaceScene"))
 local PlayerFlow = require(script.Parent:WaitForChild("PlayerFlow"))
 local Economy = require(script.Parent:WaitForChild("Economy"))
+local Badges = require(script.Parent:WaitForChild("Badges"))
 
 local cfg = GameConfig.Race
 local econ = GameConfig.Economy
@@ -411,8 +412,18 @@ local function runResults(winner: Player?, winnerName: string?, session: RaceCor
 		local before = Economy.balance(plr)
 		if outcome ~= "eliminated" then
 			Economy.award(plr, econ.BonesPerFinish, "финиш")
+			-- Значок за первый доеханный заезд, а не за первый начатый: выбывший по
+			-- жизням гонку не закончил, и обещать ему «finish a race» было бы враньём.
+			Badges.award(plr, "first_race")
 			if outcome == "won" then
 				Economy.award(plr, econ.BonesPerWin, "победа")
+			end
+		end
+		if outcome == "won" then
+			Badges.award(plr, "first_win")
+			-- Атрибут Wins уже увеличен выше, поэтому десятая победа видна сразу.
+			if ((plr:GetAttribute("Wins") :: number?) or 0) >= 10 then
+				Badges.award(plr, "ten_wins")
 			end
 		end
 		matchResult:FireClient(plr, {

@@ -22,6 +22,7 @@ local Debris = game:GetService("Debris")
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local ZombieAI = require(script.Parent:WaitForChild("ZombieAI"))
 local Economy = require(script.Parent:WaitForChild("Economy"))
+local Badges = require(script.Parent:WaitForChild("Badges"))
 
 local template = ServerStorage:WaitForChild("ZombieTemplate") :: Model
 
@@ -181,6 +182,11 @@ local function onZombieDied(zombie: Model, humanoid: Humanoid)
 			local defeated = (killer:GetAttribute("ZombiesDefeated") :: number?) or 0
 			killer:SetAttribute("ZombiesDefeated", defeated + 1)
 			Economy.award(killer, GameConfig.Economy.BonesPerZombie, "зомби")
+			-- Счётчик накопительный (PlayerData сидирует его из записи при входе),
+			-- поэтому сотня набирается за все сессии, а не за одну.
+			if defeated + 1 >= 100 then
+				Badges.award(killer, "hundred_zombies")
+			end
 		end
 	end
 
