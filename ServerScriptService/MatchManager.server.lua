@@ -3,7 +3,8 @@
 -- Сессионная машина состояний матча (веха 4 плана V2). ЗАМЕНЯЕТ старый
 -- RaceManager и VehicleSpawner — их скрипты удалены, фазами владеет только он.
 --
---   Lobby ──(готовых ≥ MinRacers)──▶ Countdown ──▶ Racing ──▶ Results ──▶ Lobby
+--   Lobby ──(готовых ≥ MinRacers, либо ≥ MinRacersAlone и вышло SoloWaitSeconds)──▶
+--         ──▶ Countdown ──▶ Racing ──▶ Results ──▶ Lobby
 --
 -- Разделение труда: RaceCore — логика заезда (чекпоинты/круги/победитель),
 -- RaceScene — визуал (маркеры, призраки), PlayerFlow — игрок/машины/лобби.
@@ -67,7 +68,9 @@ local function readyList(): { Player }
 	return list
 end
 
-local function broadcastLobby()
+-- waitLeft — сколько секунд ещё ждём соперников, прежде чем стартовать неполным
+-- составом. nil = ждать нечего (порог набран, либо мы уже не в лобби).
+local function broadcastLobby(waitLeft: number?)
 	-- ростер: все игроки сервера с флажком готовности (LobbyUI рисует список)
 	local roster: { { name: string, ready: boolean } } = {}
 	for _, plr in Players:GetPlayers() do
@@ -80,6 +83,7 @@ local function broadcastLobby()
 		phase = phase,
 		ready = #readyList(),
 		needed = cfg.MinRacers,
+		waitLeft = waitLeft,
 		total = #Players:GetPlayers(),
 		roster = roster,
 	})
@@ -135,28 +139,65 @@ local function setNightAnchor(value: number)
 	end
 end
 
+-- Ожидание в лобби с МЯГКИМ порогом: хотим MinRacers, но если через
+-- Race.SoloWaitSeconds соперники так и не пришли — выпускаем тех, кто есть (не
+-- меньше MinRacersAlone). Почему порог вообще мягкий — см. комментарий в GameConfig.
+-- Терпение отсчитывается от момента, когда в лобби появился ПЕРВЫЙ готовый, и
+-- обнуляется, только если готовых не осталось совсем: иначе игрок, нажавший PLAY
+-- пятым по счёту, снова ждал бы полную минуту.
 local function runLobby()
 	phase = Phase.Lobby
 	setNightAnchor(-1) -- в лобби светло: небо не должно прыгать на старте отсчёта
+	local aloneSince: number? = nil
 	while true do
-		broadcastLobby()
-		raceUpdate:FireAllClients({ Phase = "Idle", Waiting = #readyList(), Needed = cfg.MinRacers })
+		local count = #readyList()
+		if count < cfg.MinRacersAlone then
+			aloneSince = nil -- лобби опустело: ждать больше не для кого
+		elseif aloneSince == nil then
+			aloneSince = os.clock()
+		end
+		-- Сколько ещё ждём. nil = порог уже набран, ожидание ни при чём — по нему же
+		-- клиент понимает, показывать обратный отсчёт или нет.
+		local waitLeft: number? = nil
+		if aloneSince ~= nil and count < cfg.MinRacers then
+			waitLeft = math.max(0, cfg.SoloWaitSeconds - (os.clock() - aloneSince))
+		end
+
+		broadcastLobby(waitLeft)
+		raceUpdate:FireAllClients({
+			Phase = "Idle",
+			Waiting = count,
+			Needed = cfg.MinRacers,
+			WaitLeft = waitLeft,
+		})
 		task.wait(0.5)
-		if #readyList() >= cfg.MinRacers then
+
+		local full = #readyList() >= cfg.MinRacers
+		local outOfPatience = waitLeft ~= nil and waitLeft <= 0 and #readyList() >= cfg.MinRacersAlone
+		if full or outOfPatience then
 			-- Порог набран. Держим короткое окно СБОРА: заезд стартует не по «первым,
 			-- кто добрал минимум», а со ВСЕМИ готовыми. MinRacers — условие НАЧАЛА, а
 			-- НЕ лимит мест (мест MaxSlots=8) — опоздавшие на PLAY успевают войти.
 			local held = 0
 			while held < LOBBY_GATHER_SECONDS do
-				broadcastLobby()
-				raceUpdate:FireAllClients({ Phase = "Idle", Waiting = #readyList(), Needed = cfg.MinRacers })
+				broadcastLobby(0)
+				raceUpdate:FireAllClients({
+					Phase = "Idle",
+					Waiting = #readyList(),
+					Needed = cfg.MinRacers,
+					WaitLeft = 0,
+				})
 				task.wait(0.5)
 				held += 0.5
 			end
-			if #readyList() >= cfg.MinRacers then
+			-- Планка на выходе — та же, по которой вошли: добрали троих — троих и ждём,
+			-- пустили одиночку по таймауту — хватит одного. Иначе передумавший третий
+			-- отменял бы старт, который одиночке уже пообещали.
+			local floor = if full then cfg.MinRacers else cfg.MinRacersAlone
+			if #readyList() >= floor then
 				return -- стартуем со всеми, кто готов
 			end
-			-- за время сбора кто-то передумал и упал ниже минимума → снова ждём
+			-- за время сбора кто-то передумал и упал ниже порога → снова ждём
 		end
 	end
 end

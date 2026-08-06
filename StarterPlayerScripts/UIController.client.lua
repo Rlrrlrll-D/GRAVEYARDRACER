@@ -209,6 +209,7 @@ type RacePayload = {
 	Eliminated: boolean?,
 	Waiting: number?,
 	Needed: number?,
+	WaitLeft: number?, -- секунд до старта неполным составом; nil = порог уже набран
 }
 
 -- // ПЛАШКА-ЧЕРЕП КАК НАСТОЯЩАЯ НЕОНОВАЯ ДЕТАЛЬ ------------------------------
@@ -691,7 +692,12 @@ raceUpdate.OnClientEvent:Connect(function(data: RacePayload)
 	if data.Phase == "Idle" then
 		local waiting = data.Waiting or 0
 		local needed = data.Needed or 1
-		if needed > 1 and waiting > 0 and waiting < needed then
+		local left = data.WaitLeft
+		if type(left) == "number" and waiting > 0 then
+			-- То же обещание, что и на экране лобби: ждём соперников, но не бесконечно
+			-- (см. Race.SoloWaitSeconds). Без секунд строка выглядит как тупик.
+			raceLabel.Text = string.format("Waiting for racers… %d/%d — starting in %ds", waiting, needed, math.ceil(left))
+		elseif needed > 1 and waiting > 0 and waiting < needed then
 			raceLabel.Text = string.format("Waiting for racers… %d/%d — press READY", waiting, needed)
 		elseif needed > 1 then
 			raceLabel.Text = string.format("Press READY to race — need %d racers", needed)

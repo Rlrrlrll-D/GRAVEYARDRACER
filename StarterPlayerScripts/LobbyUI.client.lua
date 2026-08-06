@@ -342,7 +342,17 @@ player:GetAttributeChangedSignal(PANEL_ATTR):Connect(applyPanel)
 
 lobbyState.OnClientEvent:Connect(function(state)
 	if state.phase == GameState.Phase.Lobby then
-		status.Text = string.format("Racers ready: %d / %d", state.ready or 0, state.needed or 1)
+		local readyNow, needed = state.ready or 0, state.needed or 1
+		local left = state.waitLeft
+		if type(left) == "number" then
+			-- ОДИНОЧКЕ НЕЛЬЗЯ ПОКАЗЫВАТЬ ГЛУХОЕ «1 / 3». Строка, которая не меняется,
+			-- читается как «игра сломана, соперников не будет» — и человек уходит
+			-- ровно тогда, когда до старта оставалось полминуты. Обратный отсчёт
+			-- обещает заезд вслух: сервер всё равно стартует по нему (Race.SoloWaitSeconds).
+			status.Text = string.format("Racers ready: %d / %d — starting in %ds", readyNow, needed, math.ceil(left))
+		else
+			status.Text = string.format("Racers ready: %d / %d", readyNow, needed)
+		end
 	elseif state.phase == GameState.Phase.Countdown or state.phase == GameState.Phase.Racing then
 		status.Text = "Race in progress — PLAY for the next one"
 	end
