@@ -58,12 +58,61 @@ local function findMyVehicle(): Model?
 	return nil
 end
 
+-- // Прицеливание на сенсоре -------------------------------------------------
+-- На телефоне мыши нет. Перекрестие стоит там, куда его подвёл палец, и само
+-- никуда не возвращается: иначе целиться, не отпуская газ, было бы нечем.
+-- Точка живёт в координатах вьюпорта — ровно тех, что отдаёт WorldToViewportPoint
+-- (ниже по ним ставится сам крест), поэтому обратное преобразование к лучу —
+-- ViewportPointToRay, и крест с выстрелом сходятся без подгонки.
+local function touchMode(): boolean
+	return player:GetAttribute("TouchActive") == true
+end
+
+local aimPoint: Vector2? = nil -- nil = ещё не водили пальцем, значит центр экрана
+
+local function aimRay(): Ray
+	if not touchMode() then
+		return mouse.UnitRay
+	end
+	local vp = camera.ViewportSize
+	local p = aimPoint or (vp / 2)
+	return camera:ViewportPointToRay(p.X, p.Y)
+end
+
+-- Водит прицел ЛЮБОЙ свободный палец, а не только на правой половине: кнопки
+-- руля и педалей — GuiObject, касание по ним движок помечает gameProcessed и
+-- сюда оно не доходит. Значит вся остальная площадь экрана — прицел, и левше
+-- целиться так же удобно, как правше. Ход один к одному: прямое перетаскивание
+-- читается лучше любой чувствительности, подобранной на глаз.
+local aimTouch: InputObject? = nil
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if touchMode() and not gameProcessed and input.UserInputType == Enum.UserInputType.Touch then
+		aimTouch = input
+	end
+end)
+UserInputService.InputChanged:Connect(function(input)
+	if input ~= aimTouch then
+		return
+	end
+	local vp = camera.ViewportSize
+	local p = aimPoint or (vp / 2)
+	aimPoint = Vector2.new(
+		math.clamp(p.X + input.Delta.X, 30, vp.X - 30),
+		math.clamp(p.Y + input.Delta.Y, 30, vp.Y - 30)
+	)
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input == aimTouch then
+		aimTouch = nil
+	end
+end)
+
 -- Точка в мире под перекрестием (курсором). mouse.UnitRay учитывает
 -- инсет топ-бара правильно (в отличие от ViewportPointToRay+GetMouseLocation,
 -- что давало вертикальный сдвиг и промах мимо прицела). Вторым
 -- возвращает объект под курсором — чтобы красить крест зелёным на зомби.
 local function getMouseHit(excludeVehicle: Model?): (Vector3, Instance?)
-	local unitRay = mouse.UnitRay
+	local unitRay = aimRay()
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 	local filter = {}
@@ -409,6 +458,11 @@ end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
+	-- На сенсоре стреляет ТОЛЬКО гашетка: там касание экрана — это наводка
+	-- прицела, и стрельба по каждому касанию высаживала бы очередь на каждый
+	-- поворот. На ноутбуке с сенсорным экраном (клавиатура есть, TouchActive нет)
+	-- прежнее поведение остаётся.
+	if touchMode() then return end
 	if input.UserInputType == Enum.UserInputType.MouseButton1
 		or input.UserInputType == Enum.UserInputType.Touch then
 		firing = true
@@ -421,4 +475,10 @@ UserInputService.InputEnded:Connect(function(input)
 		or input.UserInputType == Enum.UserInputType.Touch then
 		firing = false
 	end
+end)
+
+-- Гашетка сенсорной раскладки (TouchControls) — через атрибут игрока, тем же
+-- путём, что руль и педали доезжают до A-Chassis.
+player:GetAttributeChangedSignal("TouchFire"):Connect(function()
+	firing = player:GetAttribute("TouchFire") == true
 end)

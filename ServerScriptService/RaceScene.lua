@@ -200,7 +200,7 @@ if cfg.GhostsEnabled then
 		nameLabel.Size = UDim2.new(1, 0, 1, 0)
 		nameLabel.BackgroundTransparency = 1
 		nameLabel.TextScaled = true
-		nameLabel.Font = Enum.Font.GothamBold
+		nameLabel.Font = Enum.Font.Creepster -- шрифт в UI один (UITheme.Font); модуль серверный, тему не тянет
 		nameLabel.TextColor3 = spec.Color
 		nameLabel.TextStrokeTransparency = 0.5
 		nameLabel.Text = spec.Name
