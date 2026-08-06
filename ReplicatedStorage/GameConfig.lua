@@ -54,6 +54,14 @@ export type GameConfigType = {
 		AreaW: number, -- ширина базовой травяной плиты
 		AreaH: number, -- глубина базовой травяной плиты
 	},
+	-- Внутренняя валюта «Кости». Начисления собраны здесь, а не разбросаны по
+	-- скриптам: баланс экономики правится в одном месте. Начисляет всё Economy.
+	Economy: {
+		BonesPerZombie: number, -- за убитого зомби
+		BonesPerFinish: number, -- дошёл до финиша (проиграл, но доехал)
+		BonesPerWin: number, -- за победу, СВЕРХ BonesPerFinish
+		BonesPerCheckpoint: number, -- за пройденный чекпоинт: капает и тому, кто не выиграл
+	},
 }
 
 local GameConfig: GameConfigType = {
@@ -111,6 +119,15 @@ local GameConfig: GameConfigType = {
 		SlabThick = 12,
 		AreaW = 680,
 		AreaH = 680,
+	},
+	Economy = {
+		-- Прикидка на заезд: 12 чекпоинтов × 3 круга × 2 = 72, десяток зомби = 50,
+		-- финиш 25, победа ещё 75. То есть победный заезд ≈ 220 костей, проигранный
+		-- но доеханный ≈ 145. Скины за кости имеет смысл ставить в 1500–4000.
+		BonesPerZombie = 5,
+		BonesPerFinish = 25,
+		BonesPerWin = 75,
+		BonesPerCheckpoint = 2,
 	},
 }
 

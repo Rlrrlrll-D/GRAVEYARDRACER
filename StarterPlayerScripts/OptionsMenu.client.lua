@@ -112,7 +112,10 @@ local title = engrave("OPTIONS")
 -- Заголовок крупный (просьба юзера): 50 -> 72 по высоте, при TextScaled буквы
 -- вырастают на ту же треть. Строки опций сдвинуты ниже, чтобы он в них не упёрся.
 title.Size = UDim2.new(1, -2 * PAD, 0, 72)
-title.Position = UDim2.fromOffset(PAD, 16)
+-- Поле сверху 36, а не 16 (просьба юзера, общая для всех панелей): на 16 пикселях
+-- заголовок садится на щетину рваного края подложки. Строки ниже сдвинуты на
+-- столько же, BACK стал ниже — иначе последний ползунок в него упирается.
+title.Position = UDim2.fromOffset(PAD, 36)
 title.TextScaled = true
 title.TextXAlignment = Enum.TextXAlignment.Center -- по центру (просьба юзера)
 title.Parent = panel
@@ -124,7 +127,7 @@ title.Parent = panel
 local activeDrag: ((x: number) -> ())? = nil
 local ROW_H = 56
 local function rowY(index: number): number
-	return 100 + (index - 1) * ROW_H
+	return 116 + (index - 1) * ROW_H
 end
 
 -- обновление строки извне (PushSettings: сохранённые опции пришли с сервера)
@@ -286,8 +289,8 @@ end
 local backBtn = Instance.new("TextButton")
 backBtn.Name = "BackPlate"
 backBtn.AnchorPoint = Vector2.new(0.5, 1)
-backBtn.Size = UDim2.fromOffset(340, 66)
-backBtn.Position = UDim2.new(0.5, 0, 1, -18)
+backBtn.Size = UDim2.fromOffset(340, 52)
+backBtn.Position = UDim2.new(0.5, 0, 1, -14)
 backBtn.BackgroundTransparency = 1
 backBtn.AutoButtonColor = false
 backBtn.Text = "BACK"

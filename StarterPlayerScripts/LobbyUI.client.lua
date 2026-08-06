@@ -3,7 +3,7 @@
 -- ЗАСТАВКА + предстартовый экран (упрощённая модель «заставка → отсчёт → гонка»).
 -- Показывается, пока игрок ВНЕ заезда: сразу при заходе и после каждого заезда.
 -- Никаких платформ/диорам — просто затемнённый блюр-фон реального кладбища +
--- тайтл + столбик плашек-мазков (PLAY / OPTIONS / RACERS). При старте заезда
+-- тайтл + столбик плашек-мазков (PLAY / OPTIONS / RACERS / SHOP). При старте заезда
 -- прячется у участника (по Participant=true в персональном RaceUpdate),
 -- возвращается по ReturnToLobby / фазе Idle. Пока показана — геймплейный HUD
 -- скрыт, фон заблюрен. Плашки и подложки — мазки кистью из PlateArt.
@@ -199,12 +199,23 @@ end
 -- ГОТОВНОСТЬ ПОКАЗЫВАЕТ ЦВЕТ, А НЕ ГАЛОЧКА (просьба юзера): не готов — красный
 -- мазок, готов — светло-зелёный. Галочка убрана: цвет читается с одного взгляда.
 local isReady = false
-local playBtn = menuPlate(1, "PLAY", UITheme.Palette.Red, 500, 110, 356)
+local playBtn = menuPlate(1, "PLAY", UITheme.Palette.Red, 500, 100, 340)
 
--- OPTIONS и RACERS — второстепенные действия, оба мшисто-зелёные. Красный в меню
--- один и означает «ещё не готов» (см. UITheme: красный в интерфейсе единственный).
-local optBtn = menuPlate(2, "OPTIONS", UITheme.Palette.Green, 460, 94, 478)
-local racersBtn = menuPlate(3, "RACERS", UITheme.Palette.Green, 460, 94, 584)
+-- OPTIONS, RACERS и SHOP — второстепенные действия, все мшисто-зелёные. Красный в
+-- меню один и означает «ещё не готов» (см. UITheme: красный в интерфейсе
+-- единственный). Различает их форма мазка: PlateArt берёт её по номеру плашки.
+--
+-- СТОЛБИК СЖАТ РАДИ ЧЕТВЁРТОЙ ПЛАШКИ. Прежние 356/478/584 при высотах 110/94/94
+-- упирались в 678 из 700 доступных, и SHOP уже не влезал.
+--
+-- ШАГ 78 ПРИ ВЫСОТЕ ПЛАШКИ 84 — ТО ЕСТЬ КОРОБКИ ИДУТ ВНАХЛЁСТ НА 6 ПИКСЕЛЕЙ, и это
+-- не опечатка. У мазка вокруг краски есть прозрачное поле: в коробке 84 самой краски
+-- около 70. Поэтому просвет, заданный обычным зазором между коробками, на экране
+-- выходит вдвое больше заданного. Юзер попросил гэп меньше — единственный способ
+-- сблизить именно КРАСКУ, не трогая картинку мазка, это дать коробкам перекрыться.
+local optBtn = menuPlate(2, "OPTIONS", UITheme.Palette.Green, 460, 84, 434)
+local racersBtn = menuPlate(3, "RACERS", UITheme.Palette.Green, 460, 84, 512)
+local shopBtn = menuPlate(4, "SHOP", UITheme.Palette.Green, 460, 84, 590)
 
 playBtn.Activated:Connect(function()
 	isReady = not isReady
@@ -242,7 +253,9 @@ rosterBackdrop.Parent = rosterPanel
 
 local rosterTitle = Instance.new("TextLabel")
 rosterTitle.Size = UDim2.new(1, -2 * PAD, 0, 72) -- вровень с заголовком опций
-rosterTitle.Position = UDim2.fromOffset(PAD, 16)
+-- Поле сверху 36 — общее для всех панелей (просьба юзера): на 16 заголовок сидел
+-- прямо на рваном крае подложки.
+rosterTitle.Position = UDim2.fromOffset(PAD, 36)
 rosterTitle.BackgroundTransparency = 1
 rosterTitle.Text = "RACERS"
 rosterTitle.TextScaled = true
@@ -251,8 +264,8 @@ UITheme.applyText(rosterTitle, { color = UITheme.Palette.Bone })
 rosterTitle.Parent = rosterPanel
 
 local rosterList = Instance.new("Frame")
-rosterList.Size = UDim2.new(1, -2 * PAD, 1, -230)
-rosterList.Position = UDim2.fromOffset(PAD, 100)
+rosterList.Size = UDim2.new(1, -2 * PAD, 1, -250)
+rosterList.Position = UDim2.fromOffset(PAD, 120)
 rosterList.BackgroundTransparency = 1
 rosterList.ZIndex = 2
 rosterList.Parent = rosterPanel
@@ -314,6 +327,9 @@ optBtn.Activated:Connect(function()
 end)
 racersBtn.Activated:Connect(function()
 	player:SetAttribute(PANEL_ATTR, "Racers")
+end)
+shopBtn.Activated:Connect(function()
+	player:SetAttribute(PANEL_ATTR, "Shop")
 end)
 
 -- Меню и панель — взаимоисключающие состояния одного экрана.

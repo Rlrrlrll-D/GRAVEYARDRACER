@@ -25,6 +25,15 @@ Net.Events = {
 	SaveSettings  = "SaveSettings",  -- client→server: применить+сохранить опции
 	PushSettings  = "PushSettings",  -- server→client: настройки, загруженные из DataStore при входе
 	BatScare      = "BatScare",      -- server→clients: (origin: Vector3, count: number, kind: "swarm"|"flyby")
+
+	-- === МАГАЗИН ===
+	-- Действие от клиента ОДНО на все случаи, а не «купить»/«надеть»/«показать окно»
+	-- тремя ремоутами: сервер всё равно проверяет товар по ShopCatalog заново, а
+	-- разделение только плодило бы одинаковые обработчики. План называл это
+	-- BuyWithBones — переименовано, когда стало ясно, что покупкой дело не кончается.
+	ShopAction     = "ShopAction",     -- client→server: (action: "buy"|"equip"|"prompt", itemId: string)
+	ShopState      = "ShopState",      -- server→client: { bones, owned = {id=true}, equipped }
+	PurchaseResult = "PurchaseResult", -- server→client: { ok: boolean, item: string?, message: string }
 }
 
 -- Удобный доступ (ждёт создания Bootstrap-ом).

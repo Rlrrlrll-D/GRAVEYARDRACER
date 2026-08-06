@@ -14,6 +14,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VehicleRegistry = require(ReplicatedStorage:WaitForChild("VehicleRegistry"))
 local MapLayout = require(ReplicatedStorage:WaitForChild("MapLayout"))
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
+local ShopCatalog = require(ReplicatedStorage:WaitForChild("ShopCatalog"))
 
 local PlayerFlow = {}
 
@@ -295,6 +296,27 @@ local HEADLIGHT_ANGLE = 56 -- ровно накрыть полотно, не р�
 local HEADLIGHT_RANGE = 38 -- главный рычаг против воксельных ступенек
 local HEADLIGHT_BRIGHTNESS = 3.0 -- компенсация укороченной дальности
 
+-- Скин кузова из магазина. Меш кузова один (BuggyBody) и он текстурирован — цвет
+-- текстуру домножает, поэтому «покрасить» здесь значит именно перекрасить, а не
+-- залить плашкой. Что надето, лежит в атрибуте EquippedSkin (ставит ShopService,
+-- сохраняет PlayerData); незнакомый или отсутствующий скин откатывается к базовому.
+local function applySkin(car: Model, player: Player)
+	local skin = ShopCatalog.get(player:GetAttribute("EquippedSkin"))
+	if not (skin and skin.kind == "skin") then
+		skin = ShopCatalog.get(ShopCatalog.DefaultSkin)
+	end
+	local body = car:FindFirstChild("BuggyBody")
+	if not (skin and body and body:IsA("BasePart")) then
+		return
+	end
+	if skin.color then
+		(body :: BasePart).Color = skin.color
+	end
+	if skin.material then
+		(body :: BasePart).Material = skin.material
+	end
+end
+
 local function tuneHeadlights(car: Model)
 	local body = car:FindFirstChild("BuggyBody")
 	if not (body and body:IsA("BasePart")) then
@@ -397,6 +419,7 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 		seat.HeadsUpDisplay = false -- нативный Roblox-спидометр (CoreGui.VehicleHudFrame) не нужен: свой HUD
 	end
 	tuneHeadlights(car) -- до Parent: свет приедет клиенту уже наведённым
+		applySkin(car, player) -- тоже ДО Parent: игрок не должен видеть смену цвета
 	car:PivotTo(seatCFrame * pivotFromSeat) -- ДО Parent: VehicleController запомнит «дом»
 	-- A-Chassis + StreamingEnabled: под ModelStreamingMode.Default машину клиенту
 	-- реплицирует ПО ЧАСТЯМ, и скопированный в PlayerGui Drive рвётся на

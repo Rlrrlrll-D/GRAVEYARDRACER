@@ -27,8 +27,10 @@ local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local RaceCore = require(script.Parent:WaitForChild("RaceCore"))
 local RaceScene = require(script.Parent:WaitForChild("RaceScene"))
 local PlayerFlow = require(script.Parent:WaitForChild("PlayerFlow"))
+local Economy = require(script.Parent:WaitForChild("Economy"))
 
 local cfg = GameConfig.Race
+local econ = GameConfig.Economy
 local Phase = GameState.Phase
 local RESULTS_SECONDS = 6 -- держим полноэкранный экран итогов, затем всех в лобби
 local RACE_ABORT_SECONDS = 30 -- никто так и не сел за руль → отменить заезд
@@ -260,6 +262,11 @@ end
 local function runRacing(participants: { Player }): (Player?, string?, RaceCore.Session)
 	phase = Phase.Racing
 	local session = RaceCore.newSession()
+	-- Кости за чекпоинты капают ПО ХОДУ заезда, а не только победителю: проигравший
+	-- тоже должен уносить что-то, иначе копить на скины могут только лидеры.
+	-- Считаем по смене NextCheckpoint в сводке — тот же сигнал, по которому клиент
+	-- звенит на чекпоинте; трогать RaceCore ради этого незачем.
+	local cpSeen: { [Player]: number } = {}
 
 	-- GO: отпускаем машины ДО рассылки «Go», чтобы газ работал ровно с того кадра,
 	-- в котором игрок увидел старт (и ни одним раньше).
@@ -347,6 +354,11 @@ local function runRacing(participants: { Player }): (Player?, string?, RaceCore.
 				if row.Position == 1 then
 					leaderId = plr.UserId
 				end
+				local seen = cpSeen[plr]
+				if seen ~= nil and row.NextCheckpoint ~= seen then
+					Economy.award(plr, econ.BonesPerCheckpoint, "чекпоинт")
+				end
+				cpSeen[plr] = row.NextCheckpoint
 				raceUpdate:FireClient(plr, {
 					Phase = "Racing",
 					Participant = true,
@@ -393,10 +405,22 @@ local function runResults(winner: Player?, winnerName: string?, session: RaceCor
 			-- атрибут Wins: leaderstats зеркалит, PlayerData сохраняет в DataStore
 			plr:SetAttribute("Wins", ((plr:GetAttribute("Wins") :: number?) or 0) + 1)
 		end
+		-- Кости за итог. Доехал (даже вторым) — BonesPerFinish; выиграл — ещё и
+		-- BonesPerWin сверху. Выбывшему по жизням не платим: иначе выгодно было бы
+		-- разбиться трижды подряд и получить те же деньги без риска ехать.
+		local before = Economy.balance(plr)
+		if outcome ~= "eliminated" then
+			Economy.award(plr, econ.BonesPerFinish, "финиш")
+			if outcome == "won" then
+				Economy.award(plr, econ.BonesPerWin, "победа")
+			end
+		end
 		matchResult:FireClient(plr, {
 			Outcome = outcome,
 			Winner = winnerName,
 			Zombies = (plr:GetAttribute("ZombiesDefeated") :: number?) or 0,
+			BonesEarned = Economy.balance(plr) - before,
+			Bones = Economy.balance(plr),
 		})
 	end
 	-- 2) держим экран итогов, затем ВСЕХ участников разом в лобби

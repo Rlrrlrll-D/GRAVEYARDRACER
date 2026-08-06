@@ -31,6 +31,7 @@ RunService.Heartbeat:Connect(function(dt: number)
 				Fuel = vehicle:GetAttribute("Fuel") or GameConfig.Vehicle.MaxFuel,
 				Lives = vehicle:GetAttribute("Lives") or GameConfig.Race.Lives,
 				ZombiesDefeated = player:GetAttribute("ZombiesDefeated") or 0,
+				Bones = player:GetAttribute("Bones") or 0,
 			})
 		end
 	end

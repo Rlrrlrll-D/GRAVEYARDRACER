@@ -90,6 +90,7 @@ local function setupVehicle(vehicle: Model)
 				Fuel = vehicle:GetAttribute("Fuel") or 0,
 				Lives = livesLeft,
 				ZombiesDefeated = driver:GetAttribute("ZombiesDefeated") or 0,
+				Bones = driver:GetAttribute("Bones") or 0,
 			})
 		end
 	end

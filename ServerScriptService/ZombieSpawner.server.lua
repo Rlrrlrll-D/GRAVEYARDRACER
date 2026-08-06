@@ -21,6 +21,7 @@ local Debris = game:GetService("Debris")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local ZombieAI = require(script.Parent:WaitForChild("ZombieAI"))
+local Economy = require(script.Parent:WaitForChild("Economy"))
 
 local template = ServerStorage:WaitForChild("ZombieTemplate") :: Model
 
@@ -179,6 +180,7 @@ local function onZombieDied(zombie: Model, humanoid: Humanoid)
 		if killer then
 			local defeated = (killer:GetAttribute("ZombiesDefeated") :: number?) or 0
 			killer:SetAttribute("ZombiesDefeated", defeated + 1)
+			Economy.award(killer, GameConfig.Economy.BonesPerZombie, "зомби")
 		end
 	end
 

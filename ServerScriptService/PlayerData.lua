@@ -1,9 +1,9 @@
 --!strict
 -- ModuleScript: ServerScriptService.PlayerData
 -- Персистентность игрока: одна DataStore-запись на игрока:
---   { settings = { по SettingsSchema }, stats = { zombies = n, wins = n }, lock = {...} }
+--   { settings = {...}, stats = { zombies, wins, bones }, owned = {...}, equipped = "id", lock = {...} }
 -- Статы живут в АТРИБУТАХ игрока (ZombiesDefeated растит ZombieSpawner, Wins —
--- MatchManager, leaderstats зеркалит): при входе сидируются из записи, при
+-- MatchManager, Bones — Economy, leaderstats зеркалит): при входе сидируются из записи, при
 -- сохранении читаются обратно. Опциями владеет SettingsService (setSettings +
 -- событие Loaded). Без API-доступа (Studio без «Enable Studio Access to API
 -- Services») деградирует в дефолты с warn — игра работает, просто без памяти.
@@ -30,6 +30,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local SettingsSchema = require(ReplicatedStorage:WaitForChild("SettingsSchema"))
+local ShopCatalog = require(ReplicatedStorage:WaitForChild("ShopCatalog"))
 
 local STORE_NAME = "PlayerData_v1"
 
@@ -44,7 +45,13 @@ local PlayerData = {}
 
 export type Record = {
 	settings: { [string]: any },
-	stats: { zombies: number, wins: number },
+	stats: { zombies: number, wins: number, bones: number },
+	-- Покупки. owned — множество id из ShopCatalog; equipped — надетый скин.
+	-- Владение НЕ хранит то, что даёт game pass: там источник правды —
+	-- UserOwnsGamePassAsync, и дублировать его в записи опасно (отозванный
+	-- пропуск остался бы «купленным» навсегда).
+	owned: { [string]: boolean },
+	equipped: string,
 }
 
 local store: GlobalDataStore? = nil
@@ -75,7 +82,12 @@ local function keyFor(player: Player): string
 end
 
 local function defaultRecord(): Record
-	return { settings = SettingsSchema.defaults(), stats = { zombies = 0, wins = 0 } }
+	return {
+		settings = SettingsSchema.defaults(),
+		stats = { zombies = 0, wins = 0, bones = 0 },
+		owned = {},
+		equipped = ShopCatalog.DefaultSkin,
+	}
 end
 
 -- // Обёртка над DataStore ----------------------------------------------------
@@ -130,6 +142,24 @@ local function recordFrom(raw: any): Record
 		if type(raw.stats) == "table" then
 			rec.stats.zombies = tonumber(raw.stats.zombies) or 0
 			rec.stats.wins = tonumber(raw.stats.wins) or 0
+			-- bones появились позже zombies/wins: у старых записей поля просто нет,
+			-- и это не ошибка — такой игрок начинает с нуля костей.
+			rec.stats.bones = math.max(0, math.floor(tonumber(raw.stats.bones) or 0))
+		end
+		-- Покупки чистим по каталогу: товар могли снять с продажи, а запись о нём
+		-- осталась. Неизвестный id — не ошибка записи, просто больше не товар.
+		if type(raw.owned) == "table" then
+			for id, v in raw.owned do
+				if v == true and ShopCatalog.get(id) then
+					rec.owned[id] = true
+				end
+			end
+		end
+		-- Надетый скин обязан существовать И быть скином: иначе машина осталась бы
+		-- без кузова из-за одной кривой строки в записи.
+		local eq = ShopCatalog.get(raw.equipped)
+		if eq and eq.kind == "skin" then
+			rec.equipped = eq.id
 		end
 	end
 	return rec
@@ -145,6 +175,31 @@ function PlayerData.isLoaded(player: Player): boolean
 	return records[player] ~= nil
 end
 
+-- Покупки. Владение живёт в записи (а не в атрибуте): список может быть длинным,
+-- клиенту он уезжает пакетом ShopState, и светить его каждому незачем.
+function PlayerData.owns(player: Player, id: string): boolean
+	local rec = records[player]
+	return rec ~= nil and rec.owned[id] == true
+end
+
+function PlayerData.grant(player: Player, id: string)
+	local rec = records[player]
+	if rec then
+		rec.owned[id] = true
+	end
+end
+
+function PlayerData.ownedList(player: Player): { [string]: boolean }
+	local rec = records[player]
+	local copy: { [string]: boolean } = {}
+	if rec then
+		for id, v in rec.owned do
+			copy[id] = v
+		end
+	end
+	return copy
+end
+
 function PlayerData.setSettings(player: Player, s: { [string]: any })
 	local rec = records[player]
 	if rec then
@@ -153,7 +208,17 @@ function PlayerData.setSettings(player: Player, s: { [string]: any })
 end
 
 -- // Загрузка с захватом замка ------------------------------------------------
-local function load(player: Player)
+-- ГРУЗИМ РОВНО ОДИН РАЗ НА ИГРОКА. Загрузку запускают два места — стартовый цикл по
+-- уже вошедшим и событие PlayerAdded, — и в Studio (а изредка и на боевом сервере,
+-- если игрок вошёл ровно в момент старта скрипта) срабатывают ОБА. Второй заход
+-- уходил в DataStore, возвращался через несколько секунд и клал в records НОВУЮ
+-- запись поверх рабочей. Всё, что игрок успел за это время (покупка в магазине,
+-- смена опций), оставалось в выброшенной таблице и не сохранялось — поймано на том,
+-- что купленные скины исчезали после перезапуска, а кости и надетый скин
+-- оставались: их сохранение читает атрибуты, а не запись.
+local loading: { [Player]: boolean } = {}
+
+local function loadInner(player: Player)
 	local rec = defaultRecord()
 	local got = false
 
@@ -194,9 +259,11 @@ local function load(player: Player)
 	end
 	records[player] = rec
 	owned[player] = got
-	-- сидируем атрибуты-счётчики: дальше их растят ZombieSpawner/MatchManager
+	-- сидируем атрибуты-счётчики: дальше их растят ZombieSpawner/MatchManager/Economy
 	player:SetAttribute("ZombiesDefeated", rec.stats.zombies)
 	player:SetAttribute("Wins", rec.stats.wins)
+	player:SetAttribute("Bones", rec.stats.bones)
+	player:SetAttribute("EquippedSkin", rec.equipped)
 	loadedEvent:Fire(player)
 end
 
@@ -210,6 +277,12 @@ local function save(player: Player, release: boolean)
 	-- статы читаем из атрибутов — там живые значения
 	rec.stats.zombies = (player:GetAttribute("ZombiesDefeated") :: number?) or rec.stats.zombies
 	rec.stats.wins = (player:GetAttribute("Wins") :: number?) or rec.stats.wins
+	rec.stats.bones = (player:GetAttribute("Bones") :: number?) or rec.stats.bones
+	-- Скин читаем из атрибута: его меняет ShopService, он же реплицируется клиенту.
+	local eq = ShopCatalog.get(player:GetAttribute("EquippedSkin"))
+	if eq and eq.kind == "skin" then
+		rec.equipped = eq.id
+	end
 
 	local key = keyFor(player)
 	withRetry("сохранение " .. player.Name, Enum.DataStoreRequestType.UpdateAsync, function()
@@ -220,10 +293,24 @@ local function save(player: Player, release: boolean)
 			local next_ = (type(old) == "table") and old or {}
 			next_.settings = rec.settings
 			next_.stats = rec.stats
+			next_.owned = rec.owned
+			next_.equipped = rec.equipped
 			next_.lock = if release then nil else { job = JOB, at = os.time() }
 			return next_
 		end)
 	end)
+end
+
+local function load(player: Player)
+	if loading[player] or records[player] then
+		return -- уже грузим или уже загрузили
+	end
+	loading[player] = true
+	local ok, err = pcall(loadInner, player)
+	loading[player] = nil
+	if not ok then
+		warn("[PlayerData] Загрузка " .. player.Name .. " упала: " .. tostring(err))
+	end
 end
 
 Players.PlayerAdded:Connect(function(player)
@@ -239,6 +326,7 @@ Players.PlayerRemoving:Connect(function(player)
 	end
 	records[player] = nil
 	owned[player] = nil
+	loading[player] = nil
 end)
 
 -- Фоновое сохранение: падение сервера теперь стоит не больше AUTOSAVE_INTERVAL.

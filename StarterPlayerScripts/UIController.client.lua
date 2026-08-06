@@ -13,6 +13,7 @@ local updateStats = remotes:WaitForChild("UpdateStats") :: RemoteEvent
 local cameraShakeEvent = remotes:WaitForChild("CameraShake") :: RemoteEvent
 local raceUpdate = remotes:WaitForChild("RaceUpdate") :: RemoteEvent
 local UITheme = require(ReplicatedStorage:WaitForChild("UITheme"))
+local PlateArt = require(ReplicatedStorage:WaitForChild("PlateArt"))
 
 local player = Players.LocalPlayer
 
@@ -47,90 +48,100 @@ screenGui.Name = "GraveyardHUD"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
-local healthBg = Instance.new("Frame")
-healthBg.Name = "HealthBackground"
-healthBg.Size = UDim2.new(0, 220, 0, 24)
-healthBg.Position = UDim2.new(1, -240, 0, 20) -- верх-ПРАВО (симметрично слева); LIVES под ним
-healthBg.BackgroundColor3 = UITheme.PanelBg
-healthBg.Parent = screenGui
+-- // ПЛАШКИ HUD — ТЕ ЖЕ МАЗКИ, ЧТО В МЕНЮ (PlateArt) --------------------------
+-- Требование юзера: интерфейс в игре не должен отличаться от заставки. Прежде HUD
+-- был набором цветных прямоугольников, а меню — мазками кистью из вектора; на одном
+-- экране это читалось как два разных интерфейса.
+--
+-- ПЛАШКИ ПОДРОСЛИ С 220×30 ДО 250×46 не ради красоты: мазок в исходнике 384×95, то
+-- есть примерно 4:1. Растянутый в 220×30 (7,3:1) он превращается в мазню — щетина
+-- размазывается вдоль, рваные концы теряются. 250×46 (5,4:1) уже держит форму.
+--
+-- Цвета остались прежними и в прежнем чередовании (красный → мох → кость): плашки
+-- различаются по смыслу, а не по прихоти. Форму мазка выбирает PlateArt по номеру,
+-- поэтому соседние плашки заведомо не одинаковые.
+local PLATE_W, PLATE_H = 250, 46
+local PLATE_STEP = 52 -- шаг столбца: высота плашки + просвет
+local PLATE_X = 20 -- поле от края экрана
+local PLATE_Y = 14
 
-local healthFill = Instance.new("Frame")
+local function hudPlate(index: number, color: Color3, anchorRight: boolean, row: number): Frame
+	local plate = PlateArt.plate(index, color)
+	plate.Size = UDim2.fromOffset(PLATE_W, PLATE_H)
+	if anchorRight then
+		plate.AnchorPoint = Vector2.new(1, 0)
+		plate.Position = UDim2.new(1, -PLATE_X, 0, PLATE_Y + row * PLATE_STEP)
+	else
+		plate.Position = UDim2.new(0, PLATE_X, 0, PLATE_Y + row * PLATE_STEP)
+	end
+	plate.Parent = screenGui
+	return plate
+end
+
+-- ЗДОРОВЬЕ — ПОЛОСА, А НЕ НАДПИСЬ, и мазком это тоже надо было сохранить. Внутри
+-- плашки-подложки лежит рамка с ClipsDescendants, а в ней ВТОРОЙ мазок, во всю
+-- ширину плашки. Сужается рамка, а не мазок: щетина не растягивается, красное
+-- просто убывает слева направо, как краска сходит с кисти.
+-- Подложка КОСТЯНАЯ, а не тёмная. С тёмной (PanelBg) пустая часть шкалы на светлом
+-- небе пропадала, и полоса выглядела всегда полной — юзер это увидел на первом же
+-- снимке. Костяная подложка убыль показывает сразу.
+local healthPlate = hudPlate(4, UITheme.cycleColor(3), true, 0)
+healthPlate.Name = "Health"
+
+local healthMask = Instance.new("Frame")
+healthMask.Name = "FillMask"
+healthMask.Size = UDim2.new(1, 0, 1, 0)
+healthMask.BackgroundTransparency = 1
+healthMask.ClipsDescendants = true
+healthMask.Parent = healthPlate
+
+local healthFill = PlateArt.plate(4, UITheme.Palette.Red)
 healthFill.Name = "HealthFill"
-healthFill.Size = UDim2.new(1, 0, 1, 0)
-healthFill.BackgroundColor3 = UITheme.Palette.Red
-healthFill.BorderSizePixel = 0
-healthFill.Parent = healthBg
+healthFill.Size = UDim2.fromOffset(PLATE_W, PLATE_H) -- в пикселях: маска его НЕ жмёт
+healthFill.Parent = healthMask
 
-local healthLabel = Instance.new("TextLabel")
-healthLabel.Size = UDim2.new(1, 0, 1, 0)
-healthLabel.BackgroundTransparency = 1
-healthLabel.TextColor3 = UITheme.Ink
-healthLabel.Font = UITheme.Font
-healthLabel.TextScaled = true
-healthLabel.Text = "Health"
-healthLabel.Parent = healthBg
+-- Буквы КОСТЯНЫЕ с тёмной обводкой: они лежат сразу на двух фонах — на красной
+-- заливке слева и на костяной подложке справа. Костяное на красном читается само,
+-- костяное на костяном держит обводка, поэтому она здесь плотнее обычной.
+local healthLabel = PlateArt.caption(healthPlate, "Health", UITheme.Ink)
+healthLabel.TextStrokeTransparency = 0.1
 
-local speedLabel = Instance.new("TextLabel")
-speedLabel.Name = "Speedometer"
-speedLabel.Size = UDim2.new(0, 220, 0, 30)
-speedLabel.Position = UDim2.new(0, 20, 0, 20) -- верх-лево (SPEED сверху)
-speedLabel.BackgroundTransparency = 0 -- непрозрачно: красный читается ровно как HealthFill
-speedLabel.BackgroundColor3 = UITheme.cycleColor(1) -- красный
-speedLabel.TextColor3 = UITheme.Ink
-speedLabel.Font = UITheme.Font
-speedLabel.TextScaled = true
-speedLabel.Text = "0 mph"
-speedLabel.Parent = screenGui
+local speedPlate = hudPlate(1, UITheme.cycleColor(1), false, 0) -- красный
+speedPlate.Name = "Speedometer"
+local speedLabel = PlateArt.caption(speedPlate, "0 mph", UITheme.Ink)
 
-local zombieLabel = Instance.new("TextLabel")
-zombieLabel.Name = "ZombiesDefeated"
-zombieLabel.Size = UDim2.new(0, 220, 0, 30)
-zombieLabel.Position = UDim2.new(0, 20, 0, 52) -- верх-лево, под SPEED
-zombieLabel.BackgroundTransparency = 0
-zombieLabel.BackgroundColor3 = UITheme.cycleColor(2) -- тёмно-зелёный
-zombieLabel.TextColor3 = UITheme.Ink
-zombieLabel.Font = UITheme.Font
-zombieLabel.TextScaled = true
-zombieLabel.Text = "Zombies Defeated: 0"
-zombieLabel.Parent = screenGui
+local zombiePlate = hudPlate(2, UITheme.cycleColor(2), false, 1) -- тёмно-зелёный
+zombiePlate.Name = "ZombiesDefeated"
+local zombieLabel = PlateArt.caption(zombiePlate, "Zombies Defeated: 0", UITheme.Ink)
 
-local livesLabel = Instance.new("TextLabel")
-livesLabel.Name = "Lives"
-livesLabel.Size = UDim2.new(0, 220, 0, 30)
-livesLabel.Position = UDim2.new(1, -240, 0, 52) -- верх-ПРАВО, под HEALTH (симметрично ZOMBIES слева)
-livesLabel.BackgroundTransparency = 0
-livesLabel.BackgroundColor3 = UITheme.cycleColor(3) -- кость (светлая) → тёмный текст
-livesLabel.TextColor3 = UITheme.Palette.Red
-livesLabel.Font = UITheme.Font
-livesLabel.TextScaled = true
-livesLabel.Text = "Lives: ♥♥♥"
-livesLabel.Parent = screenGui
+-- Кости — валюта заезда, третьи в левом столбце: SPEED и ZOMBIES уже там, и все три
+-- величины растут по ходу гонки. Чередование цветов продолжается, поэтому на костяной
+-- плашке буквы тёмные (PlateArt.caption сам решает по светлоте, ставить ли обводку).
+local bonesPlate = hudPlate(3, UITheme.cycleColor(3), false, 2) -- кость
+bonesPlate.Name = "Bones"
+local bonesLabel = PlateArt.caption(bonesPlate, "Bones: 0", UITheme.Palette.Red)
 
-local wreckedLabel = Instance.new("TextLabel")
-wreckedLabel.Name = "WreckedBanner"
-wreckedLabel.Size = UDim2.new(0, 420, 0, 60)
-wreckedLabel.Position = UDim2.new(0.5, -210, 0.35, 0)
-wreckedLabel.BackgroundTransparency = 0
-wreckedLabel.BackgroundColor3 = UITheme.Palette.Red
-wreckedLabel.TextColor3 = UITheme.Ink
-wreckedLabel.Font = UITheme.Font
-wreckedLabel.TextScaled = true
-wreckedLabel.Text = "VEHICLE DESTROYED"
-wreckedLabel.Visible = false
-wreckedLabel.Parent = screenGui
+local livesPlate = hudPlate(5, UITheme.cycleColor(3), true, 1) -- кость, симметрично ZOMBIES
+livesPlate.Name = "Lives"
+local livesLabel = PlateArt.caption(livesPlate, "Lives: 3", UITheme.Palette.Red)
+
+local wreckedPlate = PlateArt.plate(6, UITheme.Palette.Red)
+wreckedPlate.Name = "WreckedBanner"
+wreckedPlate.Size = UDim2.fromOffset(460, 78)
+wreckedPlate.AnchorPoint = Vector2.new(0.5, 0.5)
+wreckedPlate.Position = UDim2.new(0.5, 0, 0.35, 0)
+wreckedPlate.Visible = false
+wreckedPlate.Parent = screenGui
+local wreckedLabel = PlateArt.caption(wreckedPlate, "VEHICLE DESTROYED", UITheme.Ink, 34)
 
 -- // Race HUD --------------------------------------------------------------
-local raceLabel = Instance.new("TextLabel")
-raceLabel.Name = "RaceStatus"
-raceLabel.Size = UDim2.new(0, 380, 0, 30)
-raceLabel.Position = UDim2.new(0.5, -190, 0, 10)
-raceLabel.BackgroundTransparency = 0.45
-raceLabel.BackgroundColor3 = UITheme.PanelBg
-raceLabel.TextColor3 = UITheme.Ink
-raceLabel.Font = UITheme.Font
-raceLabel.TextScaled = true
-raceLabel.Text = ""
-raceLabel.Parent = screenGui
+local racePlate = PlateArt.plate(7, UITheme.Palette.Green)
+racePlate.Name = "RaceStatus"
+racePlate.Size = UDim2.fromOffset(420, 50)
+racePlate.AnchorPoint = Vector2.new(0.5, 0)
+racePlate.Position = UDim2.new(0.5, 0, 0, PLATE_Y)
+racePlate.Parent = screenGui
+local raceLabel = PlateArt.caption(racePlate, "", UITheme.Ink, 28)
 
 local raceCenter = Instance.new("TextLabel")
 raceCenter.Name = "RaceCenter"
@@ -788,28 +799,28 @@ type StatsPayload = {
 	Fuel: number,
 	Lives: number?,
 	ZombiesDefeated: number,
+	Bones: number?,
 }
 
 updateStats.OnClientEvent:Connect(function(stats: StatsPayload)
 	local ratio = math.clamp(stats.Health / math.max(stats.MaxHealth, 1), 0, 1)
-	TweenService:Create(healthFill, TweenInfo.new(0.2), { Size = UDim2.new(ratio, 0, 1, 0) }):Play()
+	TweenService:Create(healthMask, TweenInfo.new(0.2), { Size = UDim2.new(ratio, 0, 1, 0) }):Play()
 	healthLabel.Text = string.format("Health: %d / %d", stats.Health, stats.MaxHealth)
 	speedLabel.Text = string.format("%d mph", math.floor(stats.Speed))
 	zombieLabel.Text = string.format("Zombies Defeated: %d", stats.ZombiesDefeated)
+	bonesLabel.Text = string.format("Bones: %d", stats.Bones or 0)
 	local lives = stats.Lives or 3
 	livesLabel.Text = lives > 0 and ("Lives: " .. string.rep("♥", lives)) or "Lives: OUT"
 
 	if stats.Health <= 0 then
 		if lives > 0 then
 			wreckedLabel.Text = string.format("VEHICLE DESTROYED — %d left", lives)
-			wreckedLabel.TextColor3 = UITheme.Ink
 		else
 			wreckedLabel.Text = "GAME OVER"
-			wreckedLabel.TextColor3 = UITheme.Ink
 		end
-		wreckedLabel.Visible = true
+		wreckedPlate.Visible = true
 		task.delay(4.5, function()
-			wreckedLabel.Visible = false
+			wreckedPlate.Visible = false
 		end)
 	end
 end)

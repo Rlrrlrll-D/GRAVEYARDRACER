@@ -122,6 +122,20 @@ sub.TextColor3 = UITheme.Palette.Bone
 sub.Text = ""
 sub.Parent = backdrop
 
+local earnedLabel = Instance.new("TextLabel")
+earnedLabel.Name = "ResultBones"
+earnedLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+earnedLabel.Size = UDim2.new(0.7, 0, 0, 40)
+earnedLabel.Position = UDim2.new(0.5, 0, 0.64, 0)
+earnedLabel.BackgroundTransparency = 1
+earnedLabel.Font = UITheme.Font
+earnedLabel.TextScaled = true
+earnedLabel.TextColor3 = UITheme.Palette.Bone
+earnedLabel.TextStrokeColor3 = UITheme.Shadow
+earnedLabel.TextStrokeTransparency = 0.35
+earnedLabel.Text = ""
+earnedLabel.Parent = backdrop
+
 -- // Режим зрителя -----------------------------------------------------------
 local spectating = false
 local leaderUserId = 0
@@ -222,7 +236,7 @@ local function hideResult()
 	backdrop.BackgroundTransparency = 1
 end
 
-local function showResult(outcome: string, winner: string?, zombies: number)
+local function showResult(outcome: string, winner: string?, zombies: number, earned: number)
 	stopSpectating()
 	takeScreen() -- экран итога — единственное, что на экране
 
@@ -239,6 +253,9 @@ local function showResult(outcome: string, winner: string?, zombies: number)
 		title.TextColor3 = UITheme.Palette.Red
 		sub.Text = string.format("you finished · %d zombies defeated", zombies or 0)
 	end
+	-- Заработок за заезд — отдельной строкой под итогом: игрок должен видеть, что
+	-- проигранный заезд тоже что-то принёс, иначе копить на скины кажется бессмысленным.
+	earnedLabel.Text = earned > 0 and string.format("+%d BONES", earned) or ""
 
 	backdrop.Visible = true
 	backdrop.BackgroundTransparency = 1
@@ -252,7 +269,8 @@ matchResult.OnClientEvent:Connect(function(payload)
 	if type(payload) ~= "table" then
 		return
 	end
-	showResult(tostring(payload.Outcome), payload.Winner, tonumber(payload.Zombies) or 0)
+	showResult(tostring(payload.Outcome), payload.Winner, tonumber(payload.Zombies) or 0,
+		tonumber(payload.BonesEarned) or 0)
 end)
 
 -- сброс при старте СЛЕДУЮЩЕГО заезда: ТОЛЬКО на Countdown (новый заезд стартует).
