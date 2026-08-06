@@ -52,6 +52,9 @@ export type Record = {
 	-- пропуск остался бы «купленным» навсегда).
 	owned: { [string]: boolean },
 	equipped: string,
+	-- Прошёл ли игрок первый заезд с подсказками. Хранится В ЗАПИСИ, а не в
+	-- атрибуте сессии: подсказки обязаны не вернуться ни завтра, ни с телефона.
+	onboarded: boolean,
 }
 
 local store: GlobalDataStore? = nil
@@ -87,6 +90,7 @@ local function defaultRecord(): Record
 		stats = { zombies = 0, wins = 0, bones = 0 },
 		owned = {},
 		equipped = ShopCatalog.DefaultSkin,
+		onboarded = false,
 	}
 end
 
@@ -160,6 +164,16 @@ local function recordFrom(raw: any): Record
 		local eq = ShopCatalog.get(raw.equipped)
 		if eq and eq.kind == "skin" then
 			rec.equipped = eq.id
+		end
+		-- Поле появилось позже остальных. Проверяем именно НАЛИЧИЕ поля, а не его
+		-- истинность: у всех новых записей оно есть и равно false, и подмешивать сюда
+		-- «есть stats — значит играл» нельзя, иначе первый же выход из игры пометил бы
+		-- новичка обученным. Догадка нужна ровно для записей БЕЗ поля — они старше
+		-- подсказок, а запись заводится только тому, кто уже заходил.
+		if raw.onboarded ~= nil then
+			rec.onboarded = raw.onboarded == true
+		else
+			rec.onboarded = type(raw.stats) == "table"
 		end
 	end
 	return rec
@@ -264,6 +278,9 @@ local function loadInner(player: Player)
 	player:SetAttribute("Wins", rec.stats.wins)
 	player:SetAttribute("Bones", rec.stats.bones)
 	player:SetAttribute("EquippedSkin", rec.equipped)
+	-- Атрибут реплицируется клиенту сам — по нему Onboarding решает, показывать ли
+	-- подсказки; обратно в true его ставит MatchManager после первого доеханного заезда.
+	player:SetAttribute("Onboarded", rec.onboarded)
 	loadedEvent:Fire(player)
 end
 
@@ -283,6 +300,9 @@ local function save(player: Player, release: boolean)
 	if eq and eq.kind == "skin" then
 		rec.equipped = eq.id
 	end
+	-- Обучённость только НАРАСТАЕТ: снять флаг в записи некому, а вот прочитать
+	-- атрибут раньше, чем PlayerData его засидировал, — вполне возможно.
+	rec.onboarded = rec.onboarded or player:GetAttribute("Onboarded") == true
 
 	local key = keyFor(player)
 	withRetry("сохранение " .. player.Name, Enum.DataStoreRequestType.UpdateAsync, function()
@@ -295,6 +315,7 @@ local function save(player: Player, release: boolean)
 			next_.stats = rec.stats
 			next_.owned = rec.owned
 			next_.equipped = rec.equipped
+			next_.onboarded = rec.onboarded
 			next_.lock = if release then nil else { job = JOB, at = os.time() }
 			return next_
 		end)

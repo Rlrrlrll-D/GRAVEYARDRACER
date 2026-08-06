@@ -467,6 +467,11 @@ local function runResults(winner: Player?, winnerName: string?, session: RaceCor
 				Badges.award(plr, "ten_wins")
 			end
 		end
+		-- Заезд позади — подсказки своё отработали. Помечаем ВСЕХ участников, а не
+		-- только доехавших: выбывший по жизням тоже успел увидеть всю цепочку (та,
+		-- что про жизни, срабатывает как раз на потере первой). PlayerData подберёт
+		-- атрибут при сохранении, и на другом устройстве подсказки не вернутся.
+		plr:SetAttribute("Onboarded", true)
 		matchResult:FireClient(plr, {
 			Outcome = outcome,
 			Winner = winnerName,
