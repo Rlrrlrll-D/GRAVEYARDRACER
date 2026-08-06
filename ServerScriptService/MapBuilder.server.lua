@@ -327,16 +327,10 @@ local function partBottom(p: BasePart): number
 		)
 end
 
-local function measureFootprint(template: Model): Footprint
-	local cached = footprintCache[template]
-	if cached then
-		return cached
-	end
-
-	local probe = template:Clone()
-	probe:PivotTo(CFrame.new(PROBE_ORIGIN)) -- строго без поворота: меряем «как нарисовано»
-	probe.Parent = workspace
-
+-- Сам промер: клон уже стоит в PROBE_ORIGIN. Вынесен отдельно, потому что тем же
+-- сканом мерились стволы деревьев (таблица TRUNK ниже) — по клону, которому на
+-- время промера выставлена точная геометрия столкновений.
+local function probeFootprint(probe: Model, label: string): Footprint
 	-- габарит: радиус для расстановки + рамка, по которой пускаем колонны
 	local minX, maxX, minZ, maxZ, boxBottom = math.huge, -math.huge, math.huge, -math.huge, math.huge
 	for _, p in probe:GetDescendants() do
@@ -381,7 +375,7 @@ local function measureFootprint(template: Model): Footprint
 		-- Меш не нащупался (например, CollisionFidelity выродился в ничто) — честно
 		-- откатываемся на коробку: хуже, чем было, от этого не станет.
 		best, bestX, bestZ = boxBottom, PROBE_ORIGIN.X, PROBE_ORIGIN.Z
-		warn(`[MapBuilder] Подошва {template.Name} не нащупалась лучами — сажаю по коробке.`)
+		warn(`[MapBuilder] Подошва {label} не нащупалась лучами — сажаю по коробке.`)
 	end
 
 	-- Опорная точка по горизонтали — ЦЕНТР пятна касания, а не самая низкая колонна.
@@ -415,14 +409,121 @@ local function measureFootprint(template: Model): Footprint
 	end
 	baseRadius += math.max(stepX, stepZ) / 2
 
-	local fp: Footprint = {
+	return {
 		base = Vector3.new(bestX, best, bestZ) - PROBE_ORIGIN,
 		radius = math.max(maxX - minX, maxZ - minZ) / 2,
 		baseRadius = baseRadius,
 	}
+end
+
+local function measureFootprint(template: Model): Footprint
+	local cached = footprintCache[template]
+	if cached then
+		return cached
+	end
+	local probe = template:Clone()
+	probe:PivotTo(CFrame.new(PROBE_ORIGIN)) -- строго без поворота: меряем «как нарисовано»
+	probe.Parent = workspace
+	local fp = probeFootprint(probe, template.Name)
 	probe:Destroy()
 	footprintCache[template] = fp
 	return fp
+end
+
+-- // СТОЛКНОВЕНИЕ ДЕРЕВЬЕВ: цилиндр по стволу вместо оболочки меша -------------
+-- Жалоба юзера 2026-08-06: «невидимый объект не даёт проехать» — машина упиралась
+-- в пустую траву в нескольких метрах ПЕРЕД стволом. Промер объяснил всё:
+--
+--   DeadTree   (Union)    CollisionFidelity = Box     → радиус 8.1 studs на ЛЮБОЙ
+--                                                       высоте, при настоящем стволе 3.1
+--   DeadTree_B (MeshPart) CollisionFidelity = Hull    → 1.9 при настоящих 1.8
+--   DeadTree_C (MeshPart) CollisionFidelity = Default → 1.7 при настоящих 1.5
+--
+-- То есть у трети деревьев твёрдой была ВСЯ ГАБАРИТНАЯ КОРОБКА кроны, а деревья
+-- масштабируются до 3.6 — это под тридцать studs невидимой стены вокруг тонкого
+-- ствола. Два других варианта врали умеренно, но раз чиним — чиним все, иначе форма
+-- столкновения у соседних деревьев будет разной без всякой причины.
+--
+-- ПОЧЕМУ НЕ ПРОСТО PreciseConvexDecomposition ВСЕМ ДЕРЕВЬЯМ: точная декомпозиция
+-- ветвистого меша — очень сложный коллайдер, а деревьев под четыре сотни. Вместо неё
+-- дереву снимается CanCollide, а рядом встаёт невидимый цилиндр по стволу — самая
+-- дешёвая форма из существующих. Цилиндр НЕ участвует в лучах (`CanQuery = false`):
+-- пули и прицел должны попадать в настоящий меш с ветками, а не в бочку вокруг него.
+--
+-- ЧИСЛА ПРОМЕРЕНЫ ОДИН РАЗ И ЛЕЖАТ ЗДЕСЬ, А НЕ СЧИТАЮТСЯ НА СТАРТЕ. Мерить в игре
+-- нечем: `CollisionFidelity` из серверного скрипта в Play молча не пересчитывается
+-- (capability-замок — проверено: read-back остаётся Box/Hull, и за четыре секунды
+-- цифра не меняется), а в Edit-режиме пересчёт идёт нормально. Заодно это снимает
+-- со старта карты четырнадцать секунд промера.
+--
+-- КАК ПЕРЕМЕРИТЬ, если поменяются меши деревьев (делается в Edit-режиме):
+--   1. клон шаблона в workspace, пауза ~1.5с — дать построиться геометрии «как есть»;
+--   2. сетка лучей сверху вниз (как в probeFootprint) → центр пятна касания = якорь,
+--      в который сажает plantOnGround;
+--   3. всем MeshPart/UnionOperation выставить PreciseConvexDecomposition, пауза ~3с;
+--   4. та же сетка → центр ствола; dx/dz = разница центров;
+--   5. горизонтальные лучи по кругу вокруг центра ствола на высотах 1, 2 и 3 studs,
+--      r = максимум из трёх (почему именно эта полоса — см. ниже у таблицы).
+local TRUNK_MARGIN = 1.15 -- запас к радиусу: кузов не должен влезать в кору
+local TRUNK_HEIGHT = 18 -- высота цилиндра при масштабе 1; выше машины с запасом
+-- Масштаб шаблона = 1; при посадке всё множится на scale, dx/dz ещё и поворачивается.
+--
+-- РАДИУС БЕРЁТСЯ ПО ПОЛОСЕ 1…3 studs, А НЕ ПО ВСЕЙ ВЫСОТЕ. Промеренный профиль
+-- ствола (радиус по высоте над землёй):
+--
+--            h0.3  h1.0  h2.0  h3.0  h4.0
+--   DeadTree   3.36  2.47  2.14  1.80  1.89
+--   DeadTree_B 1.08  0.76  0.55  0.76  1.83
+--   DeadTree_C 1.85  1.04  0.74  0.92  1.15
+--
+-- У самой земли ствол расходится корневым раструбом, а с четырёх studs начинаются
+-- ветки — и то и другое к столкновению с машиной отношения не имеет. Первая сборка
+-- брала максимум по всей полосе 0.5…4, и цилиндры вышли вдвое толще стволов: у
+-- DeadTree_C 3.3 studs там, где видно 1.4. Теперь берём максимум по 1…3 — это ровно
+-- та высота, на которой едет кузов.
+local TRUNK: { [string]: { dx: number, dz: number, r: number } } = {
+	DeadTree = { dx = 0.26, dz = -0.21, r = 2.47 },
+	DeadTree_B = { dx = 0.45, dz = 0.33, r = 0.76 },
+	DeadTree_C = { dx = 0.08, dz = 0.38, r = 1.04 },
+}
+local trunkMissing: { [string]: boolean } = {}
+
+-- Снять столкновение с самого дерева и поставить вместо него цилиндр по стволу.
+-- Точка (x, baseY, z) — та же, куда plantOnGround посадил опору модели.
+local function trunkCollider(model: Model, template: Model, x: number, baseY: number, z: number, yawDeg: number, scale: number): boolean
+	local trunk = TRUNK[template.Name]
+	if not trunk then
+		-- Шаблон появился после промера. Ничего не трогаем: пусть столкновение
+		-- остаётся прежним (кривым, но рабочим), зато один раз скажем, что чинить.
+		if not trunkMissing[template.Name] then
+			trunkMissing[template.Name] = true
+			warn(`[MapBuilder] Ствол {template.Name} не промерен — дерево остаётся на своей оболочке. Рецепт промера см. у таблицы TRUNK.`)
+		end
+		return false
+	end
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.CanCollide = false
+		end
+	end
+	local off = CFrame.Angles(0, math.rad(yawDeg), 0) * Vector3.new(trunk.dx * scale, 0, trunk.dz * scale)
+	local r = trunk.r * TRUNK_MARGIN * scale
+	local h = TRUNK_HEIGHT * scale
+
+	local post = Instance.new("Part")
+	post.Name = "TrunkCollider"
+	post.Shape = Enum.PartType.Cylinder -- ось цилиндра идёт по X, поэтому кладём его на бок
+	post.Size = Vector3.new(h, r * 2, r * 2)
+	post.CFrame = CFrame.new(x + off.X, baseY + h / 2, z + off.Z) * CFrame.Angles(0, 0, math.rad(90))
+	post.Anchored = true
+	post.CanCollide = true
+	post.CanQuery = false -- пули и прицел ловит настоящий меш, а не эта бочка
+	post.CanTouch = false
+	post.CastShadow = false
+	post.Transparency = 1
+	post.CollisionGroup = "Obstacles" -- как и весь декор: держит машину, но не зомби
+	post.Parent = model
+	return true
 end
 
 -- Посадить клон так, чтобы ЕГО ТОЧКА ОПОРЫ попала в (x, groundY - sink, z).
@@ -573,7 +674,9 @@ for _, data in MapLayout.DeadTrees do
 		if tmpl then
 			-- по промеренной подошве: у наклонённого шаблона низ коробки — пустой угол
 			local r = measureFootprint(tmpl).baseRadius * scale
-			plantOnGround(model, tmpl, g.X, g.Z, g.Y, data.Rotation or 0, scale, TREE_SINK)
+			local yaw = data.Rotation or 0
+			plantOnGround(model, tmpl, g.X, g.Z, g.Y, yaw, scale, TREE_SINK)
+			trunkCollider(model, tmpl, g.X, g.Y - TREE_SINK, g.Z, yaw, scale)
 			occupy(g.X, g.Z, r)
 		else
 			dropToGround(model, g, data.Rotation or 0) -- заглушка-Part: коробка и есть меш
@@ -669,7 +772,9 @@ local function scatter(name: string, count: number, sMin: number, sMax: number, 
 		end
 		-- Топим на палец: у самой земли шов между стволом и грунтом читается как
 		-- «дерево висит». Саму посадку делает plantOnGround — по промеренной подошве.
-		plantOnGround(model, tmpl, x, z, g.Y, RNG:NextNumber(0, 360), scale, name == "DeadTree" and TREE_SINK or 0)
+		local yaw = RNG:NextNumber(0, 360)
+		local sink = name == "DeadTree" and TREE_SINK or 0
+		plantOnGround(model, tmpl, x, z, g.Y, yaw, scale, sink)
 		occupy(x, z, footRadius)
 		for _, part in model:GetDescendants() do
 			if part:IsA("BasePart") then
@@ -677,6 +782,10 @@ local function scatter(name: string, count: number, sMin: number, sMax: number, 
 				part.CanCollide = true -- непроходимо: группа Obstacles блокирует машину, но не зомби
 				part.CollisionGroup = "Obstacles"
 			end
+		end
+		if name == "DeadTree" then
+			-- у дерева твёрдым остаётся только ствол, см. trunkCollider
+			trunkCollider(model, tmpl, x, g.Y - sink, z, yaw, scale)
 		end
 		model.Parent = mapFolder
 		placed += 1
@@ -960,7 +1069,9 @@ do
 			if name == "DeadTree" then
 				paintTree(model)
 			end
-			plantOnGround(model, tmpl, x, z, g.Y, RNG:NextNumber(0, 360), scale, name == "DeadTree" and TREE_SINK or 0)
+			local yaw = RNG:NextNumber(0, 360)
+			local sink = name == "DeadTree" and TREE_SINK or 0
+			plantOnGround(model, tmpl, x, z, g.Y, yaw, scale, sink)
 			occupy(x, z, footRadius)
 			for _, part in model:GetDescendants() do
 				if part:IsA("BasePart") then
@@ -968,6 +1079,9 @@ do
 					part.CanCollide = true -- как у россыпи: группа Obstacles держит машину, но не зомби
 					part.CollisionGroup = "Obstacles"
 				end
+			end
+			if name == "DeadTree" then
+				trunkCollider(model, tmpl, x, g.Y - sink, z, yaw, scale)
 			end
 			model.Parent = mapFolder
 			return true
