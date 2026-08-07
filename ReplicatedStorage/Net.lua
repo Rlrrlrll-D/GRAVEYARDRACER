@@ -34,6 +34,13 @@ Net.Events = {
 	ShopAction     = "ShopAction",     -- client→server: (action: "buy"|"equip"|"prompt", itemId: string)
 	ShopState      = "ShopState",      -- server→client: { bones, owned = {id=true}, equipped }
 	PurchaseResult = "PurchaseResult", -- server→client: { ok: boolean, item: string?, message: string }
+
+	-- === ДЕВ-ИНСТРУМЕНТ (намеренно НЕ в этом списке) ===
+	-- "PhotoFreeze" — client→server: (on: boolean), заморозка мира для съёмки кадров.
+	-- Здесь его нет специально: Bootstrap создаёт ремоуты перебором Net.Events, а этот
+	-- нужен только в Studio. Его заводит сам ServerScriptService.PhotoModeService под
+	-- проверкой RunService:IsStudio() — в живой игре ремоут не появляется. Строка
+	-- оставлена, чтобы аудит трафика по этому файлу всё-таки видел полную картину.
 }
 
 -- Удобный доступ (ждёт создания Bootstrap-ом).

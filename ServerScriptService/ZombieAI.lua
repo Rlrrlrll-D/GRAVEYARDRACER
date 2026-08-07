@@ -523,6 +523,17 @@ function ZombieAI.Run(zombie: Model)
 	local nextMoanAt = os.clock() + math.random() * 3 -- редкий протяжный стон при погоне
 
 	while zombie.Parent and humanoid.Health > 0 do
+		-- ПАУЗА НА ВРЕМЯ СЪЁМКИ (дев-режим PhotoMode, флаг ставит PhotoModeService и
+		-- только в Studio). Анкер держит тело, но не замах: он идёт тайном по Motor6D
+		-- плеч, и без этой остановки зомби махал бы рукой прямо в кадре. В живой игре
+		-- атрибута не существует — цикл проскакивает проверку и работает как раньше.
+		while workspace:GetAttribute("PhotoFreeze") do
+			task.wait(0.2)
+			if not zombie.Parent then
+				return
+			end
+		end
+
 		local vehicle, distance = findNearestVehicle(rootPart.Position)
 
 		if not vehicle or distance > GameConfig.Zombie.ChaseRadius then

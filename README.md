@@ -86,3 +86,29 @@ each script.
 - `StreamingEnabled`: all scripts use `WaitForChild`/tag-listener patterns
   rather than assuming instances exist at load time, so they're safe with
   StreamingEnabled on.
+
+## 6. Taking screenshots (Photo Mode)
+
+`StarterPlayerScripts.PhotoMode` + `ServerScriptService.PhotoModeService` are a
+dev-only pair for shooting teasers / the experience thumbnail. Both bail out
+unless `RunService:IsStudio()` (add your UserId to `ALLOWED_USER_IDS` in
+`PhotoMode` to use it in the live game).
+
+Shoot in **Play**, never in Edit — local lights (lanterns, headlights) aren't
+rendered in Edit and the dusk arc hasn't started.
+
+Press **F4**. Then: RMB + mouse to look, WASD/QE to fly, Shift/Ctrl for ×4/×0.25
+speed, scroll for base speed, Z/C roll (X resets), `[`/`]` FOV, **T** autofocus
+the depth of field, **F** freeze the world, **G** rule-of-thirds grid,
+**B** 2.39:1 letterbox, **H** hide the photo UI.
+
+Saving the image is on Studio: the shot itself is the ribbon's **View →
+Screenshot**, which captures the bare viewport. Game code can't write the file —
+`CaptureService:CaptureScreenshot` only yields a temporary `rbxtemp://` id and
+`SaveScreenshotCapture` is gated behind the `RobloxScript` capability. So the
+flow is: frame it → **H** → View → Screenshot → click back into the viewport.
+
+Roblox wants 1920×1080 for the thumbnail, so a maximised Studio window (**F11**,
+panels collapsed) is already enough resolution.
+
+Don't use Studio's own freecam (Shift+P) at the same time — both grab the camera.
