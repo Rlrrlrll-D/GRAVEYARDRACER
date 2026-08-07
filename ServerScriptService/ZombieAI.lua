@@ -513,6 +513,11 @@ function ZombieAI.Run(zombie: Model)
 		attackTrack = animator:LoadAnimation(attackAnimation)
 	end
 
+	-- Дальность удара — СВОЯ У КАЖДОГО ТЕЛА. Рост зомби случайный (ZombieSpawner), а
+	-- вместе с телом растут и руки: с общей константой здоровяк махал бы, не доставая,
+	-- а мелкий доставал бы оттуда, куда его кулак заведомо не дотягивается. Атрибут
+	-- ставит спавнер; нет атрибута — значит рост обычный.
+	local attackRange = (zombie:GetAttribute("AttackRange") :: number?) or GameConfig.Zombie.AttackRange
 	local lastAttackAt = 0
 	local idleSince = os.clock()
 	local nextMoanAt = os.clock() + math.random() * 3 -- редкий протяжный стон при погоне
@@ -533,7 +538,7 @@ function ZombieAI.Run(zombie: Model)
 		if vehicle and distance <= GameConfig.Zombie.ChaseRadius then
 			local driveSeat = vehicle:FindFirstChild("DriveSeat") :: VehicleSeat
 
-			if distance <= GameConfig.Zombie.AttackRange then
+			if distance <= attackRange then
 				humanoid:MoveTo(rootPart.Position) -- stop moving
 
 				local now = os.clock()
@@ -553,7 +558,7 @@ function ZombieAI.Run(zombie: Model)
 
 					local seatNow = vehicle:FindFirstChild("DriveSeat") :: BasePart?
 					local stillClose = seatNow ~= nil
-						and (seatNow.Position - rootPart.Position).Magnitude <= GameConfig.Zombie.AttackRange
+						and (seatNow.Position - rootPart.Position).Magnitude <= attackRange
 					-- ProtectedUntil — тот же авторитет неуязвимости, что и в onPartTouched:
 					-- на отсчёт+грейс (и после респавна) укус зомби не проходит.
 					local protected = os.clock() < ((vehicle:GetAttribute("ProtectedUntil") :: number?) or 0)

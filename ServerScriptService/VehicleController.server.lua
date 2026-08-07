@@ -267,13 +267,15 @@ local function setupVehicle(vehicle: Model)
 			end
 			humanoid:TakeDamage(GameConfig.Vehicle.CrushDamageToZombie)
 		else
-			local health = (vehicle:GetAttribute("Health") :: number?) or GameConfig.Vehicle.MaxHealth
-			health = math.max(0, health - GameConfig.Vehicle.LowSpeedCollisionDamage)
-			vehicle:SetAttribute("Health", health)
+			-- КАСАНИЕ САМО ПО СЕБЕ УРОНА НЕ НАНОСИТ (требование юзера). Раньше любое
+			-- соприкосновение на малой скорости снимало здоровье, и машина разваливалась
+			-- от того, что зомби просто стоял рядом, — бить его было не за что и увернуться
+			-- не от чего. Теперь здоровье снимает ТОЛЬКО замах руками (ZombieAI: урон в
+			-- нижней точке маха, его видно и от него можно уехать).
+			--
+			-- Заглохнуть машина всё же обязана: толпа должна тормозить, иначе сквозь неё
+			-- проезжают как сквозь туман. Это потеря темпа, а не урон.
 			driveSeat.Throttle = 0
-			if health <= 0 then
-				vehicle:SetAttribute("Destroyed", true)
-			end
 		end
 	end
 

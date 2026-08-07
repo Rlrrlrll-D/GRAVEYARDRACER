@@ -8,7 +8,8 @@ export type GameConfigType = {
 		MaxFuel: number,
 		FuelDrainPerSecond: number,
 		CrushSpeedThreshold: number, -- studs/sec; above this, vehicle crushes zombies
-		LowSpeedCollisionDamage: number,
+		-- LowSpeedCollisionDamage убран: касание зомби больше не ранит машину, урон
+		-- наносит только замах (Zombie.AttackDamage). Медленное касание лишь глушит газ.
 		CrushDamageToZombie: number,
 		RespawnDelay: number, -- seconds the wreck burns before respawning at start
 	},
@@ -72,7 +73,6 @@ local GameConfig: GameConfigType = {
 		MaxFuel = 100,
 		FuelDrainPerSecond = 0.15,
 		CrushSpeedThreshold = 25,
-		LowSpeedCollisionDamage = 8,
 		CrushDamageToZombie = 100,
 		RespawnDelay = 2, -- коротко «горим» в кресле, затем сброс на старт (без выброса пешком)
 	},

@@ -56,6 +56,67 @@ Players.PlayerAdded:Connect(setupLeaderstats)
 local RISE_DURATION = 1.2   -- seconds to climb out of the ground
 local BURY_DEPTH = 4        -- studs below the final resting position to start from
 
+-- // Порода мертвеца: окрас и рост -------------------------------------------
+-- ОДИН ШАБЛОН, РАЗНЫЕ ПОКОЙНИКИ. Толпа одинаковых клонов читается как клонов, а не
+-- как кладбища. Меняем ровно то, что можно менять без второй модели: цвет тела
+-- (мешевые лохмотья — это «одежда») и цвет головы («кожа»). Кисти рук остаются
+-- зеленоватыми у всех: этот оттенок запечён в оверлей-текстуре классического зомби,
+-- и он же связывает толпу в одну породу — так и задумано.
+--
+-- Окрасы согласованы с юзером по пробам 2026-08-07 (утопленник и гнилой отвергнуты).
+local VARIANTS = {
+	{ body = Color3.fromRGB(39, 70, 45), head = Color3.fromRGB(58, 125, 21) }, -- зелёный (исходный)
+	{ body = Color3.fromRGB(96, 90, 64), head = Color3.fromRGB(128, 120, 86) }, -- восковой
+	{ body = Color3.fromRGB(62, 52, 44), head = Color3.fromRGB(88, 74, 62) }, -- землистый
+	{ body = Color3.fromRGB(74, 80, 70), head = Color3.fromRGB(96, 104, 90) }, -- пепельный
+}
+
+local SCALE_MIN, SCALE_MAX = 0.85, 1.2
+local BRUTE_CHANCE = 0.08 -- каждый двенадцатый примерно
+local BRUTE_MIN, BRUTE_MAX = 1.35, 1.45
+local ARM_REACH = 2 -- studs: длина руки R6, на столько меняется досягаемость на каждую единицу роста
+
+-- Рост шаблона меряем один раз: от него считается и глубина могилы, чтобы высокий
+-- покойник не начинал подъём, торча из земли по пояс.
+local BASE_HEIGHT = select(2, template:GetBoundingBox()).Y
+
+-- Разброс внутри окраса: без него четыре породы стоят четырьмя ровными группами.
+-- Сдвиг маленький (±6%), порода остаётся узнаваемой.
+local function jitter(c: Color3): Color3
+	local k = 0.06
+	local function ch(v: number): number
+		return math.clamp(v * (1 + (math.random() - 0.5) * 2 * k), 0, 1)
+	end
+	return Color3.new(ch(c.R), ch(c.G), ch(c.B))
+end
+
+local function pickScale(): number
+	if math.random() < BRUTE_CHANCE then
+		return BRUTE_MIN + math.random() * (BRUTE_MAX - BRUTE_MIN)
+	end
+	return SCALE_MIN + math.random() * (SCALE_MAX - SCALE_MIN)
+end
+
+-- Красим И объект BodyColors, И сами детали: BodyColors для рига авторитетнее и
+-- переписал бы цвета деталей, а детали нужны на случай, если объекта в шаблоне не
+-- окажется. Дешевле сделать оба, чем ловить потом «половина зомби не покрасилась».
+local function dressZombie(zombie: Model)
+	local variant = VARIANTS[math.random(#VARIANTS)]
+	local body, head = jitter(variant.body), jitter(variant.head)
+	local bc = zombie:FindFirstChildOfClass("BodyColors")
+	if bc then
+		bc.HeadColor3 = head
+		bc.TorsoColor3 = body
+		bc.LeftArmColor3, bc.RightArmColor3 = body, body
+		bc.LeftLegColor3, bc.RightLegColor3 = body, body
+	end
+	for _, part in zombie:GetChildren() do
+		if part:IsA("BasePart") then
+			part.Color = if part.Name == "Head" then head else body
+		end
+	end
+end
+
 local function getGravePart(instance: Instance): BasePart?
 	if instance:IsA("BasePart") then
 		return instance
@@ -125,7 +186,11 @@ end
 -- +0.35, у кого сняты (0/7) — от +0.10 до +2.24, вот эти и «висят».
 -- Возвращает true, если зомби дожил до конца подъёма (тогда запускается ИИ).
 local function riseFromGrave(zombie: Model, finalCFrame: CFrame): boolean
-	local buriedCFrame = finalCFrame * CFrame.new(0, -BURY_DEPTH, 0)
+	-- Глубина — ДОЛЯ РОСТА, а не четыре studs всем подряд. Иначе высокий покойник
+	-- начинал бы подъём, торча из земли по грудь: закапывание считается от ЦЕНТРА
+	-- модели, и чем выше тело, тем выше над центром его макушка.
+	local depth = BURY_DEPTH * (select(2, zombie:GetBoundingBox()).Y / BASE_HEIGHT)
+	local buriedCFrame = finalCFrame * CFrame.new(0, -depth, 0)
 	zombie:PivotTo(buriedCFrame)
 
 	local parts: {BasePart} = {}
@@ -206,6 +271,17 @@ local function spawnZombie()
 	end
 
 	local zombie = template:Clone()
+
+	-- Рост и окрас — ДО замера габарита ниже: по нему считается, на какой высоте
+	-- стоят ноги, и мерить надо уже готовое тело.
+	local scale = pickScale()
+	zombie:ScaleTo(scale) -- ScaleTo двигает и суставы, поэтому замах не разъезжается
+	dressZombie(zombie)
+	zombie:SetAttribute("BodyScale", scale)
+	-- Досягаемость растёт не пропорционально всей дистанции, а ровно на длину руки:
+	-- в шести studs базовой дальности сидит ещё и полкорпуса машины, и множить их на
+	-- рост незачем — здоровяк начал бы бить с двух метров пустоты.
+	zombie:SetAttribute("AttackRange", GameConfig.Zombie.AttackRange + (scale - 1) * ARM_REACH)
 
 	for _, part in zombie:GetDescendants() do
 		if part:IsA("BasePart") then
