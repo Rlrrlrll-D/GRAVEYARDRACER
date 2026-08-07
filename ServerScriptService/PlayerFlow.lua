@@ -605,13 +605,13 @@ function PlayerFlow.releaseVehicle(player: Player)
 	local car = vehicleOfPlayer[player]
 	vehicleOfPlayer[player] = nil
 	VehicleRegistry.ClearPlayer(player)
-	if car and car.Parent then
-		car:Destroy() -- ← чинит накопление машин
-	end
-	-- Гасим клиентский интерфейс AC6. Без машины его Drive/Burnout/Smoke (все живут
-	-- ВНУТРИ "A-Chassis Interface" в PlayerGui) продолжают крутиться на уничтоженной
-	-- модели и спамят «DriveSeat/Wheels not a valid member». Свежий интерфейс
-	-- копируется заново при следующей посадке (Initialize на SeatWeld).
+	-- ИНТЕРФЕЙС AC6 ГАСИМ ПЕРВЫМ, И ЭТО НЕ ПРИДИРКА К ПОРЯДКУ. Его Drive/Burnout/Smoke
+	-- (все живут ВНУТРИ "A-Chassis Interface" в PlayerGui) висят на событиях машины.
+	-- Уничтожение модели снимает SeatWeld → у Burnout срабатывает DriveSeat.ChildRemoved
+	-- → он лезет в car.Wheels уже опустошённой модели и роняет в лог «Wheels is not a
+	-- valid member». Снести интерфейс ПОСЛЕ машины — значит опоздать ровно на этот кадр:
+	-- обработчик успевает отработать. Снесённый заранее, он и не подписан больше ни на что.
+	-- Свежий интерфейс копируется заново при следующей посадке (Initialize на SeatWeld).
 	local pg = player:FindFirstChildOfClass("PlayerGui")
 	if pg then
 		for _, iface in pg:GetChildren() do
@@ -619,6 +619,9 @@ function PlayerFlow.releaseVehicle(player: Player)
 				iface:Destroy()
 			end
 		end
+	end
+	if car and car.Parent then
+		car:Destroy() -- ← чинит накопление машин
 	end
 end
 

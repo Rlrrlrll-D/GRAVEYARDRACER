@@ -250,6 +250,10 @@ local function setupVehicle(vehicle: Model)
 		local humanoid = zombieModel:FindFirstChildOfClass("Humanoid")
 		if not humanoid or humanoid.Health <= 0 then return end
 
+		-- КАСАНИЕ ЗОМБИ ЛИБО ДАВИТ ЕГО, ЛИБО НЕ ЗНАЧИТ НИЧЕГО. Здоровье машины оно не
+		-- трогает (урон только с замаха, см. ZombieAI) и газ больше не глушит: заглохнуть
+		-- посреди толпы — это стоять и получать по кузову, ничего не решая. Толпа и так
+		-- тормозит машину физически, массой тел.
 		local speed = (vehicle:GetAttribute("Speed") :: number?) or 0
 		if speed >= GameConfig.Vehicle.CrushSpeedThreshold then
 			local killer = VehicleRegistry.GetPlayerForVehicle(vehicle)
@@ -266,16 +270,6 @@ local function setupVehicle(vehicle: Model)
 				zombieModel:SetAttribute("DeathPush", flat.Unit)
 			end
 			humanoid:TakeDamage(GameConfig.Vehicle.CrushDamageToZombie)
-		else
-			-- КАСАНИЕ САМО ПО СЕБЕ УРОНА НЕ НАНОСИТ (требование юзера). Раньше любое
-			-- соприкосновение на малой скорости снимало здоровье, и машина разваливалась
-			-- от того, что зомби просто стоял рядом, — бить его было не за что и увернуться
-			-- не от чего. Теперь здоровье снимает ТОЛЬКО замах руками (ZombieAI: урон в
-			-- нижней точке маха, его видно и от него можно уехать).
-			--
-			-- Заглохнуть машина всё же обязана: толпа должна тормозить, иначе сквозь неё
-			-- проезжают как сквозь туман. Это потеря темпа, а не урон.
-			driveSeat.Throttle = 0
 		end
 	end
 
