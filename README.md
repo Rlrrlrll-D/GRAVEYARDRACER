@@ -100,15 +100,29 @@ rendered in Edit and the dusk arc hasn't started.
 Press **F4**. Then: RMB + mouse to look, WASD/QE to fly, Shift/Ctrl for ×4/×0.25
 speed, scroll for base speed, Z/C roll (X resets), `[`/`]` FOV, **T** autofocus
 the depth of field, **F** freeze the world, **G** rule-of-thirds grid,
-**B** 2.39:1 letterbox, **H** hide the photo UI.
+**B** 2.39:1 letterbox, **H** hide the photo UI *and the mouse cursor*.
+
+**H hides the cursor for a reason**: Roblox draws the pointer inside the frame,
+so the Screenshot button captures it along with the scene — and by then you've
+released RMB and are moving the mouse toward the ribbon, straight across the shot.
 
 Saving the image is on Studio: the shot itself is the ribbon's **View →
-Screenshot**, which captures the bare viewport. Game code can't write the file —
-`CaptureService:CaptureScreenshot` only yields a temporary `rbxtemp://` id and
-`SaveScreenshotCapture` is gated behind the `RobloxScript` capability. So the
-flow is: frame it → **H** → View → Screenshot → click back into the viewport.
+Screenshot**, which captures the bare viewport, never the editor chrome. Game
+code can't write the file — `CaptureService:CaptureScreenshot` only yields a
+temporary `rbxtemp://` id and `SaveScreenshotCapture` is gated behind the
+`RobloxScript` capability. Flow: frame it → **H** → View → Screenshot → click
+back into the viewport.
 
-Roblox wants 1920×1080 for the thumbnail, so a maximised Studio window (**F11**,
-panels collapsed) is already enough resolution.
+### Resolution
+
+The saved PNG is exactly what the viewport rendered, so resolution is bound only
+by viewport size — and the window does **not** have to fit on screen. Enlarging
+it past the monitor pushes the ribbon and panels off the edge; the viewport still
+renders in full. `tools/photo-window.ps1` sets that size (`-Restore` undoes it).
+
+Careful with the units: Roblox writes the file in **physical** pixels while
+`Camera.ViewportSize` reports **logical** ones. At 125% Windows scaling a
+1920×1080 viewport lands on disk as **2400×1350** — above Full HD, which is the
+good case: downscaling that to 1920×1080 beats rendering at 1080 directly.
 
 Don't use Studio's own freecam (Shift+P) at the same time — both grab the camera.

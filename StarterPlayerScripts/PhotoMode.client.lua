@@ -25,7 +25,8 @@
 --   F             заморозка мира (машины, зомби) вкл/выкл
 --   G             сетка третей
 --   B             киношные полосы 2.39:1 (остаются в кадре, это не подсказка)
---   H             спрятать/вернуть интерфейс режима
+--   H             спрятать/вернуть интерфейс режима ВМЕСТЕ С КУРСОРОМ (стрелку Roblox
+--                 рисует внутри кадра, и кнопка Screenshot забирает её вместе со сценой)
 --
 -- Со встроенным фрикамом Studio (Shift+P) одновременно не работает — оба берут
 -- камеру себе. Что-то одно.
@@ -361,7 +362,7 @@ hintsLabel.Text = table.concat({
 	"Shift/Ctrl — быстрее/медленнее · колесо — скорость",
 	"Z/C — крен, X — сброс · [ ] — поле зрения",
 	"T — автофокус · F — заморозка · G — сетка",
-	"B — киношные полосы · H — спрятать интерфейс",
+	"B — киношные полосы · H — интерфейс и курсор",
 	"",
 	"Снимок: H → лента View → Screenshot",
 }, "\n")
@@ -478,13 +479,22 @@ local function restoreNametags()
 end
 
 -- CoreGui: запоминаем каждый тип отдельно — что-то из него мог выключить и не мы.
+--
+-- ЗАПОМНИТЬ И ПРИМЕНИТЬ — РАЗНЫЕ ДЕЙСТВИЯ. Гасить приходится не один раз за сеанс
+-- (плашку Roblox возвращает всё, что трогает интерфейс между F4 и снимком), а слепок
+-- исходного состояния снимать можно только ОДИН раз: второй проход записал бы уже
+-- выключенное как «так и было», и на выходе из режима CoreGui остался бы погашен.
 local coreGuiStates: { [Enum.CoreGuiType]: boolean } = {}
+local coreGuiSaved = false
 
 local function hideCoreGui()
-	for _, coreType in Enum.CoreGuiType:GetEnumItems() do
-		if coreType ~= Enum.CoreGuiType.All then
-			coreGuiStates[coreType] = StarterGui:GetCoreGuiEnabled(coreType)
+	if not coreGuiSaved then
+		for _, coreType in Enum.CoreGuiType:GetEnumItems() do
+			if coreType ~= Enum.CoreGuiType.All then
+				coreGuiStates[coreType] = StarterGui:GetCoreGuiEnabled(coreType)
+			end
 		end
+		coreGuiSaved = true
 	end
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
 	pcall(function()
@@ -497,6 +507,7 @@ local function restoreCoreGui()
 		StarterGui:SetCoreGuiEnabled(coreType, enabled)
 	end
 	table.clear(coreGuiStates)
+	coreGuiSaved = false
 	pcall(function()
 		StarterGui:SetCore("TopbarEnabled", true)
 	end)
@@ -535,6 +546,20 @@ local prevCameraSubject: Instance? = nil
 local prevFov = 70
 local bound = false
 local looking = false
+
+-- // Курсор -------------------------------------------------------------------
+-- КУРСОР ПОПАДАЕТ В СНИМОК: Roblox рисует его сам, внутри кадра, поэтому кнопка
+-- Screenshot забирает его вместе со сценой. Прятать стрелку только на время поворота
+-- камеры (пока зажата ПКМ) оказалось мало — по сценарию съёмки ПКМ как раз отпущена:
+-- кадр выставлен, панель убрана по H, и мышь едет к кнопке в ленте ровно поверх кадра.
+-- Правило: стрелка нужна только тогда, когда видна панель — по ней возят ползунки.
+local function applyCursor()
+	if not active then
+		UserInputService.MouseIconEnabled = true
+		return
+	end
+	UserInputService.MouseIconEnabled = panelGui.Enabled and not looking
+end
 
 local function step(dt: number)
 	-- A-Chassis каждый кадр возвращает камеру себе — переспрашиваем режим, иначе
@@ -650,6 +675,7 @@ local function enter()
 	overlayGui.Enabled = true
 	panelGui.Enabled = true
 	applyGuides()
+	applyCursor()
 	layoutLetterbox()
 	refreshPanel()
 
@@ -692,8 +718,8 @@ local function leave()
 	end
 
 	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-	UserInputService.MouseIconEnabled = true
 	looking = false
+	applyCursor() -- active уже false: стрелка возвращается безусловно
 
 	camera.FieldOfView = prevFov
 	camera.CameraSubject = prevCameraSubject
@@ -722,7 +748,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if input.UserInputType == Enum.UserInputType.MouseButton2 then
 		looking = true
 		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
-		UserInputService.MouseIconEnabled = false
+		applyCursor()
 		return
 	end
 
@@ -744,9 +770,13 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		barTop.Visible = letterboxOn
 		barBottom.Visible = letterboxOn
 	elseif key == Enum.KeyCode.H then
-		-- «Чистый кадр»: панель и сетка уходят, полосы остаются — они часть кадра.
+		-- «Чистый кадр»: панель, сетка и КУРСОР уходят, полосы остаются — они часть кадра.
 		panelGui.Enabled = not panelGui.Enabled
 		applyGuides()
+		applyCursor()
+		-- Плашку Roblox гасим здесь ЗАНОВО, а не только на входе в режим: топбар живёт
+		-- в CoreGui, и его возвращает всё, что трогает интерфейс между F4 и снимком.
+		hideCoreGui()
 	elseif key == Enum.KeyCode.X then
 		roll = 0
 	elseif key == Enum.KeyCode.T then
@@ -764,7 +794,7 @@ UserInputService.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton2 and looking then
 		looking = false
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-		UserInputService.MouseIconEnabled = true
+		applyCursor()
 	end
 end)
 
