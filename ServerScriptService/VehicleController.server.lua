@@ -89,7 +89,7 @@ local function setupVehicle(vehicle: Model)
 				Speed = 0,
 				Fuel = vehicle:GetAttribute("Fuel") or 0,
 				Lives = livesLeft,
-				ZombiesDefeated = driver:GetAttribute("ZombiesDefeated") or 0,
+				ZombiesDefeated = driver:GetAttribute("RaceZombies") or 0, -- за заезд, как и в StatsService
 				Bones = driver:GetAttribute("Bones") or 0,
 			})
 		end

@@ -246,6 +246,11 @@ local function onZombieDied(zombie: Model, humanoid: Humanoid)
 		if killer then
 			local defeated = (killer:GetAttribute("ZombiesDefeated") :: number?) or 0
 			killer:SetAttribute("ZombiesDefeated", defeated + 1)
+			-- ДВА СЧЁТЧИКА, И ОНИ О РАЗНОМ. ZombiesDefeated — за всё время (значок
+			-- Hundred Down, лидерборд), RaceZombies — за текущий заезд (HUD и экран
+			-- итогов). Обнуляет второй MatchManager на старте; здесь оба растут вместе.
+			local thisRace = (killer:GetAttribute("RaceZombies") :: number?) or 0
+			killer:SetAttribute("RaceZombies", thisRace + 1)
 			Economy.award(killer, GameConfig.Economy.BonesPerZombie, "зомби")
 			-- Счётчик накопительный (PlayerData сидирует его из записи при входе),
 			-- поэтому сотня набирается за все сессии, а не за одну.

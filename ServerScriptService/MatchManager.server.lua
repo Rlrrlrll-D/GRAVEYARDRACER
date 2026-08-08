@@ -216,6 +216,14 @@ local function runCountdown(): { Player }
 		table.remove(participants)
 	end
 
+	-- Счётчик зомби ЗА ЗАЕЗД. Накопительный ZombiesDefeated не трогаем: он сидируется
+	-- из DataStore при входе и нужен значку Hundred Down и лидерборду. А HUD и экран
+	-- итогов показывают именно этот — иначе после заезда, где сбил пятерых, игроку
+	-- писало общий итог за все сессии, и «48» читалось как результат гонки.
+	for _, plr in participants do
+		plr:SetAttribute("RaceZombies", 0)
+	end
+
 	-- свежий старт: сносим зомби с прошлого заезда, чтобы они не роились у грида
 	-- на отсчёте (новые не заспавнятся, пока машины неуязвимы — см. ZombieSpawner).
 	for _, z in CollectionService:GetTagged("Zombie") do
@@ -475,7 +483,10 @@ local function runResults(winner: Player?, winnerName: string?, session: RaceCor
 		matchResult:FireClient(plr, {
 			Outcome = outcome,
 			Winner = winnerName,
-			Zombies = (plr:GetAttribute("ZombiesDefeated") :: number?) or 0,
+			-- ЗА ЗАЕЗД, а не за всё время: это экран итогов ГОНКИ. Раньше сюда уходил
+			-- накопительный ZombiesDefeated, и после заезда с пятью сбитыми игрок видел
+			-- общий счёт за все сессии, поданный как результат гонки.
+			Zombies = (plr:GetAttribute("RaceZombies") :: number?) or 0,
 			BonesEarned = Economy.balance(plr) - before,
 			Bones = Economy.balance(plr),
 		})
