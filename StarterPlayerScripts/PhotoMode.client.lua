@@ -25,6 +25,8 @@
 --   F             заморозка мира (машины, зомби) вкл/выкл
 --   G             сетка третей
 --   B             киношные полосы 2.39:1 (остаются в кадре, это не подсказка)
+--   U             HUD игры в кадре / скрыт. Плашка Roblox и курсор гаснут в обоих
+--                 случаях; кадр с HUD нужен витрине — он объясняет игру
 --   H             спрятать/вернуть интерфейс режима ВМЕСТЕ С КУРСОРОМ (стрелку Roblox
 --                 рисует внутри кадра, и кнопка Screenshot забирает её вместе со сценой)
 --
@@ -85,6 +87,13 @@ local fov = 70
 
 local freezeOn = true
 local dof: DepthOfFieldEffect? = nil
+
+-- НАШ HUD В КАДРЕ ИЛИ НЕТ (переключатель U, живёт между заходами в режим).
+-- По умолчанию режим прячет весь интерфейс — так снимают чистую сцену. Но для витрины
+-- опыта нужен и обратный кадр: HUD с «LAP 1/3 · POSITION 1/1», жизнями и счётчиком
+-- зомби объясняет игру лучше любого пейзажа. Плашка Roblox и курсор при этом гаснут
+-- ВСЕГДА — они не наши и в снимке не нужны ни в одном из режимов.
+local keepGameUi = false
 
 -- // Ремоут заморозки --------------------------------------------------------
 -- Его создаёт PhotoModeService и ТОЛЬКО в Studio — в живой игре ремоута нет, и
@@ -224,7 +233,7 @@ end
 local titleLabel = makeLabel(1, 18, 16, UITheme.Palette.Bone)
 titleLabel.Text = "PHOTO MODE"
 
-local statusLabel = makeLabel(2, 32, 13, UITheme.Palette.Bone)
+local statusLabel = makeLabel(2, 46, 13, UITheme.Palette.Bone)
 statusLabel.TextTransparency = 0.25
 
 -- Ползунок. Возвращает функцию обновления — цифры на панели меняются и с клавиш.
@@ -354,7 +363,7 @@ end, function(v)
 	return string.format("%.2f", v)
 end)
 
-local hintsLabel = makeLabel(7, 118, 12, UITheme.Palette.Bone)
+local hintsLabel = makeLabel(7, 134, 12, UITheme.Palette.Bone)
 hintsLabel.TextTransparency = 0.45
 hintsLabel.LayoutOrder = 7
 hintsLabel.Text = table.concat({
@@ -362,16 +371,18 @@ hintsLabel.Text = table.concat({
 	"Shift/Ctrl — быстрее/медленнее · колесо — скорость",
 	"Z/C — крен, X — сброс · [ ] — поле зрения",
 	"T — автофокус · F — заморозка · G — сетка",
-	"B — киношные полосы · H — интерфейс и курсор",
+	"B — киношные полосы · U — HUD игры в кадре",
+	"H — спрятать панель и курсор",
 	"",
 	"Снимок: H → лента View → Screenshot",
 }, "\n")
 
 local function refreshPanel()
 	statusLabel.Text = string.format(
-		"Заморозка: %s%s\nСкорость полёта: %.0f",
+		"Заморозка: %s%s\nHUD игры: %s\nСкорость полёта: %.0f",
 		freezeOn and "ВКЛ" or "выкл",
 		freezeRemote and "" or "  (нет сервера)",
+		keepGameUi and "В КАДРЕ" or "скрыт",
 		flySpeed
 	)
 	for _, refresh in sliderRefreshers do
@@ -421,6 +432,25 @@ local function restoreGuis()
 		end
 	end
 	table.clear(suppressed)
+end
+
+-- Привести наш интерфейс в согласие с переключателем U. Вызывается и на входе в режим,
+-- и по нажатию — поэтому обе ветки обязаны быть полными, а не «доделывать» друг друга.
+local function applyGameUi()
+	if keepGameUi then
+		for _, conn in guiConns do
+			conn:Disconnect()
+		end
+		table.clear(guiConns)
+		restoreGuis() -- вернуть каждому ScreenGui то состояние, до которого дошла игра
+	else
+		for _, gui in playerGui:GetChildren() do
+			suppressGui(gui)
+		end
+		-- HUD может появиться уже после входа в режим (UIController создаёт его не
+		-- мгновенно, а лобби пересоздаёт экраны между заездами) — ловим и таких.
+		table.insert(guiConns, playerGui.ChildAdded:Connect(suppressGui))
+	end
 end
 
 -- Блюр заставки живёт в Lighting и HUD-ом не выключается: войдя в режим из лобби,
@@ -663,10 +693,9 @@ local function enter()
 	dof.NearIntensity = 0
 	dof.Parent = Lighting
 
-	for _, gui in playerGui:GetChildren() do
-		suppressGui(gui)
-	end
-	table.insert(guiConns, playerGui.ChildAdded:Connect(suppressGui))
+	applyGameUi()
+	-- Блюр заставки гасим В ЛЮБОМ режиме, даже когда HUD оставлен в кадре: он размывает
+	-- МИР, а не интерфейс, и в снимке от него один вред.
 	suppressBlur()
 	hideNametags()
 	hideCoreGui()
@@ -777,6 +806,10 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		-- Плашку Roblox гасим здесь ЗАНОВО, а не только на входе в режим: топбар живёт
 		-- в CoreGui, и его возвращает всё, что трогает интерфейс между F4 и снимком.
 		hideCoreGui()
+	elseif key == Enum.KeyCode.U then
+		keepGameUi = not keepGameUi
+		applyGameUi()
+		refreshPanel()
 	elseif key == Enum.KeyCode.X then
 		roll = 0
 	elseif key == Enum.KeyCode.T then

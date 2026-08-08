@@ -100,7 +100,13 @@ rendered in Edit and the dusk arc hasn't started.
 Press **F4**. Then: RMB + mouse to look, WASD/QE to fly, Shift/Ctrl for ×4/×0.25
 speed, scroll for base speed, Z/C roll (X resets), `[`/`]` FOV, **T** autofocus
 the depth of field, **F** freeze the world, **G** rule-of-thirds grid,
-**B** 2.39:1 letterbox, **H** hide the photo UI *and the mouse cursor*.
+**B** 2.39:1 letterbox, **U** keep the game HUD in frame, **H** hide the photo UI
+*and the mouse cursor*.
+
+**U** exists because a storefront shot often reads better *with* the HUD — lap,
+position, lives and the zombie counter explain the game better than scenery does.
+The Roblox topbar and the cursor stay hidden either way, and so does the lobby
+blur: it blurs the world, not the interface.
 
 **H hides the cursor for a reason**: Roblox draws the pointer inside the frame,
 so the Screenshot button captures it along with the scene — and by then you've
