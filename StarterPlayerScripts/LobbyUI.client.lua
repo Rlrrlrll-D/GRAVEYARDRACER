@@ -217,9 +217,15 @@ local optBtn = menuPlate(2, "OPTIONS", UITheme.Palette.Green, 460, 84, 434)
 local racersBtn = menuPlate(3, "RACERS", UITheme.Palette.Green, 460, 84, 512)
 local shopBtn = menuPlate(4, "SHOP", UITheme.Palette.Green, 460, 84, 590)
 
+-- ЗЕЛЁНЫЙ В МЕНЮ ОДИН (2026-08-08, просьба юзера: «флажок PLAY после нажатия
+-- становится светло-зелёный, не такой как остальные»). Нажатая PLAY красилась в
+-- Palette.GreenLight, а OPTIONS/RACERS/SHOP стоят на Palette.Green — рядом это читалось
+-- как два разных зелёных в одном столбце. Теперь готовая PLAY того же цвета, что и
+-- соседние мазки. Плата за это: готовность отличается от НЕготовности (красный), но не
+-- выделяется среди прочих кнопок так, как выделялась раньше.
 playBtn.Activated:Connect(function()
 	isReady = not isReady
-	PlateArt.tint(playBtn, isReady and UITheme.Palette.GreenLight or UITheme.Palette.Red)
+	PlateArt.tint(playBtn, isReady and UITheme.Palette.Green or UITheme.Palette.Red)
 	playerReady:FireServer(isReady)
 end)
 
@@ -292,7 +298,10 @@ local function renderRoster(roster: { RosterRow })
 		end
 	end
 	for i, row in roster do
-		-- готов — светло-зелёный (как нажатая PLAY), не готов — красный
+		-- готов — светло-зелёный, не готов — красный. ЭТО УЖЕ НЕ ТОТ ЖЕ ЦВЕТ, ЧТО У
+		-- НАЖАТОЙ PLAY: её перекрасили в Palette.Green (см. выше), а плашки ростера
+		-- живут в отдельной панели и правкой не затрагивались. Захочется свести и их —
+		-- менять здесь.
 		local bg = if row.ready then UITheme.Palette.GreenLight else UITheme.Palette.Red
 		local plate = PlateArt.plate(i, bg)
 		plate.LayoutOrder = i
