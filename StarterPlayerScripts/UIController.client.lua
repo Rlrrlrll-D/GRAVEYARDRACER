@@ -271,10 +271,32 @@ local SKULL_STROKE = 0.18 -- толщина линии в studs — НЕ ТРО�
 local plateTemplate: BasePart? = nil
 local plateTried = false
 
--- Вершина ленты со СВОИМИ исходными координатами. Нужна тем, кто потом гнёт меш:
--- деформацию считаем всегда от оригинала, а не от предыдущего кадра, иначе ошибка
--- накапливается и череп «уползает».
-type RibbonVertex = { id: number, x: number, y: number, z: number }
+-- Вершина ленты хранит не готовую точку, а СПОСОБ ЕЁ ПОЛУЧИТЬ: точку осевой линии
+-- контура (cx, cy), нормаль к ней (nx, ny) и сторону (sign = ±1). Позиция считается как
+-- «отойти от осевой на полтолщины в свою сторону».
+--
+-- Так сделано ради ТОЛЩИНЫ. Она — единственное, что отделяет светящуюся стрелку от
+-- несветящегося черепа: блюм берёт уже нарисованные пиксели, а линия в доли пикселя при
+-- сглаживании смешивается с фоном и не дотягивает до порога. Храня осевую с нормалью,
+-- толщину можно менять на живом меше одним проходом по вершинам — без пересборки, то
+-- есть и в плей, и без расхода бюджета EditableMesh.
+--
+-- Деформацию (S-изгиб) считаем ВСЕГДА от этой базы, а не от предыдущего кадра, иначе
+-- ошибка накапливается и череп уползает.
+type RibbonVertex = {
+	id: number,
+	cx: number,
+	cy: number,
+	nx: number,
+	ny: number,
+	sign: number,
+	z: number,
+}
+
+-- Позиция вершины при толщине w (в долях ширины рисунка).
+local function vertexBase(v: RibbonVertex, w: number): (number, number)
+	return v.cx + v.sign * v.nx * w * 0.5, v.cy + v.sign * v.ny * w * 0.5
+end
 
 local function buildRibbon(): (BasePart?, any?, { RibbonVertex }?)
 	local okShape, shape = pcall(function()
@@ -329,10 +351,11 @@ local function buildRibbon(): (BasePart?, any?, { RibbonVertex }?)
 				outerF[k] = em:AddVertex(Vector3.new(ox, oy, halfT))
 				innerB[k] = em:AddVertex(Vector3.new(ix, iy, -halfT))
 				outerB[k] = em:AddVertex(Vector3.new(ox, oy, -halfT))
-				table.insert(verts, { id = innerF[k], x = ix, y = iy, z = halfT })
-				table.insert(verts, { id = outerF[k], x = ox, y = oy, z = halfT })
-				table.insert(verts, { id = innerB[k], x = ix, y = iy, z = -halfT })
-				table.insert(verts, { id = outerB[k], x = ox, y = oy, z = -halfT })
+				local cx, cy = cur[1], cur[2]
+				table.insert(verts, { id = innerF[k], cx = cx, cy = cy, nx = nx, ny = ny, sign = -1, z = halfT })
+				table.insert(verts, { id = outerF[k], cx = cx, cy = cy, nx = nx, ny = ny, sign = 1, z = halfT })
+				table.insert(verts, { id = innerB[k], cx = cx, cy = cy, nx = nx, ny = ny, sign = -1, z = -halfT })
+				table.insert(verts, { id = outerB[k], cx = cx, cy = cy, nx = nx, ny = ny, sign = 1, z = -halfT })
 			end
 			for k = 1, n do
 				local j = k % n + 1
@@ -365,14 +388,50 @@ local function buildRibbon(): (BasePart?, any?, { RibbonVertex }?)
 	return plate, em, verts
 end
 
+local templateMesh: any = nil
+local templateVerts: { RibbonVertex }? = nil
+local currentStroke = SKULL_STROKE -- в studs; меняется живьём подкруткой
+
+local function applyStrokeTo(em: any, verts: { RibbonVertex }, strokeStuds: number)
+	local w = strokeStuds / SKULL_WIDTH
+	for _, v in verts do
+		local x, y = vertexBase(v, w)
+		em:SetPosition(v.id, Vector3.new(x, y, v.z))
+	end
+end
+
+-- Толщина линии у ВСЕХ черепов разом: плашки-клоны ссылаются на один и тот же меш,
+-- поэтому достаточно переставить его вершины.
+local function setSkullStroke(strokeStuds: number)
+	currentStroke = math.clamp(strokeStuds, 0.02, 1.5)
+	if templateMesh and templateVerts then
+		applyStrokeTo(templateMesh, templateVerts, currentStroke)
+	end
+end
+
 local function buildPlateTemplate(): BasePart?
 	if plateTried then
 		return plateTemplate
 	end
 	plateTried = true
-	local plate = buildRibbon() -- меш держим живым: без него деталь не рисуется (см. выше)
+	-- меш держим живым: без него деталь не рисуется (см. выше)
+	local plate, em, verts = buildRibbon()
 	plateTemplate = plate
+	templateMesh = em
+	templateVerts = verts
 	return plate
+end
+
+-- ДЕВ-ДОСТУП ДЛЯ ПОДКРУТКИ (NeonTune, только Studio). Толщина живёт здесь, а крутить её
+-- надо из другого скрипта — отсюда общий стол в _G. Для игрового кода это ничего не
+-- меняет: в живой игре ветка не выполняется, и ручки не существует.
+if RunService:IsStudio() then
+	_G.__SkullTune = {
+		setStroke = setSkullStroke,
+		getStroke = function()
+			return currentStroke
+		end,
+	}
 end
 
 -- Навесить плашку на череп, если её там ещё нет (у каждого клиента своя).
@@ -503,11 +562,11 @@ local function ensureGhost(): BasePart?
 
 	local minY, maxY = math.huge, -math.huge
 	for _, v in verts do
-		if v.y < minY then
-			minY = v.y
+		if v.cy < minY then
+			minY = v.cy
 		end
-		if v.y > maxY then
-			maxY = v.y
+		if v.cy > maxY then
+			maxY = v.cy
 		end
 	end
 	ghostPart, ghostMesh, ghostVerts = part, em, verts
@@ -534,7 +593,9 @@ local S_WAVES = 2 -- изгибов, укладывающихся по длин�
 local S_AMP = 0.42 -- размах изгиба в долях ширины черепа
 local S_STRETCH = 1.5 -- во столько раз череп вытягивается по высоте к концу улёта
 local S_NARROW = 0.4 -- и сужается по ширине: получается змейка, а не блин
-local S_WAVE_SPEED = 2.5 -- сколько раз волна пробежит по телу за весь подъём
+-- 0.8, а не прежние 2.5 (юзер: «очень быстро извивается»): за подъём волна проходит по
+-- телу меньше одного раза — это читается как ленивое движение змеи, а не как дрожь.
+local S_WAVE_SPEED = 0.8
 
 local function warpGhost(a: number)
 	local verts, em = ghostVerts, ghostMesh
@@ -545,11 +606,13 @@ local function warpGhost(a: number)
 	-- череп ещё «доскладывается», и извив читается только к середине.
 	local amp = S_AMP * math.min(1, a * 5)
 	local phase = a * S_WAVE_SPEED * math.pi * 2
+	local w = currentStroke / SKULL_WIDTH -- призрак наследует текущую толщину линии
 	for _, v in verts do
-		local t = (v.y - ghostMinY) / ghostSpanY -- 0 внизу черепа, 1 наверху
+		local bx, by = vertexBase(v, w)
+		local t = (by - ghostMinY) / ghostSpanY -- 0 внизу черепа, 1 наверху
 		local bend = math.sin(t * math.pi * 2 * S_WAVES - phase)
-		local x = v.x * (1 - S_NARROW * a) + bend * amp
-		local y = ghostMinY + (v.y - ghostMinY) * (1 + S_STRETCH * a)
+		local x = bx * (1 - S_NARROW * a) + bend * amp
+		local y = ghostMinY + (by - ghostMinY) * (1 + S_STRETCH * a)
 		em:SetPosition(v.id, Vector3.new(x, y, v.z))
 	end
 end
@@ -557,9 +620,14 @@ end
 -- ПОДЪЁМ МЕДЛЕННЫЙ И РОВНЫЙ (просьба юзера «он должен подниматься медленно»). Было
 -- 0.34с с разгоном a*a — на такой скорости извив просто не успевал прочитаться.
 local RISE = 1.2
-local RISE_HEIGHT = 20
+-- ПОДЪЁМ МЕРЯЕМ В РОСТАХ ЧЕРЕПА, А НЕ В STUDS (юзер: «теперь совсем не поднимается
+-- вверх практически»). Двадцать studs — это много у базового черепа и почти ничего у
+-- того, что раздут угловым масштабом вдвое-втрое: на глаз выходило, что он топчется на
+-- месте. Теперь высота считается от фактического размера призрака, и подъём выглядит
+-- одинаково с любой дистанции.
+local RISE_HEIGHTS = 9 -- во столько собственных высот поднимается череп
 local PATH_WAVES = 1.5 -- змейка самой траектории: столько полуволн вбок за подъём
-local PATH_AMP = 1.4 -- в studs, вбок от «дома»
+local PATH_AMPS = 0.9 -- размах вбок, тоже в собственных ширинах черепа
 
 -- ПРЕВРАЩЕНИЕ ЧЕРЕПА В СТРУЙКУ. Запускается НА ПОДЛЁТЕ (цикл парения ниже), а не по
 -- факту прохождения: на 60+ studs/с пройденный чекпоинт оказывается за спиной за
@@ -614,6 +682,9 @@ local function collectSkull(index: number)
 	side = Vector3.new(side.X, 0, side.Z)
 	side = side.Magnitude > 1e-3 and side.Unit or Vector3.xAxis
 
+	-- Размер призрака за время улёта не меняется, поэтому мерки берём один раз.
+	local ghostH, ghostW = ghost.Size.Y, ghost.Size.X
+
 	task.spawn(function()
 		local t0 = os.clock()
 		while true do
@@ -622,8 +693,8 @@ local function collectSkull(index: number)
 				break
 			end
 			warpGhost(a)
-			local sway = math.sin(a * math.pi * PATH_WAVES * 2) * PATH_AMP
-			local pos = home.Position + Vector3.new(0, RISE_HEIGHT * a, 0) + side * sway
+			local sway = math.sin(a * math.pi * PATH_WAVES * 2) * PATH_AMPS * ghostW
+			local pos = home.Position + Vector3.new(0, RISE_HEIGHTS * ghostH * a, 0) + side * sway
 			-- БЕЗ ЗАКРУТКИ (просьба юзера «без вращений»). Разворот к камере оставлен —
 			-- без него лента с половины ракурсов видна с торца и исчезает, — но он
 			-- ТОЛЬКО по горизонтали: цель взгляда берём на высоте самого черепа,

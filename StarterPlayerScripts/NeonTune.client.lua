@@ -228,8 +228,35 @@ makeSlider(3, "R", function() return r end, function(v) r = v end)
 makeSlider(4, "G", function() return g end, function(v) g = v end)
 makeSlider(5, "B", function() return b end, function(v) b = v end)
 
-local valuesLabel = makeLabel(6, 36, 14, 0)
-local hintsLabel = makeLabel(7, 86, 12, 0.45)
+-- ТОЛЩИНА — ГЛАВНАЯ РУЧКА ОТ СВЕЧЕНИЯ, а вовсе не цвет. Юзер заметил суть: у стрелок
+-- старта тот же неон и тот же цвет, и они светятся, а череп — нет, и начинает только
+-- к белому. Разница одна: полоска стрелки 1.6 studs, линия черепа 0.18. Блюм берёт уже
+-- нарисованные пиксели, а волосок при сглаживании смешивается с фоном и не дотягивает
+-- до порога — поднимать приходилось цвет, хотя виновата толщина.
+-- Ползунок ходит в studs; UIController переставляет вершины живого меша, пересборки нет.
+-- Верх 0.5, а не «побольше на всякий случай»: проверено живьём, что уже на 0.9 лента
+-- смыкается сама с собой и череп становится сплошным пятном — глазницы и промежутки
+-- между зубами затягивает. Полезный диапазон весь ниже, и ползунку нужна точность в нём.
+local STROKE_MIN, STROKE_MAX = 0.08, 0.5
+local strokeValue = 0.18
+
+local function skullTune(): any
+	return _G.__SkullTune
+end
+
+makeSlider(6, "Толщ", function()
+	-- 0..255 у ползунка — общая шкала; переводим в неё реальные studs
+	return (strokeValue - STROKE_MIN) / (STROKE_MAX - STROKE_MIN) * 255
+end, function(v)
+	strokeValue = STROKE_MIN + (v / 255) * (STROKE_MAX - STROKE_MIN)
+	local tune = skullTune()
+	if tune then
+		tune.setStroke(strokeValue)
+	end
+end)
+
+local valuesLabel = makeLabel(7, 52, 14, 0)
+local hintsLabel = makeLabel(8, 86, 12, 0.45)
 hintsLabel.Text = table.concat({
 	"-  =   притушить / поднять все три канала",
 	";  '   Bloom Intensity (общий на сцену)",
@@ -238,7 +265,7 @@ hintsLabel.Text = table.concat({
 	"\\ — сброс · P — числа в Output",
 }, "\n")
 
-local skullsLabel = makeLabel(8, 16, 12, 0.45)
+local skullsLabel = makeLabel(9, 16, 12, 0.45)
 
 -- // Применение --------------------------------------------------------------
 local function currentColor(): Color3
@@ -288,8 +315,10 @@ function applyAll()
 		refresh()
 	end
 	valuesLabel.Text = string.format(
-		"Color3.fromRGB(%d, %d, %d)\nBloom  I %.2f   T %.2f",
+		"Color3.fromRGB(%d, %d, %d)\nSKULL_STROKE = %.2f%s\nBloom  I %.2f   T %.2f",
 		math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5),
+		strokeValue,
+		skullTune() and "" or "  (UIController не отдал ручку)",
 		bloom and bloom.Intensity or 0,
 		bloom and bloom.Threshold or 0
 	)
@@ -313,6 +342,7 @@ local function printNumbers()
 	local c = currentColor()
 	print(string.format("[NeonTune] SKULL_COLOR = Color3.fromRGB(%d, %d, %d)",
 		math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5)))
+	print(string.format("[NeonTune] SKULL_STROKE = %.2f", strokeValue))
 	if bloom then
 		print(string.format("[NeonTune] BloomIntensity = %.2f, Threshold = %.2f", bloom.Intensity, bloom.Threshold))
 	end
