@@ -476,6 +476,7 @@ local ghostPart: BasePart? = nil
 local ghostMesh: any = nil
 local ghostVerts: { RibbonVertex }? = nil
 local ghostMinY, ghostSpanY = 0, 1
+local ghostBaseSize = Vector3.one
 local ghostTried = false
 
 local function ensureGhost(): BasePart?
@@ -489,6 +490,7 @@ local function ensureGhost(): BasePart?
 	end
 	part.Name = "GhostSkull"
 	part.Size = part.Size * SKULL_WIDTH
+	ghostBaseSize = part.Size -- запоминаем: перед каждым улётом домножаем на масштаб черепа
 	part.Material = Enum.Material.Neon
 	part.Color = SKULL_COLOR
 	part.Transparency = 1 -- припаркован невидимым до первого сбора
@@ -522,27 +524,42 @@ end
 --
 -- Деформацию ВСЕГДА считаем от исходных координат вершины (RibbonVertex.x/y), а не от
 -- предыдущего кадра: иначе ошибка накапливается и череп уползает от «дома».
-local S_WAVES = 1 -- одна полная S на всю высоту черепа
-local S_AMP = 0.5 -- размах изгиба в долях ширины черепа
-local S_STRETCH = 1.8 -- во столько раз череп вытягивается по высоте к концу улёта
-local S_NARROW = 0.5 -- и во столько же сужается по ширине: получается струйка
+-- ВОЛНА ДОЛЖНА БЕЖАТЬ ПО ТЕЛУ, А НЕ ЗАСТЫВАТЬ (2026-08-09, юзер: «он просто сначала
+-- всё изогнёт, а потом это всё поднимет — нет, нужно змееобразное движение»). Раньше
+-- фаза синуса была постоянной: череп принимал форму S и дальше ехал вверх этой самой
+-- фигурой, то есть двигался как вырезанная из картона змейка. Теперь фаза едет со
+-- временем (S_WAVE_SPEED) — гребни бегут снизу вверх по телу, и череп именно
+-- извивается. Плюс сама траектория идёт синусоидой вбок (PATH_*), а не по прямой.
+local S_WAVES = 2 -- изгибов, укладывающихся по длине тела одновременно
+local S_AMP = 0.42 -- размах изгиба в долях ширины черепа
+local S_STRETCH = 1.5 -- во столько раз череп вытягивается по высоте к концу улёта
+local S_NARROW = 0.4 -- и сужается по ширине: получается змейка, а не блин
+local S_WAVE_SPEED = 2.5 -- сколько раз волна пробежит по телу за весь подъём
 
 local function warpGhost(a: number)
 	local verts, em = ghostVerts, ghostMesh
 	if not (verts and em) then
 		return
 	end
+	-- Размах набирается за первую пятую часть пути, дальше держится: иначе в начале
+	-- череп ещё «доскладывается», и извив читается только к середине.
+	local amp = S_AMP * math.min(1, a * 5)
+	local phase = a * S_WAVE_SPEED * math.pi * 2
 	for _, v in verts do
 		local t = (v.y - ghostMinY) / ghostSpanY -- 0 внизу черепа, 1 наверху
-		local bend = math.sin(t * math.pi * 2 * S_WAVES - math.pi * 0.5)
-		local x = v.x * (1 - S_NARROW * a) + bend * S_AMP * a
+		local bend = math.sin(t * math.pi * 2 * S_WAVES - phase)
+		local x = v.x * (1 - S_NARROW * a) + bend * amp
 		local y = ghostMinY + (v.y - ghostMinY) * (1 + S_STRETCH * a)
 		em:SetPosition(v.id, Vector3.new(x, y, v.z))
 	end
 end
 
-local RISE = 0.34 -- вся анимация: коротко, иначе на скорости её не увидеть
-local RISE_HEIGHT = 26
+-- ПОДЪЁМ МЕДЛЕННЫЙ И РОВНЫЙ (просьба юзера «он должен подниматься медленно»). Было
+-- 0.34с с разгоном a*a — на такой скорости извив просто не успевал прочитаться.
+local RISE = 1.2
+local RISE_HEIGHT = 20
+local PATH_WAVES = 1.5 -- змейка самой траектории: столько полуволн вбок за подъём
+local PATH_AMP = 1.4 -- в studs, вбок от «дома»
 
 -- ПРЕВРАЩЕНИЕ ЧЕРЕПА В СТРУЙКУ. Запускается НА ПОДЛЁТЕ (цикл парения ниже), а не по
 -- факту прохождения: на 60+ studs/с пройденный чекпоинт оказывается за спиной за
@@ -582,7 +599,20 @@ local function collectSkull(index: number)
 
 	ghost.Color = SKULL_COLOR
 	ghost.Transparency = SKULL_BASE_ALPHA
+	-- РАЗМЕР БЕРЁМ У ТОГО ЧЕРЕПА, КОГО ПОДМЕНЯЕМ (2026-08-09, юзер: «при подъезде к
+	-- черепу пропадает сияние»). Оно не пропадало — призрак выходил базового размера,
+	-- тогда как настоящий череп у чекпоинта раздут угловым масштабом (на 30 studs это
+	-- почти вдвое). Подмена вдвое меньшим силуэтом и читалась как «сияние исчезло».
+	ghost.Size = ghostBaseSize * model:GetScale()
 	warpGhost(0)
+
+	-- Вбок змейка идёт ПОПЕРЁК ВЗГЛЯДА, иначе с половины ракурсов она уходит «в экран»
+	-- и читается прямой. Ось берём один раз на старте: если пересчитывать её каждый
+	-- кадр, поворот машины дёргал бы траекторию.
+	local camAtStart = workspace.CurrentCamera
+	local side = camAtStart and camAtStart.CFrame.RightVector or Vector3.xAxis
+	side = Vector3.new(side.X, 0, side.Z)
+	side = side.Magnitude > 1e-3 and side.Unit or Vector3.xAxis
 
 	task.spawn(function()
 		local t0 = os.clock()
@@ -592,7 +622,8 @@ local function collectSkull(index: number)
 				break
 			end
 			warpGhost(a)
-			local pos = home.Position + Vector3.new(0, RISE_HEIGHT * a * a, 0)
+			local sway = math.sin(a * math.pi * PATH_WAVES * 2) * PATH_AMP
+			local pos = home.Position + Vector3.new(0, RISE_HEIGHT * a, 0) + side * sway
 			-- БЕЗ ЗАКРУТКИ (просьба юзера «без вращений»). Разворот к камере оставлен —
 			-- без него лента с половины ракурсов видна с торца и исчезает, — но он
 			-- ТОЛЬКО по горизонтали: цель взгляда берём на высоте самого черепа,
@@ -604,8 +635,10 @@ local function collectSkull(index: number)
 			else
 				ghost.CFrame = CFrame.new(pos)
 			end
-			-- гаснет не сразу: сначала видно, КАК он тянется, и только к концу исчезает
-			ghost.Transparency = SKULL_BASE_ALPHA + (1 - SKULL_BASE_ALPHA) * a * a
+			-- ГАСНЕТ ТОЛЬКО В ПОСЛЕДНЕЙ ТРЕТИ. При прежнем a*a на длинном подъёме череп
+			-- тускнел уже с середины, и извив досматривался вполсилы.
+			local fade = math.max(0, (a - 0.65) / 0.35)
+			ghost.Transparency = SKULL_BASE_ALPHA + (1 - SKULL_BASE_ALPHA) * fade * fade
 			task.wait()
 		end
 		ghost.Transparency = 1
