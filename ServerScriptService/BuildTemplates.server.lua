@@ -113,9 +113,14 @@ local _, _ = spawnBuggy, alignVehicle -- функции сохранены, но
 -- // 4. Шевроны направления на старте --------------------------------------------
 -- Неоновые стрелки на полотне сразу за стартовой чертой: с места старта
 -- не очевидно, в какую сторону восьмёрки ехать к первому чекпоинту.
-local function roadY(x: number, z: number): number
-	local result = workspace:Raycast(Vector3.new(x, 50, z), Vector3.new(0, -100, 0))
-	return result and result.Position.Y or 2
+-- ТОЛЬКО ПО ТЕРРЕЙНУ и nil при промахе. Раньше луч бил по всему подряд и на промахе
+-- возвращал 2 — «дно» из Map.GroundTop. Именно это и закапывало стрелки, см. ниже.
+local function roadY(x: number, z: number): number?
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { workspace.Terrain }
+	local result = workspace:Raycast(Vector3.new(x, 200, z), Vector3.new(0, -400, 0), params)
+	return result and result.Position.Y or nil
 end
 
 local arrowFolder = Instance.new("Folder")
@@ -123,25 +128,52 @@ arrowFolder.Name = "StartArrows"
 arrowFolder.Parent = workspace
 
 local sideDir = Vector3.new(-startDir.Z, 0, startDir.X) -- перпендикуляр к трассе
-for i = 1, 3 do
-	local flat = Vector3.new(startPos.X, 0, startPos.Y) + startDir * (10 + i * 12)
-	local tip = Vector3.new(flat.X, roadY(flat.X, flat.Z) + 0.15, flat.Z)
-	for _, side in {-1, 1} do
-		local wing = Instance.new("Part")
-		wing.Name = "StartChevron"
-		wing.Size = Vector3.new(1.6, 0.2, 7)
-		wing.Material = Enum.Material.Neon
-		wing.Color = Color3.fromRGB(110, 255, 170) -- в цвет маяков-чекпоинтов
-		wing.Transparency = 0.15
-		wing.Anchored = true
-		wing.CanCollide = false
-		wing.CanQuery = false
-		wing.CanTouch = false
-		-- крыло шеврона: от вершины назад и вбок под 45°
-		local tail = tip - startDir * 5 + sideDir * (side * 5)
-		wing.CFrame = CFrame.lookAt((tip + tail) / 2, tip)
-		wing.Parent = arrowFolder
-	end
-end
 
-print("[BuildTemplates] Шаблоны созданы, мавзолей и стрелки старта размещены.")
+-- СТРЕЛКИ СТАВИМ ПОСЛЕ ТОГО, КАК ПОЯВИТСЯ ПОЛОТНО (2026-08-09, юзер: «стрелок вообще
+-- нет»). Они были на месте — все шесть, неоновые, — но ПОД ЗЕМЛЁЙ: верх на Y 2.25 при
+-- полотне на Y 6.0. Причина в порядке запуска серверных скриптов: он не определён, и
+-- BuildTemplates успевал промерить землю раньше, чем MapBuilder красил террейн. Луч
+-- уходил в пустоту, срабатывало запасное значение — и шевроны ложились на дно карты.
+-- ЖДЁМ ИМЕННО ФЛАГ workspace.MapReady, а не «попадания луча». Попадание — негодный
+-- признак: базовая плита земли (Map.GroundTop = 2) лежит там с самого начала, луч
+-- натыкается на неё сразу, и стрелки всё равно ложились на Y≈2 при полотне на Y=6.
+-- Флаг ставит MapBuilder последней строкой, когда дорога уже поднята.
+task.spawn(function()
+	local deadline = os.clock() + 60
+	while not workspace:GetAttribute("MapReady") and os.clock() < deadline do
+		task.wait(0.25)
+	end
+	if not workspace:GetAttribute("MapReady") then
+		warn("[BuildTemplates] MapBuilder не отчитался о готовности — стрелки старта не размещены")
+		return
+	end
+
+	for i = 1, 3 do
+		local flat = Vector3.new(startPos.X, 0, startPos.Y) + startDir * (10 + i * 12)
+		-- 0.3 над поверхностью, а не 0.15: деталь толщиной 0.2 лежит плашмя, и при
+		-- меньшем зазоре её нижняя грань цепляет террейн и мерцает z-файтингом.
+		local ground = roadY(flat.X, flat.Z)
+		if ground then
+			local tip = Vector3.new(flat.X, ground + 0.3, flat.Z)
+			for _, side in { -1, 1 } do
+				local wing = Instance.new("Part")
+				wing.Name = "StartChevron"
+				wing.Size = Vector3.new(1.6, 0.2, 7)
+				wing.Material = Enum.Material.Neon
+				wing.Color = Color3.fromRGB(110, 255, 170) -- в цвет маяков-чекпоинтов
+				wing.Transparency = 0.15
+				wing.Anchored = true
+				wing.CanCollide = false
+				wing.CanQuery = false
+				wing.CanTouch = false
+				-- крыло шеврона: от вершины назад и вбок под 45°
+				local tail = tip - startDir * 5 + sideDir * (side * 5)
+				wing.CFrame = CFrame.lookAt((tip + tail) / 2, tip)
+				wing.Parent = arrowFolder
+			end
+		end
+	end
+	print("[BuildTemplates] стрелки старта размещены по полотну.")
+end)
+
+print("[BuildTemplates] Шаблоны созданы, мавзолей размещён (стрелки — отдельной строкой, они ждут полотна).")
