@@ -589,13 +589,27 @@ end
 -- фигурой, то есть двигался как вырезанная из картона змейка. Теперь фаза едет со
 -- временем (S_WAVE_SPEED) — гребни бегут снизу вверх по телу, и череп именно
 -- извивается. Плюс сама траектория идёт синусоидой вбок (PATH_*), а не по прямой.
-local S_WAVES = 2 -- изгибов, укладывающихся по длине тела одновременно
-local S_AMP = 0.42 -- размах изгиба в долях ширины черепа
-local S_STRETCH = 1.5 -- во столько раз череп вытягивается по высоте к концу улёта
-local S_NARROW = 0.4 -- и сужается по ширине: получается змейка, а не блин
--- 0.8, а не прежние 2.5 (юзер: «очень быстро извивается»): за подъём волна проходит по
--- телу меньше одного раза — это читается как ленивое движение змеи, а не как дрожь.
-local S_WAVE_SPEED = 0.8
+-- ВСЕ ПАРАМЕТРЫ ЗМЕЙКИ В ОДНОЙ ТАБЛИЦЕ, А НЕ КОНСТАНТАМИ. Подобрать их вслепую нельзя:
+-- эффект длится секунду, я его через свой стенд ни разу не увидел, и три захода правок
+-- ушли в пустоту. Таблицу крутит подкрутка (NeonTune, F6) прямо в плей.
+local SNAKE = {
+	waves = 2, -- изгибов, укладывающихся по длине тела одновременно
+	amp = 0.42, -- размах изгиба в долях ширины черепа
+	stretch = 1.5, -- во столько раз череп вытягивается по высоте к концу улёта
+	narrow = 0.4, -- и сужается по ширине: получается змейка, а не блин
+	-- 0 = ВОЛНА ПО ТЕЛУ НЕ БЕЖИТ (уточнение юзера: «должно быть поступательное движение
+	-- вверх по СТАТИЧНОЙ синусоиде»). Синусоида задана в пространстве и не шевелится, а
+	-- череп просто едет по ней вверх — сама траектория и рисует змейку (pathWaves/
+	-- pathAmps). Бегущая волна делала обратное: тело извивалось на месте, и движение
+	-- читалось как дрожь. Поднять выше нуля — вернуть прежнее поведение.
+	waveSpeed = 0,
+	rise = 1.2, -- секунд на всю анимацию
+	heights = 9, -- на столько СОБСТВЕННЫХ высот черепа поднимается
+	-- ЭТИ ДВЕ И ЕСТЬ САМА СИНУСОИДА, по которой череп едет вверх. Раньше они были
+	-- добавкой к извиву тела, теперь — главное движение, поэтому размах крупнее.
+	pathWaves = 2, -- полных волн вбок за подъём
+	pathAmps = 2.5, -- размах вбок в собственных ширинах черепа
+}
 
 local function warpGhost(a: number)
 	local verts, em = ghostVerts, ghostMesh
@@ -604,30 +618,19 @@ local function warpGhost(a: number)
 	end
 	-- Размах набирается за первую пятую часть пути, дальше держится: иначе в начале
 	-- череп ещё «доскладывается», и извив читается только к середине.
-	local amp = S_AMP * math.min(1, a * 5)
-	local phase = a * S_WAVE_SPEED * math.pi * 2
+	local amp = SNAKE.amp * math.min(1, a * 5)
+	local phase = a * SNAKE.waveSpeed * math.pi * 2
 	local w = currentStroke / SKULL_WIDTH -- призрак наследует текущую толщину линии
 	for _, v in verts do
 		local bx, by = vertexBase(v, w)
 		local t = (by - ghostMinY) / ghostSpanY -- 0 внизу черепа, 1 наверху
-		local bend = math.sin(t * math.pi * 2 * S_WAVES - phase)
-		local x = bx * (1 - S_NARROW * a) + bend * amp
-		local y = ghostMinY + (by - ghostMinY) * (1 + S_STRETCH * a)
+		local bend = math.sin(t * math.pi * 2 * SNAKE.waves - phase)
+		local x = bx * (1 - SNAKE.narrow * a) + bend * amp
+		local y = ghostMinY + (by - ghostMinY) * (1 + SNAKE.stretch * a)
 		em:SetPosition(v.id, Vector3.new(x, y, v.z))
 	end
 end
 
--- ПОДЪЁМ МЕДЛЕННЫЙ И РОВНЫЙ (просьба юзера «он должен подниматься медленно»). Было
--- 0.34с с разгоном a*a — на такой скорости извив просто не успевал прочитаться.
-local RISE = 1.2
--- ПОДЪЁМ МЕРЯЕМ В РОСТАХ ЧЕРЕПА, А НЕ В STUDS (юзер: «теперь совсем не поднимается
--- вверх практически»). Двадцать studs — это много у базового черепа и почти ничего у
--- того, что раздут угловым масштабом вдвое-втрое: на глаз выходило, что он топчется на
--- месте. Теперь высота считается от фактического размера призрака, и подъём выглядит
--- одинаково с любой дистанции.
-local RISE_HEIGHTS = 9 -- во столько собственных высот поднимается череп
-local PATH_WAVES = 1.5 -- змейка самой траектории: столько полуволн вбок за подъём
-local PATH_AMPS = 0.9 -- размах вбок, тоже в собственных ширинах черепа
 
 -- ПРЕВРАЩЕНИЕ ЧЕРЕПА В СТРУЙКУ. Запускается НА ПОДЛЁТЕ (цикл парения ниже), а не по
 -- факту прохождения: на 60+ studs/с пройденный чекпоинт оказывается за спиной за
@@ -658,7 +661,7 @@ local function collectSkull(index: number)
 	local ghost = ensureGhost()
 	if not ghost then
 		-- меша не досталось (бюджет) — улёта не будет, но чекпоинт всё равно засчитан
-		task.delay(RISE, function()
+		task.delay(SNAKE.rise, function()
 			collecting[model] = nil
 			spent[model] = true
 		end)
@@ -688,13 +691,13 @@ local function collectSkull(index: number)
 	task.spawn(function()
 		local t0 = os.clock()
 		while true do
-			local a = (os.clock() - t0) / RISE
+			local a = (os.clock() - t0) / SNAKE.rise
 			if a >= 1 then
 				break
 			end
 			warpGhost(a)
-			local sway = math.sin(a * math.pi * PATH_WAVES * 2) * PATH_AMPS * ghostW
-			local pos = home.Position + Vector3.new(0, RISE_HEIGHTS * ghostH * a, 0) + side * sway
+			local sway = math.sin(a * math.pi * SNAKE.pathWaves * 2) * SNAKE.pathAmps * ghostW
+			local pos = home.Position + Vector3.new(0, SNAKE.heights * ghostH * a, 0) + side * sway
 			-- БЕЗ ЗАКРУТКИ (просьба юзера «без вращений»). Разворот к камере оставлен —
 			-- без него лента с половины ракурсов видна с торца и исчезает, — но он
 			-- ТОЛЬКО по горизонтали: цель взгляда берём на высоте самого черепа,
@@ -721,6 +724,58 @@ local function collectSkull(index: number)
 		spent[model] = true
 		setSkullFade(model, 1)
 	end)
+end
+
+-- ПРИНУДИТЕЛЬНЫЙ ЗАПУСК ДЛЯ ПОДКРУТКИ (только Studio). Обычный распад требует, чтобы
+-- чекпоинт был АКТИВНЫМ — а это выставляет только настоящий гоночный апдейт. Из-за
+-- этого эффект нельзя было посмотреть иначе как проехав заезд, и три захода правок
+-- ушли вслепую. Здесь все три сторожа снимаются руками, и эффект гоняется где угодно.
+local function forceCollect(): string
+	local folder = workspace:FindFirstChild("RaceMarkers")
+	if not folder then
+		return "RaceMarkers нет"
+	end
+	local char = player.Character
+	local cam = workspace.CurrentCamera
+	local from = (char and char.PrimaryPart and char.PrimaryPart.Position)
+		or (cam and cam.CFrame.Position)
+	if not from then
+		return "не от чего мерить расстояние"
+	end
+	local best: Model?, bestD, bestIdx = nil, math.huge, nil
+	for _, m in folder:GetChildren() do
+		if m:IsA("Model") and m.PrimaryPart then
+			local d = (m:GetPivot().Position - from).Magnitude
+			if d < bestD then
+				local idx = nil
+				for i = 1, 40 do
+					if m:GetAttribute("cp" .. i) == true then
+						idx = i
+						break
+					end
+				end
+				if idx then
+					best, bestD, bestIdx = m, d, idx
+				end
+			end
+		end
+	end
+	if not (best and bestIdx) then
+		return "поблизости нет черепа с меткой cpN"
+	end
+	transformed[bestIdx] = nil -- «уже распадался в этом заходе»
+	collecting[best] = nil -- «сейчас летит»
+	spent[best] = nil -- «собран, ждём отъезда»
+	collectSkull(bestIdx)
+	return string.format("запущен на %s, %.0f studs", (best :: Model).Name, bestD)
+end
+
+if RunService:IsStudio() then
+	local tune = _G.__SkullTune
+	if tune then
+		tune.snake = SNAKE -- таблица живая: подкрутка меняет поля прямо во время анимации
+		tune.playCollect = forceCollect
+	end
 end
 
 -- Подсветка СВОЕГО следующего чекпоинта — локально, у каждого игрока своя

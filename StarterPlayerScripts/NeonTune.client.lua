@@ -255,9 +255,36 @@ end, function(v)
 	end
 end)
 
-local valuesLabel = makeLabel(7, 52, 14, 0)
-local hintsLabel = makeLabel(8, 86, 12, 0.45)
+-- ПАРАМЕТРЫ ЗМЕЙКИ. Эффект длится секунду, и вслепую его не подобрать — три захода
+-- правок ушли впустую именно поэтому. Таблица SNAKE живая: значения читаются каждый
+-- кадр анимации, так что ползунок двигает даже уже летящий череп.
+local function snake(): any
+	local tune = skullTune()
+	return tune and tune.snake
+end
+
+local function snakeSlider(order: number, name: string, field: string, minV: number, maxV: number)
+	makeSlider(order, name, function()
+		local s = snake()
+		local v = s and s[field] or minV
+		return (v - minV) / (maxV - minV) * 255
+	end, function(v)
+		local s = snake()
+		if s then
+			s[field] = minV + (v / 255) * (maxV - minV)
+		end
+	end)
+end
+
+snakeSlider(7, "Длит", "rise", 0.3, 5) -- секунд на весь улёт
+snakeSlider(8, "Волна", "waveSpeed", 0, 3) -- как быстро изгиб бежит по телу
+snakeSlider(9, "Изгиб", "amp", 0, 1.2) -- размах изгиба
+snakeSlider(10, "Высота", "heights", 1, 20) -- на сколько своих ростов поднимается
+
+local valuesLabel = makeLabel(11, 52, 14, 0)
+local hintsLabel = makeLabel(12, 100, 12, 0.45)
 hintsLabel.Text = table.concat({
+	"ENTER — прогнать улёт на ближайшем черепе",
 	"-  =   притушить / поднять все три канала",
 	";  '   Bloom Intensity (общий на сцену)",
 	",  .   Bloom Threshold",
@@ -265,7 +292,7 @@ hintsLabel.Text = table.concat({
 	"\\ — сброс · P — числа в Output",
 }, "\n")
 
-local skullsLabel = makeLabel(9, 16, 12, 0.45)
+local skullsLabel = makeLabel(13, 16, 12, 0.45)
 
 -- // Применение --------------------------------------------------------------
 local function currentColor(): Color3
@@ -343,6 +370,12 @@ local function printNumbers()
 	print(string.format("[NeonTune] SKULL_COLOR = Color3.fromRGB(%d, %d, %d)",
 		math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5)))
 	print(string.format("[NeonTune] SKULL_STROKE = %.2f", strokeValue))
+	local s = snake()
+	if s then
+		print(string.format(
+			"[NeonTune] SNAKE: rise=%.2f waveSpeed=%.2f amp=%.2f heights=%.1f stretch=%.2f narrow=%.2f waves=%.1f pathWaves=%.1f pathAmps=%.2f",
+			s.rise, s.waveSpeed, s.amp, s.heights, s.stretch, s.narrow, s.waves, s.pathWaves, s.pathAmps))
+	end
 	if bloom then
 		print(string.format("[NeonTune] BloomIntensity = %.2f, Threshold = %.2f", bloom.Intensity, bloom.Threshold))
 	end
@@ -385,6 +418,16 @@ UserInputService.InputBegan:Connect(function(input, processed)
 			bloom.Intensity = baseIntensity
 			bloom.Threshold = baseThreshold
 		end
+	elseif key == Enum.KeyCode.Return or key == Enum.KeyCode.KeypadEnter then
+		local tune = skullTune()
+		if tune and tune.playCollect then
+			-- Ответ печатаем в Output: если череп не нашёлся, надо знать почему,
+			-- а не гадать «нажал и ничего».
+			print("[NeonTune] улёт: " .. tune.playCollect())
+		else
+			print("[NeonTune] UIController не отдал ручку запуска")
+		end
+		return
 	elseif key == Enum.KeyCode.M then
 		forceVisible = not forceVisible
 		if not forceVisible then
