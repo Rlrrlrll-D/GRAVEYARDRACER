@@ -263,6 +263,59 @@ local function snake(): any
 	return tune and tune.snake
 end
 
+-- // СТЕНД: эффект по кругу, вне гонки ---------------------------------------
+-- Юзер: «вообще я хочу увидеть эффект отдельно вне игры». И он прав: эффект длится
+-- секунду и срабатывает только у активного чекпоинта на ходу — рассмотреть его в
+-- заезде нельзя, а подбирать вслепую мы уже пробовали, ушло три захода впустую.
+-- Стенд паркует камеру у ближайшего черепа и перезапускает улёт, пока не выключишь.
+local standOn = false
+local standCamera: Camera? = nil
+
+local function nearestSkull(): Model?
+	local folder = workspace:FindFirstChild("RaceMarkers")
+	if not folder then
+		return nil
+	end
+	local cam = workspace.CurrentCamera
+	local from = cam and cam.CFrame.Position or Vector3.zero
+	local best, bestD = nil, math.huge
+	for _, m in folder:GetChildren() do
+		if m:IsA("Model") and m.PrimaryPart then
+			local d = (m:GetPivot().Position - from).Magnitude
+			if d < bestD then
+				best, bestD = m, d
+			end
+		end
+	end
+	return best
+end
+
+local function standLoop()
+	task.spawn(function()
+		while standOn do
+			local tune = skullTune()
+			local m = nearestSkull()
+			if tune and tune.playCollect and m then
+				-- камеру держим сами: смотрим на череп сбоку и с запасом вверх, чтобы
+				-- весь подъём помещался в кадр
+				local home = m:GetPivot().Position
+				local s = snake()
+				local up = (s and s.heights or 9) * 2.5
+				local cam = workspace.CurrentCamera
+				if cam then
+					standCamera = cam
+					cam.CameraType = Enum.CameraType.Scriptable
+					cam.FieldOfView = 55
+					cam.CFrame = CFrame.lookAt(home + Vector3.new(up * 0.9, up * 0.55, up * 0.9), home + Vector3.new(0, up * 0.45, 0))
+				end
+				tune.playCollect()
+			end
+			local s = snake()
+			task.wait((s and s.rise or 1.2) + 0.5) -- пауза между прогонами
+		end
+	end)
+end
+
 local function snakeSlider(order: number, name: string, field: string, minV: number, maxV: number)
 	makeSlider(order, name, function()
 		local s = snake()
@@ -284,7 +337,8 @@ snakeSlider(10, "Высота", "heights", 1, 20) -- на сколько сво�
 local valuesLabel = makeLabel(11, 52, 14, 0)
 local hintsLabel = makeLabel(12, 100, 12, 0.45)
 hintsLabel.Text = table.concat({
-	"ENTER — прогнать улёт на ближайшем черепе",
+	"O — СТЕНД: эффект по кругу, камера сама",
+	"ENTER — прогнать улёт один раз",
 	"-  =   притушить / поднять все три канала",
 	";  '   Bloom Intensity (общий на сцену)",
 	",  .   Bloom Threshold",
@@ -418,6 +472,26 @@ UserInputService.InputBegan:Connect(function(input, processed)
 			bloom.Intensity = baseIntensity
 			bloom.Threshold = baseThreshold
 		end
+	elseif key == Enum.KeyCode.O then
+		standOn = not standOn
+		if standOn then
+			-- на время стенда прячем всё лишнее: смотрим только на эффект
+			for _, g in playerGui:GetChildren() do
+				if g:IsA("LayerCollector") and g ~= gui then
+					g.Enabled = false
+				end
+			end
+			game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
+			standLoop()
+			print("[NeonTune] стенд ВКЛ — эффект по кругу. O — выключить")
+		else
+			local cam = standCamera or workspace.CurrentCamera
+			if cam then
+				cam.CameraType = Enum.CameraType.Custom -- вернуть камеру игроку
+			end
+			print("[NeonTune] стенд выкл")
+		end
+		return
 	elseif key == Enum.KeyCode.Return or key == Enum.KeyCode.KeypadEnter then
 		local tune = skullTune()
 		if tune and tune.playCollect then
