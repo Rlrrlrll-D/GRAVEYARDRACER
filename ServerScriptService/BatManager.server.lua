@@ -100,7 +100,11 @@ if #zones > 0 then
 										local origin = pos
 											+ seat.CFrame.LookVector * ZONE_AHEAD
 											+ Vector3.new(0, ZONE_UP, 0)
-										local count = z.Kind == "swarm" and math.random(26, 34) or math.random(2, 4)
+										-- Стая крупнее прежних 26-34 (2026-08-09, юзер: «побольше»).
+										-- ПОТОЛОК ДЕРЖИТ КЛИЕНТ: BatFX.POOL_SIZE = 72. Просить
+										-- больше пула бессмысленно — take() отдаст nil, и лишние
+										-- мыши не появятся молча, без ошибки.
+										local count = z.Kind == "swarm" and math.random(40, 52) or math.random(2, 4)
 										batScare:FireClient(plr, origin, count, z.Kind)
 										if z.Kind == "swarm" then
 											cameraShake:FireClient(plr, 0.55, 0.3)
