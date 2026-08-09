@@ -271,11 +271,12 @@ local SKULL_STROKE = 0.18 -- толщина линии в studs — НЕ ТРО�
 local plateTemplate: BasePart? = nil
 local plateTried = false
 
-local function buildPlateTemplate(): BasePart?
-	if plateTried then
-		return plateTemplate
-	end
-	plateTried = true
+-- Вершина ленты со СВОИМИ исходными координатами. Нужна тем, кто потом гнёт меш:
+-- деформацию считаем всегда от оригинала, а не от предыдущего кадра, иначе ошибка
+-- накапливается и череп «уползает».
+type RibbonVertex = { id: number, x: number, y: number, z: number }
+
+local function buildRibbon(): (BasePart?, any?, { RibbonVertex }?)
 	local okShape, shape = pcall(function()
 		return require(ReplicatedStorage:WaitForChild("SkullOutline", 10))
 	end)
@@ -298,6 +299,7 @@ local function buildPlateTemplate(): BasePart?
 		warn("[UIController] EditableMesh не выдан — бюджет памяти исчерпан")
 		return nil
 	end
+	local verts: { RibbonVertex } = {}
 	local ok, part = pcall(function()
 		-- Лента по каждому контуру: в каждой точке берём нормаль к линии (касательная,
 		-- повёрнутая на 90°) и отступаем на полтолщины в обе стороны — получаются две
@@ -327,6 +329,10 @@ local function buildPlateTemplate(): BasePart?
 				outerF[k] = em:AddVertex(Vector3.new(ox, oy, halfT))
 				innerB[k] = em:AddVertex(Vector3.new(ix, iy, -halfT))
 				outerB[k] = em:AddVertex(Vector3.new(ox, oy, -halfT))
+				table.insert(verts, { id = innerF[k], x = ix, y = iy, z = halfT })
+				table.insert(verts, { id = outerF[k], x = ox, y = oy, z = halfT })
+				table.insert(verts, { id = innerB[k], x = ix, y = iy, z = -halfT })
+				table.insert(verts, { id = outerB[k], x = ox, y = oy, z = -halfT })
 			end
 			for k = 1, n do
 				local j = k % n + 1
@@ -356,6 +362,15 @@ local function buildPlateTemplate(): BasePart?
 	plate.CanQuery = false
 	plate.CanTouch = false
 	plate.CastShadow = false
+	return plate, em, verts
+end
+
+local function buildPlateTemplate(): BasePart?
+	if plateTried then
+		return plateTemplate
+	end
+	plateTried = true
+	local plate = buildRibbon() -- меш держим живым: без него деталь не рисуется (см. выше)
 	plateTemplate = plate
 	return plate
 end
@@ -450,117 +465,155 @@ local function applySkullState(model: Model, active: boolean)
 	-- (дальний череп крупнее, чтобы линия на экране оставалась той же толщины).
 end
 
--- ПРЕВРАЩЕНИЕ ЧЕРЕПА В ДЫМ. Запускается НА ПОДЛЁТЕ (цикл парения ниже), а не по
+local transformed: { [number]: boolean } = {} -- этот чекпоинт уже распался в текущем заходе
+
+-- ПРИЗРАК УЛЁТА — СВОЙ МЕШ, А НЕ КЛОН ЧЕРЕПА. Клон ссылался бы на ТОТ ЖЕ EditableMesh,
+-- что и все чекпоинты сразу: согнув его, мы согнули бы каждый череп на карте. Поэтому
+-- лента собирается второй раз, отдельно. Он ОДИН на клиента и переиспользуется: за раз
+-- распадается только один череп (сторожат transformed/collecting), а бюджет EditableMesh
+-- невелик (~8 на сессию) — плодить по мешу на чекпоинт нельзя.
+local ghostPart: BasePart? = nil
+local ghostMesh: any = nil
+local ghostVerts: { RibbonVertex }? = nil
+local ghostMinY, ghostSpanY = 0, 1
+local ghostTried = false
+
+local function ensureGhost(): BasePart?
+	if ghostTried then
+		return ghostPart
+	end
+	ghostTried = true
+	local part, em, verts = buildRibbon()
+	if not (part and em and verts) then
+		return nil
+	end
+	part.Name = "GhostSkull"
+	part.Size = part.Size * SKULL_WIDTH
+	part.Material = Enum.Material.Neon
+	part.Color = SKULL_COLOR
+	part.Transparency = 1 -- припаркован невидимым до первого сбора
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Parent = workspace -- НЕ в RaceMarkers: туда лезет цикл парения
+
+	local minY, maxY = math.huge, -math.huge
+	for _, v in verts do
+		if v.y < minY then
+			minY = v.y
+		end
+		if v.y > maxY then
+			maxY = v.y
+		end
+	end
+	ghostPart, ghostMesh, ghostVerts = part, em, verts
+	ghostMinY = minY
+	ghostSpanY = math.max(maxY - minY, 1e-6)
+	return part
+end
+
+-- S-ИЗГИБ ПО САМОЙ ФОРМЕ, А НЕ ПО ТРАЕКТОРИИ (2026-08-09, юзер прислал референс
+-- D:\VECTOR\skull_S.ai). Раньше череп летел по синусоиде и закручивался, оставаясь
+-- черепом, — то есть искажения формы не было вовсе. Теперь гнётся сама лента: смещение
+-- по X считается от высоты точки, поэтому верх уходит в одну сторону, низ в другую, а
+-- глазницы и зубы вытягиваются вдоль дуги ровно как на референсе.
+--
+-- Деформацию ВСЕГДА считаем от исходных координат вершины (RibbonVertex.x/y), а не от
+-- предыдущего кадра: иначе ошибка накапливается и череп уползает от «дома».
+local S_WAVES = 1 -- одна полная S на всю высоту черепа
+local S_AMP = 0.5 -- размах изгиба в долях ширины черепа
+local S_STRETCH = 1.8 -- во столько раз череп вытягивается по высоте к концу улёта
+local S_NARROW = 0.5 -- и во столько же сужается по ширине: получается струйка
+
+local function warpGhost(a: number)
+	local verts, em = ghostVerts, ghostMesh
+	if not (verts and em) then
+		return
+	end
+	for _, v in verts do
+		local t = (v.y - ghostMinY) / ghostSpanY -- 0 внизу черепа, 1 наверху
+		local bend = math.sin(t * math.pi * 2 * S_WAVES - math.pi * 0.5)
+		local x = v.x * (1 - S_NARROW * a) + bend * S_AMP * a
+		local y = ghostMinY + (v.y - ghostMinY) * (1 + S_STRETCH * a)
+		em:SetPosition(v.id, Vector3.new(x, y, v.z))
+	end
+end
+
+local RISE = 0.34 -- вся анимация: коротко, иначе на скорости её не увидеть
+local RISE_HEIGHT = 26
+
+-- ПРЕВРАЩЕНИЕ ЧЕРЕПА В СТРУЙКУ. Запускается НА ПОДЛЁТЕ (цикл парения ниже), а не по
 -- факту прохождения: на 60+ studs/с пройденный чекпоинт оказывается за спиной за
--- доли секунды, и всю анимацию игрок физически не видел. Теперь череп распадается,
--- пока он ещё в кадре, и машина проезжает сквозь облако. Проход по чекпоинту
+-- доли секунды, и всю анимацию игрок физически не видел. Проход по чекпоинту
 -- остаётся страховочным триггером — если мимо черепа прошли по широкой дуге.
 -- Для орба — no-op.
-local transformed: { [number]: boolean } = {} -- этот чекпоинт уже распался в текущем заходе
 local function collectSkull(index: number)
-	if transformed[index] then return end -- дважды один череп не растворяем
+	if transformed[index] then
+		return -- дважды один череп не растворяем
+	end
 	local marker = findMarker(index)
-	if not (marker and marker:IsA("Model")) then return end
+	if not (marker and marker:IsA("Model")) then
+		return
+	end
 	local model = marker :: Model
-	if collecting[model] then return end
-	local anchor = model.PrimaryPart
-	if not anchor then return end
+	if collecting[model] then
+		return
+	end
+	if not model.PrimaryPart then
+		return
+	end
 	transformed[index] = true
 	local home = skullHome[model] or model:GetPivot()
 
-	-- «Улёт» анимируем на КЛИЕНТ-ЛОКАЛЬНОМ КЛОНЕ, а общий череп прячем локально.
-	-- Общий череп — сетевой инстанс: в Team Test окно-хост = сервер, его парение
-	-- реплицируется и перебивало твин улёта у второго игрока (у него анимация «не
-	-- срабатывала»). Клон сервер не знает — его никто не перебьёт; у каждого одинаково.
-	collecting[model] = true -- локальное парение общий череп не трогает (applySkullState тоже пропустит)
-	setSkullFade(model, 1) -- спрятать общий череп локально на время улёта
+	collecting[model] = true -- парение общий череп больше не трогает
+	setSkullFade(model, 1) -- и он спрятан локально на время улёта
 
-	local ghost = model:Clone()
-	for _, d in ghost:GetDescendants() do
-		if d:IsA("LuaSourceContainer") then
-			d:Destroy() -- клон чисто визуальный, скрипты не нужны
-		end
-	end
-	ghost.Name = "GhostSkull"
-	ghost:PivotTo(home)
-	ghost.Parent = workspace -- вне RaceMarkers → цикл парения его не трогает; клиент-локально
-	local gAnchor = ghost.PrimaryPart
-
-	-- Юзер: «нужно, чтобы S-образное искажение читалось СРАЗУ ПО ФОРМЕ ЧЕРЕПА и
-	-- проходило быстрее». Было 0.6с и равномерное сжатие клона: змейку рисовала одна
-	-- траектория, а сам силуэт до конца оставался черепом — то есть искажения по форме
-	-- не было вовсе, и за 0.6с на скорости его читать было некогда.
-	local RISE = 0.34
-
-	-- ШАГ ВОЛНЫ (2026-08-09, юзер: «S-образный путь нужно сделать с меньшим шагом волн
-	-- в разы, чтобы было читаемое искривление»). Была РОВНО ОДНА синусоида на весь
-	-- подъём — на такой длине она читается почти прямой линией с лёгким наклоном, а не
-	-- змейкой. Теперь три: длина волны втрое короче, изгиб виден как изгиб.
-	-- Амплитуда поднята с 0.85 до 1.7, потому что она отмеряется от ширины черепа, а
-	-- череп только что уменьшили вдвое (SKULL_WIDTH 4 → 2) — без этого змейка сузилась
-	-- бы вдвое вместе с ним. 1.7 держит РАЗМАХ В STUDS примерно прежним.
-	local SWAY_WAVES = 3
-	local SWAY_AMPLITUDE = 1.7
-
-	-- S-ОБРАЗНЫЙ УЛЁТ + РАСПАД. Прямой твин Position змейку не даёт — ведём вручную:
-	-- вверх с разгоном, поперёк — одна полная синусоида (вправо-назад-влево-назад).
-	-- Поперечную ось берём от КАМЕРЫ, иначе с половины ракурсов змейка уходит «в
-	-- экран» и читается как прямая. Никаких частиц: любой размытый спрайт на этой
-	-- сцене читается как пятно, превращается САМ ЧЕРЕП.
-	local gPlate = ghost:FindFirstChild("Plate")
-	local baseSize = gPlate and gPlate:IsA("BasePart") and gPlate.Size or nil
-
-	if gAnchor then
-		local cam = workspace.CurrentCamera
-		local side = cam and cam.CFrame.RightVector or Vector3.xAxis
-		side = Vector3.new(side.X, 0, side.Z)
-		side = side.Magnitude > 1e-3 and side.Unit or Vector3.xAxis
-		local twist = (math.random() < 0.5 and -1 or 1) * 70 -- градусы, закрутка плашки
-		local width = baseSize and baseSize.X or 4
-		task.spawn(function()
-			local t0 = os.clock()
-			while ghost.Parent do
-				local a = (os.clock() - t0) / RISE
-				if a >= 1 then break end
-				local up = 26 * a * a -- разгон вверх, как прежний Quad In
-				-- Амплитуду ведём ОТ ШИРИНЫ ЧЕРЕПА и НЕ гасим к концу: змейка должна
-				-- быть видна на всей дистанции, а не затухать на второй половине.
-				local sway = math.sin(a * math.pi * 2 * SWAY_WAVES) * width * SWAY_AMPLITUDE
-				ghost:PivotTo(home + Vector3.new(0, up, 0) + side * sway)
-				-- ИСКАЖЕНИЕ ПО ФОРМЕ: череп не просто уменьшается, а вытягивается в
-				-- струйку — ширина сходится почти в ноль, высота растёт втрое. Именно
-				-- это делает S читаемым силуэтом, а не только траекторией.
-				if gPlate and baseSize then
-					gPlate.Size = Vector3.new(
-						math.max(0.05, baseSize.X * (1 - 0.88 * a)),
-						baseSize.Y * (1 + 2.1 * a),
-						baseSize.Z
-					)
-				end
-				aimPlate(ghost, twist * a) -- лицом к камере и с закруткой
-				task.wait()
-			end
+	local ghost = ensureGhost()
+	if not ghost then
+		-- меша не досталось (бюджет) — улёта не будет, но чекпоинт всё равно засчитан
+		task.delay(RISE, function()
+			collecting[model] = nil
+			spent[model] = true
 		end)
+		return
 	end
 
-	-- гаснет не сразу: сначала видно, КАК он тянется, и только к концу исчезает
-	if gPlate and gPlate:IsA("BasePart") then
-		-- ОБЯЗАТЕЛЬНО вернуть плотность: клон снят уже ПОСЛЕ того, как общий череп
-		-- спрятан (setSkullFade(model, 1)), то есть родился полностью прозрачным —
-		-- и весь улёт шёл из невидимости в невидимость, юзер справедливо сказал
-		-- «анимации улёта нет». Стартуем с той же плотности, какой череп горел.
-		gPlate.Transparency = SKULL_BASE_ALPHA
-		TweenService:Create(gPlate, TweenInfo.new(RISE, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-			{ Transparency = 1 }):Play()
-	end
+	ghost.Color = SKULL_COLOR
+	ghost.Transparency = SKULL_BASE_ALPHA
+	warpGhost(0)
 
-	task.delay(RISE + 0.2, function()
-		ghost:Destroy()
+	task.spawn(function()
+		local t0 = os.clock()
+		while true do
+			local a = (os.clock() - t0) / RISE
+			if a >= 1 then
+				break
+			end
+			warpGhost(a)
+			local pos = home.Position + Vector3.new(0, RISE_HEIGHT * a * a, 0)
+			-- БЕЗ ЗАКРУТКИ (просьба юзера «без вращений»). Разворот к камере оставлен —
+			-- без него лента с половины ракурсов видна с торца и исчезает, — но он
+			-- ТОЛЬКО по горизонтали: цель взгляда берём на высоте самого черепа,
+			-- поэтому плашка стоит строго вертикально и не кренится.
+			local cam = workspace.CurrentCamera
+			if cam then
+				local eye = cam.CFrame.Position
+				ghost.CFrame = CFrame.lookAt(pos, Vector3.new(eye.X, pos.Y, eye.Z))
+			else
+				ghost.CFrame = CFrame.new(pos)
+			end
+			-- гаснет не сразу: сначала видно, КАК он тянется, и только к концу исчезает
+			ghost.Transparency = SKULL_BASE_ALPHA + (1 - SKULL_BASE_ALPHA) * a * a
+			task.wait()
+		end
+		ghost.Transparency = 1
+		warpGhost(0) -- вернуть ленту в исходную форму к следующему сбору
 		collecting[model] = nil
 		-- НЕ показываем сразу. Юзер: «после улёта я успеваю увидеть возвращённый
-		-- череп» — так и было: улёт кончался за 0.8с от триггера, то есть ровно у
-		-- чекпоинта, и череп вспыхивал прямо перед носом. Теперь он остаётся
-		-- спрятанным, а вернёт его цикл парения, когда игрок отъедет на RESTORE_DIST.
+		-- череп» — так и было: улёт кончался ровно у чекпоинта, и череп вспыхивал
+		-- прямо перед носом. Теперь его вернёт цикл парения, когда игрок отъедет.
 		spent[model] = true
 		setSkullFade(model, 1)
 	end)
