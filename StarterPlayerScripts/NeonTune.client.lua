@@ -337,6 +337,7 @@ snakeSlider(10, "Высота", "heights", 1, 20) -- на сколько сво�
 local valuesLabel = makeLabel(11, 52, 14, 0)
 local hintsLabel = makeLabel(12, 100, 12, 0.45)
 hintsLabel.Text = table.concat({
+	"I — матрица свечения (4 образца одного цвета)",
 	"O — СТЕНД: эффект по кругу, камера сама",
 	"ENTER — прогнать улёт один раз",
 	"-  =   притушить / поднять все три канала",
@@ -472,6 +473,66 @@ UserInputService.InputBegan:Connect(function(input, processed)
 			bloom.Intensity = baseIntensity
 			bloom.Threshold = baseThreshold
 		end
+	elseif key == Enum.KeyCode.I then
+		-- МАТРИЦА СВЕЧЕНИЯ. Вопрос «почему стрелка светится, а череп нет» я закрыть не
+		-- могу: BloomEffect не попадает в захваты экрана (авто-качество в нефокусном
+		-- окне Studio выбрасывает его из конвейера, уровень качества капабилити-локнут).
+		-- Значит смотреть должен ты. Четыре объекта, ОДИН цвет, меняется по одному
+		-- свойству за раз — какой из них не засветится, тот и виноват:
+		--   1 толстая полоса, прозрачность 0.15  (эталон: ровно стрелка старта)
+		--   2 толстая полоса, прозрачность 0     (проверяем прозрачность)
+		--   3 ТОНКАЯ полоса 0.18, обычный Part   (проверяем толщину)
+		--   4 плашка черепа из EditableMesh      (проверяем сам меш)
+		local COLOR = Color3.fromRGB(110, 255, 170)
+		local old = workspace:FindFirstChild("__GlowMatrix")
+		if old then
+			old:Destroy()
+			print("[NeonTune] матрица убрана")
+			return
+		end
+		local cam = workspace.CurrentCamera
+		if not cam then
+			return
+		end
+		local base = cam.CFrame.Position + cam.CFrame.LookVector * 22
+		local folder = Instance.new("Folder")
+		folder.Name = "__GlowMatrix"
+		folder.Parent = workspace
+		local right = cam.CFrame.RightVector
+		local function bar(off: number, thick: number, tr: number, name: string)
+			local p = Instance.new("Part")
+			p.Name = name
+			p.Size = Vector3.new(thick, 6, 0.2)
+			p.Material = Enum.Material.Neon
+			p.Color = COLOR
+			p.Transparency = tr
+			p.Anchored = true
+			p.CanCollide = false
+			p.CastShadow = false
+			p.CFrame = CFrame.lookAt(base + right * off, base + right * off - cam.CFrame.LookVector)
+			p.Parent = folder
+		end
+		bar(-7.5, 1.6, 0.15, "1_толстая_прозр015")
+		bar(-2.5, 1.6, 0.00, "2_толстая_прозр0")
+		bar(2.5, 0.18, 0.00, "3_ТОНКАЯ_обычный_Part")
+		local marks = workspace:FindFirstChild("RaceMarkers")
+		if marks then
+			for _, m in marks:GetChildren() do
+				local pl = m:IsA("Model") and m:FindFirstChild("Plate")
+				if pl and pl:IsA("BasePart") then
+					local c = pl:Clone()
+					c.Name = "4_МЕШ_черепа"
+					c.Color = COLOR
+					c.Transparency = 0
+					c.Anchored = true
+					c.CFrame = CFrame.new(base + right * 8)
+					c.Parent = folder
+					break
+				end
+			end
+		end
+		print("[NeonTune] матрица перед камерой: 1 толстая/0.15 · 2 толстая/0 · 3 ТОНКАЯ Part · 4 меш черепа. Цвет у всех 110,255,170. I — убрать")
+		return
 	elseif key == Enum.KeyCode.O then
 		standOn = not standOn
 		if standOn then
