@@ -318,6 +318,18 @@ end
 -- Крест — на точке камера-луча под курсором (стабильно под мышью), а не
 -- на луче от дула — иначе крест «плавал» бы при повороте турели.
 RunService.RenderStepped:Connect(function()
+	-- ДЕВ-ПАНЕЛЬ ЗАБИРАЕТ МЫШЬ СЕБЕ (атрибут ставит NeonTune, только в Studio). Без
+	-- этой уступки выходила драка каждый кадр: панель гасила прицел, турель ниже видела
+	-- «прицела нет», включала его заново и заодно прятала системный курсор — и так по
+	-- кругу. Снаружи это выглядело как «курсора нет» и «всё мигает». Сама турель при
+	-- этом продолжает целиться и стрелять, отключён только её захват курсора.
+	if player:GetAttribute("DevPanelOpen") then
+		if crossGui.Enabled then
+			crossGui.Enabled = false
+			UserInputService.MouseIconEnabled = true
+		end
+		return
+	end
 	local vehicle = findMyVehicle()
 	if not vehicle or not raceOnScreen() then
 		if crossGui.Enabled then

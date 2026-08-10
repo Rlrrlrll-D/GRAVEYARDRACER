@@ -75,7 +75,6 @@ local active = false
 -- На выходе возвращаем прозрачность: в лобби это верно само по себе, а в заезде
 -- UIController перекрывает наше значение ближайшим RaceUpdate (они идут каждые 0.4с).
 local forceVisible = false
-local cursorConns: { RBXScriptConnection }? = nil
 local r, g, b = CONFIG_COLOR.R * 255, CONFIG_COLOR.G * 255, CONFIG_COLOR.B * 255
 local bloom = Lighting:FindFirstChildOfClass("BloomEffect")
 local baseIntensity = bloom and bloom.Intensity or 1
@@ -538,35 +537,14 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		-- рисует свой крест — по ползункам им не попасть. Прежде я возвращал курсор раз
 		-- в полсекунды, и он мигал: турель гасила, я зажигал. Сторож ловит сам факт
 		-- гашения и возвращает стрелку в том же кадре, поэтому мигания нет.
-		cursorConns = cursorConns or {}
-		for _, c in cursorConns do
-			c:Disconnect()
-		end
-		table.clear(cursorConns)
-		if active then
-			UserInputService.MouseIconEnabled = true
-			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-			cursorConns[1] = UserInputService:GetPropertyChangedSignal("MouseIconEnabled"):Connect(function()
-				if active and not UserInputService.MouseIconEnabled then
-					UserInputService.MouseIconEnabled = true
-				end
-			end)
-			cursorConns[2] = UserInputService:GetPropertyChangedSignal("MouseBehavior"):Connect(function()
-				if active and UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
-					UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-				end
-			end)
-			local cross = playerGui:FindFirstChild("WeaponCrosshair")
-			if cross and cross:IsA("LayerCollector") then
-				local lc = cross :: LayerCollector
-				lc.Enabled = false
-				cursorConns[3] = lc:GetPropertyChangedSignal("Enabled"):Connect(function()
-					if active and lc.Enabled then
-						lc.Enabled = false
-					end
-				end)
-			end
-		end
+		-- УСТУПКА ВМЕСТО ДРАКИ. Прежде я гасил прицел турели сторожем — а турель гасит
+		-- системный курсор ровно в тот момент, когда ВКЛЮЧАЕТ прицел. Получался цикл:
+		-- я выключил прицел → турель следующим кадром включила его и спрятала курсор →
+		-- я снова выключил… Курсора не было вовсе. Теперь просто поднимаем флаг, а
+		-- TurretAimClient сам не трогает мышь, пока панель открыта.
+		player:SetAttribute("DevPanelOpen", active or nil)
+		UserInputService.MouseIconEnabled = true
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		if active then
 			bloom = Lighting:FindFirstChildOfClass("BloomEffect")
 			applyAll()
