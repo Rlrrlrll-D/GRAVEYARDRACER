@@ -274,7 +274,10 @@ local SKULL_COLOR = Color3.fromRGB(110, 255, 170)
 -- Иначе говоря: за «видно издалека» отвечает SKULL_STROKE, за габарит — SKULL_WIDTH,
 -- и трогать первый ради второго не нужно.
 local SKULL_WIDTH = 2 -- ширина черепа в studs (было 4)
-local SKULL_STROKE = 0.18 -- толщина линии в studs — НЕ ТРОГАТЬ ради размера, см. выше
+-- 0.08 подобрано юзером живьём (2026-08-10, ползунок «Толщ» в NeonTune) вместе с
+-- блюмом: Intensity 0.55, Threshold 1.35 — см. EnvironmentConfig/AtmosphereSetup. Линия
+-- стала вдвое тоньше прежней, а ореол вернулся за счёт блюма, а не за счёт цвета.
+local SKULL_STROKE = 0.08 -- толщина линии в studs — НЕ ТРОГАТЬ ради размера, см. выше
 local plateTemplate: BasePart? = nil
 local plateTried = false
 

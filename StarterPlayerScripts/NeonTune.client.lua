@@ -17,7 +17,10 @@
 --   - / =         притушить / поднять ВСЕ три канала разом на 5% — быстрый способ
 --                 менять яркость, не трогая оттенок
 --   ; / '         Bloom Intensity ∓0.05  (ОБЩИЙ на сцену: тянет и фары, и фонари)
---   , / .         Bloom Threshold ∓0.05  (порог: что вообще начинает светиться)
+--   9 / 0         Bloom Threshold ∓0.05  (порог: что вообще начинает светиться).
+--                 Не «,»/«.» — точку забирает система, до скрипта она не доходит.
+--   Z             выключить зомби: иначе стая доедает машину, пока смотришь
+--   O             стенд: улёт по кругу, камера сама
 --   \             сброс к тому, что стоит в конфиге
 --   P             напечатать итоговые числа в Output — оттуда копировать мне
 --
@@ -238,8 +241,8 @@ makeSlider(5, "B", function() return b end, function(v) b = v end)
 -- Верх 0.5, а не «побольше на всякий случай»: проверено живьём, что уже на 0.9 лента
 -- смыкается сама с собой и череп становится сплошным пятном — глазницы и промежутки
 -- между зубами затягивает. Полезный диапазон весь ниже, и ползунку нужна точность в нём.
-local STROKE_MIN, STROKE_MAX = 0.08, 0.5
-local strokeValue = 0.18
+local STROKE_MIN, STROKE_MAX = 0.04, 0.5
+local strokeValue = 0.08 -- то, что стоит в UIController после подбора юзером
 
 local function skullTune(): any
 	return _G.__SkullTune
@@ -356,12 +359,11 @@ local valuesLabel = makeLabel(11, 52, 14, 0)
 local hintsLabel = makeLabel(12, 100, 12, 0.45)
 hintsLabel.Text = table.concat({
 	"Z — выключить зомби (не мешают смотреть)",
-	"I — матрица свечения (4 образца одного цвета)",
 	"O — СТЕНД: эффект по кругу, камера сама",
 	"ENTER — прогнать улёт один раз",
 	"-  =   притушить / поднять все три канала",
 	";  '   Bloom Intensity (общий на сцену)",
-	",  .   Bloom Threshold",
+	"9  0   Bloom Threshold",
 	"M — показать черепа вне заезда",
 	"\\ — сброс · P — числа в Output",
 }, "\n")
@@ -470,7 +472,15 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		end
 		return
 	end
-	if not active or processed then
+	if not active then
+		return
+	end
+	-- processed НАМЕРЕННО НЕ ПРОВЕРЯЕМ. Ползунки сделаны на TextButton, и после клика по
+	-- ним фокус остаётся на кнопке — Roblox начинает помечать ВСЕ последующие нажатия
+	-- как «обработанные интерфейсом». Из-за этого клавиши переставали работать ровно
+	-- после того, как покрутишь ползунок (юзер: «O не работает»). Единственное, что
+	-- действительно надо пропускать, — ввод в текстовое поле, но их здесь нет вовсе.
+	if UserInputService:GetFocusedTextBox() then
 		return
 	end
 
@@ -483,9 +493,10 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		bloom.Intensity = math.clamp(bloom.Intensity + 0.05, 0, 4)
 	elseif key == Enum.KeyCode.Semicolon and bloom then
 		bloom.Intensity = math.clamp(bloom.Intensity - 0.05, 0, 4)
-	elseif key == Enum.KeyCode.Period and bloom then
+	-- Порог переехал с «,»/«.» на «9»/«0» (юзер: «точка занята системой»).
+	elseif key == Enum.KeyCode.Zero and bloom then
 		bloom.Threshold = math.clamp(bloom.Threshold + 0.05, 0, 5)
-	elseif key == Enum.KeyCode.Comma and bloom then
+	elseif key == Enum.KeyCode.Nine and bloom then
 		bloom.Threshold = math.clamp(bloom.Threshold - 0.05, 0, 5)
 	elseif key == Enum.KeyCode.BackSlash then
 		r, g, b = CONFIG_COLOR.R * 255, CONFIG_COLOR.G * 255, CONFIG_COLOR.B * 255
@@ -502,66 +513,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		zombiesOff = not zombiesOff
 		r:FireServer(zombiesOff)
 		print("[NeonTune] зомби: " .. (zombiesOff and "ВЫКЛЮЧЕНЫ" or "включены"))
-		return
-	elseif key == Enum.KeyCode.I then
-		-- МАТРИЦА СВЕЧЕНИЯ. Вопрос «почему стрелка светится, а череп нет» я закрыть не
-		-- могу: BloomEffect не попадает в захваты экрана (авто-качество в нефокусном
-		-- окне Studio выбрасывает его из конвейера, уровень качества капабилити-локнут).
-		-- Значит смотреть должен ты. Четыре объекта, ОДИН цвет, меняется по одному
-		-- свойству за раз — какой из них не засветится, тот и виноват:
-		--   1 толстая полоса, прозрачность 0.15  (эталон: ровно стрелка старта)
-		--   2 толстая полоса, прозрачность 0     (проверяем прозрачность)
-		--   3 ТОНКАЯ полоса 0.18, обычный Part   (проверяем толщину)
-		--   4 плашка черепа из EditableMesh      (проверяем сам меш)
-		local COLOR = Color3.fromRGB(110, 255, 170)
-		local old = workspace:FindFirstChild("__GlowMatrix")
-		if old then
-			old:Destroy()
-			print("[NeonTune] матрица убрана")
-			return
-		end
-		local cam = workspace.CurrentCamera
-		if not cam then
-			return
-		end
-		local base = cam.CFrame.Position + cam.CFrame.LookVector * 22
-		local folder = Instance.new("Folder")
-		folder.Name = "__GlowMatrix"
-		folder.Parent = workspace
-		local right = cam.CFrame.RightVector
-		local function bar(off: number, thick: number, tr: number, name: string)
-			local p = Instance.new("Part")
-			p.Name = name
-			p.Size = Vector3.new(thick, 6, 0.2)
-			p.Material = Enum.Material.Neon
-			p.Color = COLOR
-			p.Transparency = tr
-			p.Anchored = true
-			p.CanCollide = false
-			p.CastShadow = false
-			p.CFrame = CFrame.lookAt(base + right * off, base + right * off - cam.CFrame.LookVector)
-			p.Parent = folder
-		end
-		bar(-7.5, 1.6, 0.15, "1_толстая_прозр015")
-		bar(-2.5, 1.6, 0.00, "2_толстая_прозр0")
-		bar(2.5, 0.18, 0.00, "3_ТОНКАЯ_обычный_Part")
-		local marks = workspace:FindFirstChild("RaceMarkers")
-		if marks then
-			for _, m in marks:GetChildren() do
-				local pl = m:IsA("Model") and m:FindFirstChild("Plate")
-				if pl and pl:IsA("BasePart") then
-					local c = pl:Clone()
-					c.Name = "4_МЕШ_черепа"
-					c.Color = COLOR
-					c.Transparency = 0
-					c.Anchored = true
-					c.CFrame = CFrame.new(base + right * 8)
-					c.Parent = folder
-					break
-				end
-			end
-		end
-		print("[NeonTune] матрица перед камерой: 1 толстая/0.15 · 2 толстая/0 · 3 ТОНКАЯ Part · 4 меш черепа. Цвет у всех 110,255,170. I — убрать")
 		return
 	elseif key == Enum.KeyCode.O then
 		standOn = not standOn
