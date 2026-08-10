@@ -107,6 +107,33 @@ remote.OnServerEvent:Connect(function(_player, on)
 	end
 end)
 
+-- // Выключатель зомби -------------------------------------------------------
+-- Отдельно от заморозки, и намеренно: заморозка останавливает ВЕСЬ мир, включая
+-- машину и саму сцену, а тут нужно ровно обратное — мир живёт, но никто не грызёт
+-- машину, пока настраивают свечение черепов и анимацию улёта.
+--
+-- Гасим В ДВА ДЕЙСТВИЯ. Флаг перекрывает кран (ZombieSpawner его читает перед
+-- спавном), но уже вылезшие продолжают идти к машине — поэтому их ещё и убираем.
+-- Одного флага было бы мало, одного сноса — тоже: через SpawnInterval набегут новые.
+local zombiesRemote = Instance.new("RemoteEvent")
+zombiesRemote.Name = "DevZombies"
+zombiesRemote.Parent = remotes
+
+zombiesRemote.OnServerEvent:Connect(function(_player, off)
+	local disable = off == true
+	workspace:SetAttribute("ZombiesOff", disable or nil)
+	local removed = 0
+	if disable then
+		for _, z in CollectionService:GetTagged("Zombie") do
+			z:Destroy()
+			removed += 1
+		end
+	end
+	print(("[PhotoMode] зомби %s%s"):format(
+		disable and "ВЫКЛЮЧЕНЫ" or "включены",
+		disable and (", снято " .. removed) or ""))
+end)
+
 -- Съёмщик вышел из игры замороженным — мир не должен остаться стоять.
 game:GetService("Players").PlayerRemoving:Connect(function()
 	if #game:GetService("Players"):GetPlayers() <= 1 then

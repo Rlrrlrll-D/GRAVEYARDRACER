@@ -332,7 +332,13 @@ end
 task.spawn(function()
 	while true do
 		task.wait(GameConfig.Zombie.SpawnInterval)
-		if #CollectionService:GetTagged("Zombie") < GameConfig.Zombie.MaxZombies then
+		-- ДЕВ-ВЫКЛЮЧАТЕЛЬ (PhotoModeService, только Studio): пока флаг стоит, новых
+		-- зомби не плодим. Нужен, чтобы настраивать свет и анимации у чекпоинтов —
+		-- иначе стая доедает машину прямо во время наблюдения. В живой игре атрибута
+		-- не существует, проверка просто ложна.
+		if not workspace:GetAttribute("ZombiesOff")
+			and #CollectionService:GetTagged("Zombie") < GameConfig.Zombie.MaxZombies
+		then
 			spawnZombie()
 		end
 	end

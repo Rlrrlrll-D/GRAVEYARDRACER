@@ -264,6 +264,23 @@ local function snake(): any
 	return tune and tune.snake
 end
 
+-- // Выключатель зомби -------------------------------------------------------
+-- Юзер: «не дают настроить свечение и змейку». Так и есть: пока разглядываешь череп,
+-- стая доедает машину, экран трясёт от ударов, а на выбывании тебя уносит в лобби.
+-- Ремоут заводит PhotoModeService и только в Studio — в живой игре его нет, и ветка
+-- молча ничего не делает.
+local zombiesOff = false
+local zombiesRemote: RemoteEvent? = nil
+task.spawn(function()
+	local remotes = ReplicatedStorage:WaitForChild("Remotes", 20)
+	if remotes then
+		local r = remotes:WaitForChild("DevZombies", 20)
+		if r and r:IsA("RemoteEvent") then
+			zombiesRemote = r
+		end
+	end
+end)
+
 -- // СТЕНД: эффект по кругу, вне гонки ---------------------------------------
 -- Юзер: «вообще я хочу увидеть эффект отдельно вне игры». И он прав: эффект длится
 -- секунду и срабатывает только у активного чекпоинта на ходу — рассмотреть его в
@@ -338,6 +355,7 @@ snakeSlider(10, "Высота", "heights", 1, 20) -- на сколько сво�
 local valuesLabel = makeLabel(11, 52, 14, 0)
 local hintsLabel = makeLabel(12, 100, 12, 0.45)
 hintsLabel.Text = table.concat({
+	"Z — выключить зомби (не мешают смотреть)",
 	"I — матрица свечения (4 образца одного цвета)",
 	"O — СТЕНД: эффект по кругу, камера сама",
 	"ENTER — прогнать улёт один раз",
@@ -406,7 +424,8 @@ function applyAll()
 		bloom and bloom.Threshold or 0
 	)
 	skullsLabel.Text = painted > 0
-		and string.format("покрашено черепов: %d · показ (M): %s", painted, forceVisible and "ВКЛ" or "выкл")
+		and string.format("черепов: %d · показ (M): %s · зомби (Z): %s",
+			painted, forceVisible and "вкл" or "выкл", zombiesOff and "ВЫКЛ" or "вкл")
 		or "плашек черепов нет — их строит UIController"
 end
 
@@ -474,6 +493,16 @@ UserInputService.InputBegan:Connect(function(input, processed)
 			bloom.Intensity = baseIntensity
 			bloom.Threshold = baseThreshold
 		end
+	elseif key == Enum.KeyCode.Z then
+		local r = zombiesRemote
+		if not r then
+			print("[NeonTune] ремоута DevZombies нет — он только в Studio")
+			return
+		end
+		zombiesOff = not zombiesOff
+		r:FireServer(zombiesOff)
+		print("[NeonTune] зомби: " .. (zombiesOff and "ВЫКЛЮЧЕНЫ" or "включены"))
+		return
 	elseif key == Enum.KeyCode.I then
 		-- МАТРИЦА СВЕЧЕНИЯ. Вопрос «почему стрелка светится, а череп нет» я закрыть не
 		-- могу: BloomEffect не попадает в захваты экрана (авто-качество в нефокусном
