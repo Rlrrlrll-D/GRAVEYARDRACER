@@ -20,7 +20,8 @@
 --   9 / 0         Bloom Threshold ∓0.05  (порог: что вообще начинает светиться).
 --                 Не «,»/«.» — точку забирает система, до скрипта она не доходит.
 --   Z             выключить зомби: иначе стая доедает машину, пока смотришь
---   O             стенд: улёт по кругу, камера сама
+--   K             стенд: улёт по кругу, камера сама. НЕ «O» — у юзера она до скрипта
+--                 не доходит (проверено: K срабатывает, O нет, обе в одной цепочке)
 --   \             сброс к тому, что стоит в конфиге
 --   P             напечатать итоговые числа в Output — оттуда копировать мне
 --
@@ -74,6 +75,7 @@ local active = false
 -- На выходе возвращаем прозрачность: в лобби это верно само по себе, а в заезде
 -- UIController перекрывает наше значение ближайшим RaceUpdate (они идут каждые 0.4с).
 local forceVisible = false
+local cursorConns: { RBXScriptConnection }? = nil
 local r, g, b = CONFIG_COLOR.R * 255, CONFIG_COLOR.G * 255, CONFIG_COLOR.B * 255
 local bloom = Lighting:FindFirstChildOfClass("BloomEffect")
 local baseIntensity = bloom and bloom.Intensity or 1
@@ -298,6 +300,10 @@ local standCamera: Camera? = nil
 -- Цель запоминаем: пересчитывать «ближайший череп» каждый кадр нельзя — камера сама
 -- переезжает к черепу, ближайшим тут же становится другой, и стенд бы прыгал по карте.
 local standTarget: Model? = nil
+local standConns: { RBXScriptConnection } = {}
+-- Что мы погасили и каким оно было: на выходе надо вернуть ИМЕННО прежнее состояние,
+-- а не «включить всё» — часть экранов может быть законно выключена самой игрой.
+local standHidden: { [LayerCollector]: boolean } = {}
 
 local function nearestSkull(): Model?
 	local folder = workspace:FindFirstChild("RaceMarkers")
@@ -361,18 +367,29 @@ local function standLoop()
 		end
 	end)
 
-	-- Чужие экраны гасим ПОВТОРНО: лобби и HUD зажигают себя по RaceUpdate (он идёт
-	-- каждые 0.4с), и разового выключения не хватало — заставка возвращалась поверх.
-	task.spawn(function()
-		while standOn do
-			for _, g in playerGui:GetChildren() do
-				if g:IsA("LayerCollector") and g ~= gui and g.Enabled then
-					g.Enabled = false
-				end
-			end
-			task.wait(0.3)
+	-- ЧУЖИЕ ЭКРАНЫ ГАСИМ СТОРОЖЕМ, А НЕ ОПРОСОМ. Лобби и HUD зажигают себя по RaceUpdate
+	-- (каждые 0.4с), и мой прежний опрос раз в 0.3с гасил их с запозданием — из-за чего
+	-- интерфейс МЕЛЬКАЛ (юзер это и увидел). Сторож ловит включение и гасит в том же
+	-- кадре, так что мигания нет вовсе.
+	local function watch(g: Instance)
+		if not g:IsA("LayerCollector") or g == gui then
+			return
 		end
-	end)
+		local lc = g :: LayerCollector
+		if standHidden[lc] == nil then
+			standHidden[lc] = lc.Enabled
+		end
+		standConns[#standConns + 1] = lc:GetPropertyChangedSignal("Enabled"):Connect(function()
+			if standOn and lc.Enabled then
+				lc.Enabled = false
+			end
+		end)
+		lc.Enabled = false
+	end
+	for _, g in playerGui:GetChildren() do
+		watch(g)
+	end
+	standConns[#standConns + 1] = playerGui.ChildAdded:Connect(watch)
 end
 
 local function snakeSlider(order: number, name: string, field: string, minV: number, maxV: number)
@@ -404,7 +421,7 @@ local valuesLabel = makeLabel(16, 52, 14, 0)
 local hintsLabel = makeLabel(17, 100, 12, 0.45)
 hintsLabel.Text = table.concat({
 	"Z — выключить зомби (не мешают смотреть)",
-	"O или K — СТЕНД: эффект по кругу, камера сама",
+	"K — СТЕНД: эффект по кругу, камера сама",
 	"ENTER — прогнать улёт один раз",
 	"-  =   притушить / поднять все три канала",
 	";  '   Bloom Intensity (общий на сцену)",
@@ -474,7 +491,7 @@ function applyAll()
 	-- работал и снимался, а строки о нём в логе не было. Пусть будет видно глазами.
 	local ghost = workspace:FindFirstChild("GhostSkull")
 	skullsLabel.Text = string.format(
-		"СТЕНД (O/K): %s · летит: %s · зомби (Z): %s\nчерепов: %d · показ (M): %s · курсор: %s",
+		"СТЕНД (K): %s · летит: %s · зомби (Z): %s\nчерепов: %d · показ (M): %s · курсор: %s",
 		standOn and "ВКЛ" or "выкл",
 		(ghost and ghost:IsA("BasePart") and ghost.Transparency < 0.99) and "да" or "нет",
 		zombiesOff and "ВЫКЛ" or "вкл",
@@ -491,18 +508,6 @@ task.spawn(function()
 		task.wait(0.5)
 		if active then
 			applyAll()
-			-- Крест турели и системный курсор зажигаются обратно чужим кодом (турель
-			-- ставит их каждый раз, когда игрок за рулём), поэтому давим повторно —
-			-- иначе прицел проступает под панелью через секунду после открытия.
-			UserInputService.MouseIconEnabled = true
-			-- И РЕЖИМ МЫШИ ТОЖЕ. Одного значка мало: за рулём турель захватывает мышь
-			-- (LockCenter), и тогда курсор физически не сдвинуть с центра — ползунки
-			-- недоступны, хотя стрелка «включена».
-			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-			local cross = playerGui:FindFirstChild("WeaponCrosshair")
-			if cross and cross:IsA("LayerCollector") and cross.Enabled then
-				cross.Enabled = false
-			end
 		end
 	end
 end)
@@ -528,15 +533,39 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == TOGGLE_KEY then
 		active = not active
 		gui.Enabled = active
-		-- КУРСОР НАД ПАНЕЛЬЮ (юзер: «под панелью остаётся прицел, неудобно»). За рулём
-		-- TurretAimClient прячет системный курсор и рисует свой крест — по ползункам им
-		-- не попасть. Пока панель открыта, возвращаем обычную стрелку и гасим крест;
-		-- на выходе крест не зажигаем сами: им распоряжается турель, она вернёт его
-		-- ближайшим кадром, когда игрок снова сядет за руль.
-		UserInputService.MouseIconEnabled = true
-		local cross = playerGui:FindFirstChild("WeaponCrosshair")
-		if cross and cross:IsA("LayerCollector") and active then
-			cross.Enabled = false
+		-- КУРСОР НАД ПАНЕЛЬЮ — СТОРОЖЕМ, А НЕ ОПРОСОМ (юзер: «курсор мелькает вместе с
+		-- HUD»). За рулём TurretAimClient прячет системную стрелку, захватывает мышь и
+		-- рисует свой крест — по ползункам им не попасть. Прежде я возвращал курсор раз
+		-- в полсекунды, и он мигал: турель гасила, я зажигал. Сторож ловит сам факт
+		-- гашения и возвращает стрелку в том же кадре, поэтому мигания нет.
+		cursorConns = cursorConns or {}
+		for _, c in cursorConns do
+			c:Disconnect()
+		end
+		table.clear(cursorConns)
+		if active then
+			UserInputService.MouseIconEnabled = true
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+			cursorConns[1] = UserInputService:GetPropertyChangedSignal("MouseIconEnabled"):Connect(function()
+				if active and not UserInputService.MouseIconEnabled then
+					UserInputService.MouseIconEnabled = true
+				end
+			end)
+			cursorConns[2] = UserInputService:GetPropertyChangedSignal("MouseBehavior"):Connect(function()
+				if active and UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
+					UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+				end
+			end)
+			local cross = playerGui:FindFirstChild("WeaponCrosshair")
+			if cross and cross:IsA("LayerCollector") then
+				local lc = cross :: LayerCollector
+				lc.Enabled = false
+				cursorConns[3] = lc:GetPropertyChangedSignal("Enabled"):Connect(function()
+					if active and lc.Enabled then
+						lc.Enabled = false
+					end
+				end)
+			end
 		end
 		if active then
 			bloom = Lighting:FindFirstChildOfClass("BloomEffect")
@@ -589,23 +618,33 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		r:FireServer(zombiesOff)
 		print("[NeonTune] зомби: " .. (zombiesOff and "ВЫКЛЮЧЕНЫ" or "включены"))
 		return
-	-- K — ЗАПАСНАЯ КЛАВИША К СТЕНДУ. Юзер дважды сообщил, что O не работает, при том
-	-- что у меня та же сборка запускает стенд и снимается на видео. Раз причину по
-	-- логам поймать не удалось, даём вторую клавишу: если сработает K, дело в самой
-	-- клавише O на его стороне, и это сразу сузит поиск.
-	elseif key == Enum.KeyCode.O or key == Enum.KeyCode.K then
+	-- СТЕНД НА K, А НЕ НА O. Проверено юзером напрямую: K доходит, O — нет, при том что
+	-- обе лежали в одной цепочке elseif и у меня срабатывали обе. Причину на его стороне
+	-- (раскладка? перехват?) выяснять не стали — дешевле сменить клавишу, чем гоняться.
+	elseif key == Enum.KeyCode.K then
 		standOn = not standOn
 		if standOn then
-			-- на время стенда прячем всё лишнее: смотрим только на эффект
-			for _, g in playerGui:GetChildren() do
-				if g:IsA("LayerCollector") and g ~= gui then
-					g.Enabled = false
-				end
-			end
+			-- Экраны гасит standLoop сторожами, здесь только CoreGui.
 			game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
 			standLoop()
-			print("[NeonTune] стенд ВКЛ — эффект по кругу. O — выключить")
+			print("[NeonTune] стенд ВКЛ — эффект по кругу. K — выключить")
 		else
+			pcall(function()
+				RunService:UnbindFromRenderStep("NeonTuneStand")
+			end)
+			for _, c in standConns do
+				c:Disconnect()
+			end
+			table.clear(standConns)
+			-- возвращаем ровно то, что было до стенда
+			for lc, wasEnabled in standHidden do
+				if lc.Parent then
+					lc.Enabled = wasEnabled
+				end
+			end
+			table.clear(standHidden)
+			game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
+			standTarget = nil
 			local cam = standCamera or workspace.CurrentCamera
 			if cam then
 				cam.CameraType = Enum.CameraType.Custom -- вернуть камеру игроку
