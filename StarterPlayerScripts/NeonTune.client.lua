@@ -335,14 +335,19 @@ local function standLoop()
 		standTarget = m
 		local home = m:GetPivot().Position
 		local s = snake()
-		-- рамка кадра растёт вместе с высотой подъёма, чтобы улёт помещался целиком
-		local up = (s and s.heights or 9) * 2.2
+		-- РАМКУ СЧИТАЕМ ОТ НАСТОЯЩЕЙ ВЫСОТЫ ПОЛЁТА, а не от абстрактного числа. Прошлый
+		-- заход брал heights * 2.2 и промахивался: подъём равен heights * СОБСТВЕННОЙ
+		-- высоте призрака, а она зависит от масштаба черепа. Из-за этого камера смотрела
+		-- в землю рядом, и стенд выглядел неработающим, хотя эффект шёл.
+		local ghost = workspace:FindFirstChild("GhostSkull")
+		local ghostH = (ghost and ghost:IsA("BasePart")) and ghost.Size.Y or 2.4
+		local riseH = math.max((s and s.heights or 9) * ghostH, 8)
+		-- смотрим в середину пути и отходим так, чтобы путь помещался целиком
+		local look = home + Vector3.new(0, riseH * 0.5, 0)
+		local dist = riseH * 0.95
 		cam.CameraType = Enum.CameraType.Scriptable
 		cam.FieldOfView = 55
-		cam.CFrame = CFrame.lookAt(
-			home + Vector3.new(up * 0.85, up * 0.5, up * 0.85),
-			home + Vector3.new(0, up * 0.42, 0)
-		)
+		cam.CFrame = CFrame.lookAt(look + Vector3.new(dist * 0.75, riseH * 0.1, dist * 0.75), look)
 	end)
 
 	task.spawn(function()
@@ -482,6 +487,10 @@ task.spawn(function()
 			-- ставит их каждый раз, когда игрок за рулём), поэтому давим повторно —
 			-- иначе прицел проступает под панелью через секунду после открытия.
 			UserInputService.MouseIconEnabled = true
+			-- И РЕЖИМ МЫШИ ТОЖЕ. Одного значка мало: за рулём турель захватывает мышь
+			-- (LockCenter), и тогда курсор физически не сдвинуть с центра — ползунки
+			-- недоступны, хотя стрелка «включена».
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 			local cross = playerGui:FindFirstChild("WeaponCrosshair")
 			if cross and cross:IsA("LayerCollector") and cross.Enabled then
 				cross.Enabled = false
