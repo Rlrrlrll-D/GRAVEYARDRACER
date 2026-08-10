@@ -63,9 +63,9 @@ end
 local TOGGLE_KEY = Enum.KeyCode.F6
 local FONT = Enum.Font.Code
 
--- То, что стоит в UIController. Сюда же возвращает «\». Это цвет стрелок старта: он
--- светится, и именно его срезание вдвое когда-то и убило ореол — см. SKULL_COLOR.
-local CONFIG_COLOR = Color3.fromRGB(110, 255, 170)
+-- То, что стоит в UIController. Сюда же возвращает «\». Золотой подобран юзером
+-- 2026-08-10 вместо прежнего зелёного (цвета стрелок старта).
+local CONFIG_COLOR = Color3.fromRGB(252, 213, 62)
 
 local active = false
 -- ПОКАЗАТЬ ЧЕРЕПА В ЛОББИ. Плашки существуют всегда (все 12), но вне заезда UIController
@@ -110,7 +110,7 @@ pad.Parent = panel
 
 local layout = Instance.new("UIListLayout")
 layout.SortOrder = Enum.SortOrder.LayoutOrder
-layout.Padding = UDim.new(0, 6)
+layout.Padding = UDim.new(0, 3)
 layout.Parent = panel
 
 local function makeLabel(order: number, height: number, size: number, transparency: number): TextLabel
@@ -145,14 +145,16 @@ local refreshers: { () -> () } = {}
 local applyAll -- вперёд: ползунки дёргают её, а определена она ниже
 
 local function makeSlider(order: number, name: string, get: () -> number, set: (number) -> ())
+	-- 24 вместо 32: ползунков стало тринадцать, и в прежней вёрстке панель переставала
+	-- влезать по высоте — верх уезжал за край экрана вместе с ползунками цвета.
 	local row = Instance.new("Frame")
 	row.LayoutOrder = order
-	row.Size = UDim2.new(1, 0, 0, 32)
+	row.Size = UDim2.new(1, 0, 0, 24)
 	row.BackgroundTransparency = 1
 	row.Parent = panel
 
 	local caption = Instance.new("TextLabel")
-	caption.Size = UDim2.new(1, 0, 0, 14)
+	caption.Size = UDim2.new(1, 0, 0, 13)
 	caption.BackgroundTransparency = 1
 	caption.Font = FONT
 	caption.TextSize = 13
@@ -162,7 +164,7 @@ local function makeSlider(order: number, name: string, get: () -> number, set: (
 
 	local track = Instance.new("Frame")
 	track.Size = UDim2.new(1, 0, 0, 6)
-	track.Position = UDim2.new(0, 0, 0, 20)
+	track.Position = UDim2.new(0, 0, 0, 16)
 	track.BackgroundColor3 = UITheme.Shadow
 	track.BorderSizePixel = 0
 	track.Parent = row
@@ -241,8 +243,10 @@ makeSlider(5, "B", function() return b end, function(v) b = v end)
 -- Верх 0.5, а не «побольше на всякий случай»: проверено живьём, что уже на 0.9 лента
 -- смыкается сама с собой и череп становится сплошным пятном — глазницы и промежутки
 -- между зубами затягивает. Полезный диапазон весь ниже, и ползунку нужна точность в нём.
-local STROKE_MIN, STROKE_MAX = 0.04, 0.5
-local strokeValue = 0.08 -- то, что стоит в UIController после подбора юзером
+-- Низ опущен до 0.01: 0.04 юзер выбрал, упершись в прежний предел, — значит хотелось
+-- ещё тоньше, и запас нужен вниз, а не вверх.
+local STROKE_MIN, STROKE_MAX = 0.01, 0.5
+local strokeValue = 0.04 -- то, что стоит в UIController после подбора юзером
 
 local function skullTune(): any
 	return _G.__SkullTune
@@ -291,6 +295,9 @@ end)
 -- Стенд паркует камеру у ближайшего черепа и перезапускает улёт, пока не выключишь.
 local standOn = false
 local standCamera: Camera? = nil
+-- Цель запоминаем: пересчитывать «ближайший череп» каждый кадр нельзя — камера сама
+-- переезжает к черепу, ближайшим тут же становится другой, и стенд бы прыгал по карте.
+local standTarget: Model? = nil
 
 local function nearestSkull(): Model?
 	local folder = workspace:FindFirstChild("RaceMarkers")
@@ -312,27 +319,53 @@ local function nearestSkull(): Model?
 end
 
 local function standLoop()
+	-- КАМЕРУ ДЕРЖИМ КАЖДЫЙ КАДР, А НЕ РАЗ В ЦИКЛ. Прошлый заход ставил CFrame один раз
+	-- на прогон — и штатный контроллер камеры возвращал её обратно тем же кадром.
+	-- Снаружи это выглядело как «стенд не включается»: в логе «стенд ВКЛ» есть, а на
+	-- экране ничего. Приоритет ПОСЛЕ Camera — иначе нас затирают в том же кадре.
+	RunService:BindToRenderStep("NeonTuneStand", Enum.RenderPriority.Camera.Value + 10, function()
+		if not standOn then
+			return
+		end
+		local m = standTarget or nearestSkull()
+		local cam = workspace.CurrentCamera
+		if not (m and cam) then
+			return
+		end
+		standTarget = m
+		local home = m:GetPivot().Position
+		local s = snake()
+		-- рамка кадра растёт вместе с высотой подъёма, чтобы улёт помещался целиком
+		local up = (s and s.heights or 9) * 2.2
+		cam.CameraType = Enum.CameraType.Scriptable
+		cam.FieldOfView = 55
+		cam.CFrame = CFrame.lookAt(
+			home + Vector3.new(up * 0.85, up * 0.5, up * 0.85),
+			home + Vector3.new(0, up * 0.42, 0)
+		)
+	end)
+
 	task.spawn(function()
 		while standOn do
 			local tune = skullTune()
-			local m = nearestSkull()
-			if tune and tune.playCollect and m then
-				-- камеру держим сами: смотрим на череп сбоку и с запасом вверх, чтобы
-				-- весь подъём помещался в кадр
-				local home = m:GetPivot().Position
-				local s = snake()
-				local up = (s and s.heights or 9) * 2.5
-				local cam = workspace.CurrentCamera
-				if cam then
-					standCamera = cam
-					cam.CameraType = Enum.CameraType.Scriptable
-					cam.FieldOfView = 55
-					cam.CFrame = CFrame.lookAt(home + Vector3.new(up * 0.9, up * 0.55, up * 0.9), home + Vector3.new(0, up * 0.45, 0))
-				end
+			if tune and tune.playCollect and (standTarget or nearestSkull()) then
 				tune.playCollect()
 			end
 			local s = snake()
 			task.wait((s and s.rise or 1.2) + 0.5) -- пауза между прогонами
+		end
+	end)
+
+	-- Чужие экраны гасим ПОВТОРНО: лобби и HUD зажигают себя по RaceUpdate (он идёт
+	-- каждые 0.4с), и разового выключения не хватало — заставка возвращалась поверх.
+	task.spawn(function()
+		while standOn do
+			for _, g in playerGui:GetChildren() do
+				if g:IsA("LayerCollector") and g ~= gui and g.Enabled then
+					g.Enabled = false
+				end
+			end
+			task.wait(0.3)
 		end
 	end)
 end
@@ -350,13 +383,20 @@ local function snakeSlider(order: number, name: string, field: string, minV: num
 	end)
 end
 
-snakeSlider(7, "Длит", "rise", 0.3, 5) -- секунд на весь улёт
-snakeSlider(8, "Волна", "waveSpeed", 0, 3) -- как быстро изгиб бежит по телу
-snakeSlider(9, "Изгиб", "amp", 0, 1.2) -- размах изгиба
-snakeSlider(10, "Высота", "heights", 1, 20) -- на сколько своих ростов поднимается
+-- ВСЕ ручки змейки, а не четыре из девяти. Прошлый набор не покрывал форму самой
+-- кривой (Разм/Волн) — то есть ровно то, что и хотелось подобрать глазами.
+snakeSlider(7, "Длит", "rise", 0.3, 6) -- секунд на весь улёт
+snakeSlider(8, "Высота", "heights", 1, 25) -- на сколько своих ростов поднимается
+snakeSlider(9, "Разм", "pathAmps", 0, 1.2) -- размах перегиба кривой — ГЛАВНАЯ форма
+snakeSlider(10, "Волн", "pathWaves", 0.25, 5) -- сколько волн кривой на путь
+snakeSlider(11, "Тянуть", "stretch", 0, 4) -- вытягивание по высоте к концу
+snakeSlider(12, "Сужать", "narrow", 0, 0.95) -- сужение по ширине к концу
+snakeSlider(13, "Течь", "travel", 0, 2) -- 1 = кривая стоит в пространстве
+snakeSlider(14, "Извив", "amp", 0, 1.2) -- ДОПОЛНИТЕЛЬНЫЙ извив тела поверх кривой
+snakeSlider(15, "Бег", "waveSpeed", 0, 3) -- как быстро этот извив бежит по телу
 
-local valuesLabel = makeLabel(11, 52, 14, 0)
-local hintsLabel = makeLabel(12, 100, 12, 0.45)
+local valuesLabel = makeLabel(16, 52, 14, 0)
+local hintsLabel = makeLabel(17, 100, 12, 0.45)
 hintsLabel.Text = table.concat({
 	"Z — выключить зомби (не мешают смотреть)",
 	"O — СТЕНД: эффект по кругу, камера сама",
@@ -368,7 +408,7 @@ hintsLabel.Text = table.concat({
 	"\\ — сброс · P — числа в Output",
 }, "\n")
 
-local skullsLabel = makeLabel(13, 16, 12, 0.45)
+local skullsLabel = makeLabel(18, 16, 12, 0.45)
 
 -- // Применение --------------------------------------------------------------
 local function currentColor(): Color3
@@ -438,6 +478,14 @@ task.spawn(function()
 		task.wait(0.5)
 		if active then
 			applyAll()
+			-- Крест турели и системный курсор зажигаются обратно чужим кодом (турель
+			-- ставит их каждый раз, когда игрок за рулём), поэтому давим повторно —
+			-- иначе прицел проступает под панелью через секунду после открытия.
+			UserInputService.MouseIconEnabled = true
+			local cross = playerGui:FindFirstChild("WeaponCrosshair")
+			if cross and cross:IsA("LayerCollector") and cross.Enabled then
+				cross.Enabled = false
+			end
 		end
 	end
 end)
@@ -463,6 +511,16 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == TOGGLE_KEY then
 		active = not active
 		gui.Enabled = active
+		-- КУРСОР НАД ПАНЕЛЬЮ (юзер: «под панелью остаётся прицел, неудобно»). За рулём
+		-- TurretAimClient прячет системный курсор и рисует свой крест — по ползункам им
+		-- не попасть. Пока панель открыта, возвращаем обычную стрелку и гасим крест;
+		-- на выходе крест не зажигаем сами: им распоряжается турель, она вернёт его
+		-- ближайшим кадром, когда игрок снова сядет за руль.
+		UserInputService.MouseIconEnabled = true
+		local cross = playerGui:FindFirstChild("WeaponCrosshair")
+		if cross and cross:IsA("LayerCollector") and active then
+			cross.Enabled = false
+		end
 		if active then
 			bloom = Lighting:FindFirstChildOfClass("BloomEffect")
 			applyAll()
