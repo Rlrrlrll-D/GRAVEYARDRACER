@@ -415,9 +415,11 @@ snakeSlider(12, "Сужать", "narrow", 0, 0.95) -- сужение по шир
 snakeSlider(13, "Течь", "travel", 0, 2) -- 1 = кривая стоит в пространстве
 snakeSlider(14, "Извив", "amp", 0, 1.2) -- ДОПОЛНИТЕЛЬНЫЙ извив тела поверх кривой
 snakeSlider(15, "Бег", "waveSpeed", 0, 3) -- как быстро этот извив бежит по телу
+snakeSlider(16, "СМашин", "follow", 0, 1) -- 1 = летит вместе с багги, 0 = остаётся у чекпоинта
+snakeSlider(17, "Отстать", "followFade", 0, 1) -- с какой доли пути начинает отставать
 
-local valuesLabel = makeLabel(16, 52, 14, 0)
-local hintsLabel = makeLabel(17, 100, 12, 0.45)
+local valuesLabel = makeLabel(18, 52, 14, 0)
+local hintsLabel = makeLabel(19, 100, 12, 0.45)
 hintsLabel.Text = table.concat({
 	"Z — выключить зомби (не мешают смотреть)",
 	"K — СТЕНД: эффект по кругу, камера сама",
@@ -429,7 +431,7 @@ hintsLabel.Text = table.concat({
 	"\\ — сброс · P — числа в Output",
 }, "\n")
 
-local skullsLabel = makeLabel(18, 30, 12, 0.25)
+local skullsLabel = makeLabel(20, 30, 12, 0.25)
 
 -- // Применение --------------------------------------------------------------
 local function currentColor(): Color3
@@ -519,8 +521,8 @@ local function printNumbers()
 	local s = snake()
 	if s then
 		print(string.format(
-			"[NeonTune] SNAKE: rise=%.2f waveSpeed=%.2f amp=%.2f heights=%.1f stretch=%.2f narrow=%.2f waves=%.1f pathWaves=%.1f pathAmps=%.2f",
-			s.rise, s.waveSpeed, s.amp, s.heights, s.stretch, s.narrow, s.waves, s.pathWaves, s.pathAmps))
+			"[NeonTune] SNAKE: rise=%.2f waveSpeed=%.2f amp=%.2f heights=%.1f stretch=%.2f narrow=%.2f waves=%.1f pathWaves=%.1f pathAmps=%.2f follow=%.2f followFade=%.2f",
+			s.rise, s.waveSpeed, s.amp, s.heights, s.stretch, s.narrow, s.waves, s.pathWaves, s.pathAmps, s.follow, s.followFade))
 	end
 	if bloom then
 		print(string.format("[NeonTune] BloomIntensity = %.2f, Threshold = %.2f", bloom.Intensity, bloom.Threshold))

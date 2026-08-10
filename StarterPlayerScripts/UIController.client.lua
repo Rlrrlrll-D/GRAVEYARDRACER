@@ -4,6 +4,7 @@
 -- Also handles the CameraShake remote for hazard collisions.
 
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService") -- нужен улёту: ищет машину игрока
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
@@ -626,6 +627,14 @@ local SNAKE = {
 	pathWaves = 1.5, -- полных волн, укладывающихся на длину пути
 	pathAmps = 0.19, -- размах перегиба
 	travel = 1, -- 1 = кривая неподвижна в пространстве (см. warpGhost); меньше — «плывёт» вместе с телом
+	-- ЛЕТИТ ВМЕСТЕ С МАШИНОЙ (2026-08-10, юзер: «чтобы он не улетал сразу за спину»).
+	-- Улёт длится 5.7с, а чекпоинт на 60+ studs/с уходит назад за доли секунды — почти
+	-- вся анимация оставалась за спиной. Теперь призрак подхватывает СМЕЩЕНИЕ машины:
+	-- 1 = висит относительно неё неподвижно (летит рядом всю дорогу), 0 = как раньше,
+	-- остаётся у чекпоинта. Промежуточные значения дают «сначала летит с тобой, потом
+	-- отстаёт» — за это отвечает followFade.
+	follow = 0.85,
+	followFade = 0.6, -- доля пути, после которой призрак начинает отставать
 }
 
 local function warpGhost(a: number)
@@ -721,6 +730,23 @@ local function collectSkull(index: number)
 	-- Размер призрака за время улёта не меняется, поэтому мерки берём один раз.
 	local ghostH, ghostW = ghost.Size.Y, ghost.Size.X
 
+	-- Откуда считать смещение машины: запоминаем её положение в момент запуска. Берём
+	-- СИДЕНЬЕ, а не корпус — оно есть у любой машины и не пляшет от подвески.
+	local function mySeat(): BasePart?
+		for _, v in CollectionService:GetTagged("PlayerVehicle") do
+			local seat = v:FindFirstChild("DriveSeat")
+			if seat and seat:IsA("BasePart") and seat.Occupant then
+				local char = seat.Occupant.Parent
+				if char and Players:GetPlayerFromCharacter(char) == player then
+					return seat
+				end
+			end
+		end
+		return nil
+	end
+	local seatAtStart = mySeat()
+	local seatOrigin = seatAtStart and seatAtStart.Position or nil
+
 	task.spawn(function()
 		local t0 = os.clock()
 		while true do
@@ -733,6 +759,16 @@ local function collectSkull(index: number)
 			-- «юзом»: жёсткий силуэт скользит по кривой боком. Змейку рисует warpGhost,
 			-- смещая вершины, то есть перегибая само тело.
 			local pos = home.Position + Vector3.new(0, SNAKE.heights * ghostH * a, 0)
+			-- Подхватываем смещение машины, чтобы улёт не остался за спиной. Держим его
+			-- полным до followFade, дальше плавно отпускаем — призрак отстаёт сам, и это
+			-- читается как «дух проводил и отвалился», а не как приклеенный к капоту.
+			if seatOrigin and seatAtStart and seatAtStart.Parent then
+				local k = SNAKE.follow
+				if a > SNAKE.followFade and SNAKE.followFade < 1 then
+					k *= 1 - (a - SNAKE.followFade) / (1 - SNAKE.followFade)
+				end
+				pos += (seatAtStart.Position - seatOrigin) * k
+			end
 			-- БЕЗ ЗАКРУТКИ (просьба юзера «без вращений»). Разворот к камере оставлен —
 			-- без него лента с половины ракурсов видна с торца и исчезает, — но он
 			-- ТОЛЬКО по горизонтали: цель взгляда берём на высоте самого черепа,

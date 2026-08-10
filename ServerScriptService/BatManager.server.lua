@@ -16,6 +16,34 @@ local batScare = Net.get(Net.Events.BatScare)
 -- Клиент (UIController) сам чтит опцию cameraShake, здесь фильтровать не нужно.
 local cameraShake = Net.get(Net.Events.CameraShake)
 
+-- // Ночь ли сейчас ----------------------------------------------------------
+-- Юзер: «мыши-скримеры должны пугать только ночью». Днём стая в лицо читается не как
+-- жуть, а как помеха — пугает темнота, а не сами мыши.
+--
+-- СПРАШИВАТЬ Lighting БЕССМЫСЛЕННО: дугу суток ведёт КЛИЕНТ (DayNightCycle), серверный
+-- Lighting так и стоит на ночных значениях с запуска. Единственный общий источник
+-- правды — метка NightAnchor, по которой клиенты и считают свою стадию:
+--   < 0  — лобби, держим ранний вечер → не ночь;
+--   = 0  — заездов ещё не было, сервер держит базовую ночь → ночь;
+--   > 0  — идёт переход, значение = время его начала.
+-- Порог NIGHT_AT берём не в конце дуги, а на 70%: к этому моменту уже темно, и ждать
+-- полной ночи ради скримера незачем.
+local EnvironmentConfig = require(ReplicatedStorage:WaitForChild("EnvironmentConfig"))
+local NIGHT_AT = 0.7
+
+local function isNight(): boolean
+	local anchor = ReplicatedStorage:FindFirstChild("NightAnchor")
+	local startedAt = (anchor and anchor:IsA("NumberValue")) and anchor.Value or 0
+	if startedAt < 0 then
+		return false -- лобби: светло
+	end
+	if startedAt == 0 then
+		return true -- базовое состояние сервера — ночь
+	end
+	local elapsed = workspace:GetServerTimeNow() - startedAt
+	return elapsed >= EnvironmentConfig.Dusk.NightFallSeconds * NIGHT_AT
+end
+
 -- точки вылета: впереди по курсу каждого едущего игрока, чуть выше
 local function driverOrigins(): { Vector3 }
 	local pts: { Vector3 } = {}
@@ -95,7 +123,10 @@ if #zones > 0 then
 								-- в зоне: срабатываем один раз на въезд (кулдаун зоны)
 								if (now - (seen[i] or -math.huge)) >= ZONE_COOLDOWN then
 									seen[i] = now
-									if math.random() < (z.Chance or 1) then
+									-- Скример (swarm) — только в темноте; одиночный пролёт
+									-- (flyby) это эмбиент, ему день не мешает.
+									local allowed = z.Kind ~= "swarm" or isNight()
+									if allowed and math.random() < (z.Chance or 1) then
 										lastScare[plr] = now
 										local origin = pos
 											+ seat.CFrame.LookVector * ZONE_AHEAD
