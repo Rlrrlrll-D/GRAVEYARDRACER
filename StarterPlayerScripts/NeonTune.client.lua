@@ -247,7 +247,7 @@ makeSlider(5, "B", function() return b end, function(v) b = v end)
 -- Низ опущен до 0.01: 0.04 юзер выбрал, упершись в прежний предел, — значит хотелось
 -- ещё тоньше, и запас нужен вниз, а не вверх.
 local STROKE_MIN, STROKE_MAX = 0.01, 0.5
-local strokeValue = 0.04 -- то, что стоит в UIController после подбора юзером
+local strokeValue = 0.03 -- то, что стоит в UIController после подбора юзером
 
 local function skullTune(): any
 	return _G.__SkullTune
