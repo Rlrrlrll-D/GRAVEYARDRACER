@@ -404,7 +404,7 @@ local valuesLabel = makeLabel(16, 52, 14, 0)
 local hintsLabel = makeLabel(17, 100, 12, 0.45)
 hintsLabel.Text = table.concat({
 	"Z — выключить зомби (не мешают смотреть)",
-	"O — СТЕНД: эффект по кругу, камера сама",
+	"O или K — СТЕНД: эффект по кругу, камера сама",
 	"ENTER — прогнать улёт один раз",
 	"-  =   притушить / поднять все три канала",
 	";  '   Bloom Intensity (общий на сцену)",
@@ -413,7 +413,7 @@ hintsLabel.Text = table.concat({
 	"\\ — сброс · P — числа в Output",
 }, "\n")
 
-local skullsLabel = makeLabel(18, 16, 12, 0.45)
+local skullsLabel = makeLabel(18, 30, 12, 0.25)
 
 -- // Применение --------------------------------------------------------------
 local function currentColor(): Color3
@@ -470,10 +470,18 @@ function applyAll()
 		bloom and bloom.Intensity or 0,
 		bloom and bloom.Threshold or 0
 	)
-	skullsLabel.Text = painted > 0
-		and string.format("черепов: %d · показ (M): %s · зомби (Z): %s",
-			painted, forceVisible and "вкл" or "выкл", zombiesOff and "ВЫКЛ" or "вкл")
-		or "плашек черепов нет — их строит UIController"
+	-- СОСТОЯНИЕ ПРЯМО НА ПАНЕЛИ. Консоль оказалась ненадёжным свидетелем: у меня стенд
+	-- работал и снимался, а строки о нём в логе не было. Пусть будет видно глазами.
+	local ghost = workspace:FindFirstChild("GhostSkull")
+	skullsLabel.Text = string.format(
+		"СТЕНД (O/K): %s · летит: %s · зомби (Z): %s\nчерепов: %d · показ (M): %s · курсор: %s",
+		standOn and "ВКЛ" or "выкл",
+		(ghost and ghost:IsA("BasePart") and ghost.Transparency < 0.99) and "да" or "нет",
+		zombiesOff and "ВЫКЛ" or "вкл",
+		painted,
+		forceVisible and "вкл" or "выкл",
+		UserInputService.MouseIconEnabled and "вкл" or "ВЫКЛ"
+	)
 end
 
 -- Плашки появляются не сразу и не все разом (UIController строит их по ходу заезда),
@@ -581,7 +589,11 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		r:FireServer(zombiesOff)
 		print("[NeonTune] зомби: " .. (zombiesOff and "ВЫКЛЮЧЕНЫ" or "включены"))
 		return
-	elseif key == Enum.KeyCode.O then
+	-- K — ЗАПАСНАЯ КЛАВИША К СТЕНДУ. Юзер дважды сообщил, что O не работает, при том
+	-- что у меня та же сборка запускает стенд и снимается на видео. Раз причину по
+	-- логам поймать не удалось, даём вторую клавишу: если сработает K, дело в самой
+	-- клавише O на его стороне, и это сразу сузит поиск.
+	elseif key == Enum.KeyCode.O or key == Enum.KeyCode.K then
 		standOn = not standOn
 		if standOn then
 			-- на время стенда прячем всё лишнее: смотрим только на эффект
