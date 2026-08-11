@@ -48,7 +48,8 @@ local settings = SettingsSchema.defaults()
 local gui = Instance.new("ScreenGui")
 gui.Name = "OptionsMenu"
 gui.ResetOnSpawn = false
-gui.DisplayOrder = 20 -- поверх заставки (LobbyUI = 10)
+-- Единая лестница слоёв — в MOBILE_AUDIT.md, раздел 1. Номера УНИКАЛЬНЫ намеренно.
+gui.DisplayOrder = 65 -- панель: выше магазина (60), чтобы опции открывались поверх него
 gui.IgnoreGuiInset = true
 gui.Parent = playerGui
 

@@ -69,7 +69,9 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "MatchResult"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
-gui.DisplayOrder = 50 -- поверх HUD и лобби
+-- Единая лестница слоёв — в MOBILE_AUDIT.md, раздел 1. Было 50, как у прицела: связь
+-- держалась только на том, что прицел гаснет по HUD. Теперь номер свой.
+gui.DisplayOrder = 70 -- итог накрывает всё игровое: HUD, лобби, раскладку, прицел, панели
 gui.Parent = playerGui
 
 -- баннер зрителя (верх экрана)

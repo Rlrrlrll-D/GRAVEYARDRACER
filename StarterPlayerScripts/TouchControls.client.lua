@@ -90,7 +90,8 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "TouchControls"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
-gui.DisplayOrder = 20 -- ниже прицела (50), выше HUD
+-- Единая лестница слоёв — в MOBILE_AUDIT.md, раздел 1.
+gui.DisplayOrder = 20 -- выше HUD (0), ниже прицела (50) и панелей (60/65)
 gui.Enabled = false
 gui.Parent = playerGui
 

@@ -53,7 +53,10 @@ local state = {
 local gui = Instance.new("ScreenGui")
 gui.Name = "ShopUI"
 gui.ResetOnSpawn = false
-gui.DisplayOrder = 20 -- как у опций: поверх заставки (LobbyUI = 10)
+-- Единая лестница слоёв — в MOBILE_AUDIT.md, раздел 1. Держать номера УНИКАЛЬНЫМИ:
+-- при равном DisplayOrder порядок решает положение в PlayerGui, то есть случай, а
+-- кнопки сенсорной раскладки (20) — TextButton, они бы съедали касания магазина.
+gui.DisplayOrder = 60 -- панель: выше раскладки (20) и прицела (50)
 gui.IgnoreGuiInset = true
 gui.Parent = playerGui
 
