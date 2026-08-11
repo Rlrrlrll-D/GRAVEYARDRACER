@@ -4,9 +4,17 @@
 -- клиента останавливает мир, чтобы кадр можно было выставить спокойно, а не ловить
 -- зомби на бегу.
 --
--- ТОЛЬКО STUDIO. Скрипт выходит на первой же строке в живой игре, и ремоут PhotoFreeze
--- там не создаётся вовсе — «заморозить сервер» некому и нечем. Поэтому его НЕТ и в
--- манифесте ReplicatedStorage.Net: попади он туда, Bootstrap создавал бы ремоут всем.
+-- ДОСТУП: STUDIO ЛИБО ВЛАДЕЛЕЦ. Раньше скрипт выходил на первой же строке в живой игре,
+-- и ремоутов там не было вовсе. Но снимать превью удобнее в НАСТОЯЩЕМ клиенте (F11 даёт
+-- полный экран без ленты редактора), а там зомби не давали спокойно выставить кадр.
+--
+-- РАЗ РЕМОУТ ВИДЕН ВСЕМ, КАЖДЫЙ ВЫЗОВ ОБЯЗАН ПРОВЕРЯТЬ, КТО ДЁРГАЕТ. Без проверки любой
+-- игрок мог бы заморозить сервер или снести всех зомби — ровно та дыра, что нашлась в
+-- ремоутах A-Chassis (SECURITY_AUDIT.md, раздел 2). Список сверяется по UserId НА
+-- СЕРВЕРЕ, подделать его с клиента нельзя.
+--
+-- В манифесте ReplicatedStorage.Net этих ремоутов по-прежнему НЕТ: их заводит только
+-- этот скрипт. Попади они туда — Bootstrap создавал бы их независимо от проверок здесь.
 --
 -- ЧТО ИМЕННО ЗАМОРАЖИВАЕТСЯ
 --   * машины (тег PlayerVehicle) и зомби (тег Zombie) — Anchored на всех деталях;
@@ -19,13 +27,24 @@
 -- анкер шасси их не удержал бы.
 
 local RunService = game:GetService("RunService")
-
-if not RunService:IsStudio() then
-	return
-end
-
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- 8110001559 — владелец места. Тот же список, что в StarterPlayerScripts.PhotoMode;
+-- держать их в синхроне вручную, значений всего одно.
+local ALLOWED_USER_IDS: { number } = { 8110001559 }
+
+local function isAllowed(player: Player): boolean
+	if RunService:IsStudio() then
+		return true
+	end
+	for _, id in ALLOWED_USER_IDS do
+		if id == player.UserId then
+			return true
+		end
+	end
+	return false
+end
 
 local FREEZE_TAGS = { "PlayerVehicle", "Zombie" }
 
@@ -99,7 +118,10 @@ local function unfreeze()
 	table.clear(tracks)
 end
 
-remote.OnServerEvent:Connect(function(_player, on)
+remote.OnServerEvent:Connect(function(player, on)
+	if not isAllowed(player) then
+		return -- чужой клиент не морозит сервер
+	end
 	if on == true then
 		freeze()
 	else
@@ -119,7 +141,10 @@ local zombiesRemote = Instance.new("RemoteEvent")
 zombiesRemote.Name = "DevZombies"
 zombiesRemote.Parent = remotes
 
-zombiesRemote.OnServerEvent:Connect(function(_player, off)
+zombiesRemote.OnServerEvent:Connect(function(player, off)
+	if not isAllowed(player) then
+		return -- иначе любой игрок сносил бы всех зомби в заезде
+	end
 	local disable = off == true
 	workspace:SetAttribute("ZombiesOff", disable or nil)
 	local removed = 0
@@ -141,4 +166,5 @@ game:GetService("Players").PlayerRemoving:Connect(function()
 	end
 end)
 
-print("[PhotoMode] заморозка мира доступна (Studio)")
+print(("[PhotoMode] заморозка мира и выключатель зомби подняты (%s)"):format(
+	RunService:IsStudio() and "Studio: доступно всем" or "живая игра: только владельцу"))

@@ -23,6 +23,8 @@
 --   [ / ]         поле зрения (оно же ползунком)
 --   T             автофокус по центру кадра
 --   F             заморозка мира (машины, зомби) вкл/выкл
+--   M             убрать зомби совсем и закрыть кран спавна. НЕ то же, что заморозка:
+--                 та оставляет их стоять в кадре, часто с занесённой рукой над капотом
 --   G             сетка третей
 --   B             киношные полосы 2.39:1 (остаются в кадре, это не подсказка)
 --   U             HUD игры в кадре / скрыт. Плашка Roblox и курсор гаснут в обоих
@@ -90,6 +92,14 @@ local flySpeed = 40
 local fov = 70
 
 local freezeOn = true
+-- ЗОМБИ ОТДЕЛЬНО ОТ ЗАМОРОЗКИ, И ЭТО НЕ ДУБЛИРОВАНИЕ. Заморозка (F) останавливает ВЕСЬ
+-- мир — и машину, и сцену, — а зомби при этом остаются стоять в кадре там, где их
+-- застали, часто с занесённой рукой над капотом. Выключатель (M) убирает их совсем и
+-- закрывает кран спавна, оставляя мир живым: туман плывёт, свет мигает, кадр чистый.
+-- Раньше эта клавиша жила только в NeonTune, а он в живом клиенте недоступен — панель
+-- там открылась бы наполовину мёртвой (ползунки лезут в UIController через _G.__SkullTune,
+-- который выставляется только под IsStudio).
+local zombiesOff = false
 local dof: DepthOfFieldEffect? = nil
 
 -- НАШ HUD В КАДРЕ ИЛИ НЕТ (переключатель U, живёт между заходами в режим).
@@ -100,15 +110,22 @@ local dof: DepthOfFieldEffect? = nil
 local keepGameUi = false
 
 -- // Ремоут заморозки --------------------------------------------------------
--- Его создаёт PhotoModeService и ТОЛЬКО в Studio — в живой игре ремоута нет, и
--- заморозка просто недоступна. Ждём коротко, без него режим всё равно рабочий.
+-- Их создаёт PhotoModeService. Раньше он поднимался только в Studio, и в живой игре
+-- заморозки не было вовсе — зомби не давали выставить кадр. Теперь ремоуты есть всегда,
+-- но сервер сверяет UserId вызывающего: чужой клиент ничего ими не сделает.
+-- Ждём коротко, без них режим всё равно рабочий (панель покажет «нет сервера»).
 local freezeRemote: RemoteEvent? = nil
+local zombiesRemote: RemoteEvent? = nil
 task.spawn(function()
 	local remotes = ReplicatedStorage:WaitForChild("Remotes", 20)
 	if remotes then
 		local r = remotes:WaitForChild("PhotoFreeze", 20)
 		if r and r:IsA("RemoteEvent") then
 			freezeRemote = r
+		end
+		local z = remotes:WaitForChild("DevZombies", 20)
+		if z and z:IsA("RemoteEvent") then
+			zombiesRemote = z
 		end
 	end
 end)
@@ -237,7 +254,7 @@ end
 local titleLabel = makeLabel(1, 18, 16, UITheme.Palette.Bone)
 titleLabel.Text = "PHOTO MODE"
 
-local statusLabel = makeLabel(2, 46, 13, UITheme.Palette.Bone)
+local statusLabel = makeLabel(2, 62, 13, UITheme.Palette.Bone) -- четыре строки состояния
 statusLabel.TextTransparency = 0.25
 
 -- Ползунок. Возвращает функцию обновления — цифры на панели меняются и с клавиш.
@@ -367,7 +384,7 @@ end, function(v)
 	return string.format("%.2f", v)
 end)
 
-local hintsLabel = makeLabel(7, 134, 12, UITheme.Palette.Bone)
+local hintsLabel = makeLabel(7, 148, 12, UITheme.Palette.Bone)
 hintsLabel.TextTransparency = 0.45
 hintsLabel.LayoutOrder = 7
 hintsLabel.Text = table.concat({
@@ -375,17 +392,19 @@ hintsLabel.Text = table.concat({
 	"Shift/Ctrl — быстрее/медленнее · колесо — скорость",
 	"Z/C — крен, X — сброс · [ ] — поле зрения",
 	"T — автофокус · F — заморозка · G — сетка",
-	"B — киношные полосы · U — HUD игры в кадре",
-	"H — спрятать панель и курсор",
+	"M — убрать зомби · B — киношные полосы",
+	"U — HUD игры в кадре · H — панель и курсор",
 	"",
 	"Снимок: H → лента View → Screenshot",
 }, "\n")
 
 local function refreshPanel()
 	statusLabel.Text = string.format(
-		"Заморозка: %s%s\nHUD игры: %s\nСкорость полёта: %.0f",
+		"Заморозка: %s%s\nЗомби: %s%s\nHUD игры: %s\nСкорость полёта: %.0f",
 		freezeOn and "ВКЛ" or "выкл",
 		freezeRemote and "" or "  (нет сервера)",
+		zombiesOff and "УБРАНЫ" or "в игре",
+		zombiesRemote and "" or "  (нет сервера)",
 		keepGameUi and "В КАДРЕ" or "скрыт",
 		flySpeed
 	)
@@ -520,6 +539,7 @@ end
 -- выключенное как «так и было», и на выходе из режима CoreGui остался бы погашен.
 local coreGuiStates: { [Enum.CoreGuiType]: boolean } = {}
 local coreGuiSaved = false
+local topbarWarned = false -- ругаемся про плашку один раз за сеанс, а не каждый H
 
 local function hideCoreGui()
 	if not coreGuiSaved then
@@ -531,9 +551,18 @@ local function hideCoreGui()
 		coreGuiSaved = true
 	end
 	StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
-	pcall(function()
+	-- ПЛАШКА ROBLOX СВЕРХУ СЛЕВА — ОТДЕЛЬНАЯ ИСТОРИЯ. SetCoreGuiEnabled её не берёт:
+	-- топбар живёт мимо CoreGuiType. Единственный существующий рычаг — этот вызов, и в
+	-- Studio он срабатывает. В ЖИВОМ КЛИЕНТЕ плашка (Unibar) остаётся: скрывать её игре
+	-- Roblox не даёт, обхода из кода нет. Отказ больше не глотаем молча — иначе не
+	-- отличить «вызов отклонён» от «подействовал и не помог». Смотреть в консоли (F9).
+	local okTopbar = pcall(function()
 		StarterGui:SetCore("TopbarEnabled", false)
 	end)
+	if not okTopbar and not topbarWarned then
+		topbarWarned = true
+		warn("[PhotoMode] SetCore(\"TopbarEnabled\") отклонён — плашку Roblox не спрятать, чистый кадр снимать в Studio")
+	end
 end
 
 local function restoreCoreGui()
@@ -735,6 +764,16 @@ local function leave()
 	end
 
 	sendFreeze(false)
+	-- Зомби возвращаем ОБЯЗАТЕЛЬНО, а не оставляем как было: выключатель действует на
+	-- весь сервер, и уйди съёмщик с погашенными зомби — заезд остальных остался бы
+	-- пустым до перезапуска.
+	if zombiesOff then
+		zombiesOff = false
+		local remote = zombiesRemote
+		if remote then
+			remote:FireServer(false)
+		end
+	end
 
 	overlayGui.Enabled = false
 	panelGui.Enabled = false
@@ -802,6 +841,13 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if key == Enum.KeyCode.F then
 		freezeOn = not freezeOn
 		sendFreeze(freezeOn)
+		refreshPanel()
+	elseif key == Enum.KeyCode.M then
+		zombiesOff = not zombiesOff
+		local remote = zombiesRemote
+		if remote then
+			remote:FireServer(zombiesOff)
+		end
 		refreshPanel()
 	elseif key == Enum.KeyCode.G then
 		guidesOn = not guidesOn
