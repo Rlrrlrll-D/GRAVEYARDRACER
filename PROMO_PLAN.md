@@ -29,20 +29,63 @@
 
 Материала уже хватает: иконка, превью, скриншоты. Ролики подождут до записи с зомби.
 
-### 1.1 DevForum, раздел Cool Creations — СПЕРВА ПРОВЕРИТЬ ДОСТУП
+### 1.1 DevForum, раздел Creations Feedback
 
-**Может оказаться закрыт.** На DevForum четыре уровня (Visitor, Member, Regular, Leader),
-и право создавать темы зависит от уровня; по части источников Cool Creations доступен
-только высоким. Новый аккаунт обычно читает, но не публикует.
+**Раздел называется именно так** (проверено по форуму 2026-08-11). «Cool Creations» —
+устаревшее имя, его переименовали; в первой версии этого плана я ошибся.
 
-Проверка за минуту: `https://devforum.roblox.com/` → **Help and Feedback** →
-**Cool Creations**. Нет кнопки «New Topic» — канал отпадает, идём в 1.2.
+Описание раздела: *«This category serves as a showcase for anything on Roblox that you'd
+like feedback or discussion on. You can showcase your games, artwork, scripts…»*. Раздел
+живой — порядка 57 тем в неделю.
 
-Прямую ссылку на раздел не привожу намеренно: подтвердить её не вышло, DevForum не
-отдаёт страницы без авторизации, а слать по непроверенному адресу смысла нет.
+**Проверить перед постом:** есть ли кнопка **New Topic**. Категорию видно всем, а право
+создавать тему зависит от уровня на форуме (Visitor / Member / Regular / Leader). Нет
+кнопки — идём в 1.2.
 
-Если доступ есть — это лучший канал: там прямо ждут «покажите, что вы сделали», и
-аудитория ровно та, что сейчас может зайти в игру.
+**Подача важна: это раздел ОБРАТНОЙ СВЯЗИ, а не витрина.** Просьба о ней должна стоять
+вверху, а не в конце, и быть конкретной — три названных вопроса собирают ответы, а общее
+«что думаете» не собирает ничего.
+
+Заголовок:
+
+```
+Graveyard Racer — a night-graveyard racer with zombies. Looking for feedback on the driving feel
+```
+
+Тело:
+
+```
+I've just published my first proper experience and I'd like some outside eyes on it,
+mainly on how the car feels to drive.
+
+Three laps, three lives, and a graveyard that keeps handing zombies back to the track.
+You drive a rust-eaten buggy, run them down for bones, or use the turret bolted to the
+roll cage. Lose all three lives and you're out — the race carries on without you.
+
+What I'd most like feedback on:
+• Driving feel — it's A-Chassis with tuning, and I genuinely can't tell any more
+  whether it's heavy or just sluggish.
+• Whether the checkpoint markers read clearly at speed, or you lose track of where
+  to go next.
+• Mobile: steering and pedals are custom, and the turret auto-aims there. No idea
+  how that lands for someone who isn't me.
+
+A few things that might interest people here:
+• The checkpoint skulls aren't decals. They're ribbons generated at runtime from the
+  original vector outline via EditableMesh, so the line stays smooth at any thickness.
+• The glow is bloom, not the material — Neon on its own gives a flat fill. That means
+  the halo disappears on low graphics settings, which took me embarrassingly long to
+  work out.
+• A-Chassis has no touch branch at all, so mobile steering and pedals feed the chassis
+  through player attributes.
+
+https://www.roblox.com/games/91578422014822/GraveyardRacer
+
+It's 16+ for now while it earns its audience reach.
+```
+
+Картинку приложить: `art/badges/`-стиль не нужен, годится кадр из игры —
+`thumbs\thumb_1.jpg`.
 
 Формат, который там читают: не реклама, а рассказ с деталями. Люди голосуют за то, что
 интересно сделано.
