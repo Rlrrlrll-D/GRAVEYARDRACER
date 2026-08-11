@@ -79,18 +79,30 @@ Age Restriction — нет. То есть аудитория не режется
 
 ## 2. Creator Dashboard
 
-### 2.1 Значки — ждут заведения
+### 2.1 Значки — ЗАВЕДЕНЫ 2026-08-11
 
-Кодом значки создать нельзя. Завести четыре, номера вписать в `Badges.Ids`
-(`ServerScriptService/Badges.lua`) — дальше они выдаются сами, менять ничего не надо.
-Пока стоит 0, выдача молча пропускается.
+Все четыре созданы, включены (`enabled: true`), номера вписаны в `Badges.Ids`
+(`ServerScriptService/Badges.lua`) — дальше они выдаются сами.
 
-| Ключ в коде | Название | Описание |
-|---|---|---|
-| `first_race` | First Ride | Finish a race for the first time. |
-| `first_win` | Gravedigger | Win your first race in the graveyard. |
-| `ten_wins` | Known by the Dead | Win ten races. The dead know your name. |
-| `hundred_zombies` | Hundred Down | Put a hundred zombies back in the ground. |
+| Ключ в коде | Название | Описание | ID |
+|---|---|---|---|
+| `first_race` | First Ride | Finish a race for the first time. | `1492362140274498` |
+| `first_win` | Gravedigger | Win your first race in the graveyard. | `2706944826388815` |
+| `ten_wins` | Known by the Dead | Win ten races. The dead know your name. | `1871814996659084` |
+| `hundred_zombies` | Hundred Down | Put a hundred zombies back in the ground. | `1256716160538986` |
+
+Иконки — `art/badges/`, рисуются из вектора черепа генератором
+`tools/make-badge-icons.ps1` (см. его шапку).
+
+**ГРАБЛИ, НА КОТОРЫЕ ЧУТЬ НЕ НАСТУПИЛИ.** Dashboard показывает значки НОВЫМИ СВЕРХУ,
+то есть в порядке, обратном созданию. Скопированный оттуда список ID пришёл зеркальным
+моему, и вписанный как есть он выдавал бы First Ride за сотню зомби. Проявилось бы это
+ничем: выдача проходит успешно, просто не за то. Сверять обязательно —
+`badges.roblox.com/v1/badges/<id>` отдаёт `name` и `description` публично, без
+авторизации.
+
+Проверить выдачу можно только в живой игре: в Studio `AwardBadge` штатно не работает.
+При старте сервера печатается `[Badges] Значки: N настроено из 4`.
 
 ### 2.2 Товары — заведены, проверять не нужно
 
