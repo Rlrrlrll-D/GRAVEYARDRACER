@@ -347,10 +347,32 @@ fire.plate.Name = "Fire"
 fire.plate.AnchorPoint = Vector2.new(1, 1)
 fire.plate.Position = UDim2.new(1, -(M + (GAS_W - FIRE) / 2), 1, -(M + BRAKE_H + 10 + GAS_H + 16))
 crosshairGlyph(fire.plate, UITheme.Palette.Red, 58) -- на костяном мазке знак красный: тот же Palette.Red, что у тормоза
-bind(fire, function()
-	player:SetAttribute("TouchFire", true)
-end, function()
-	player:SetAttribute("TouchFire", false)
+
+-- ГАШЕТКА — ПЕРЕКЛЮЧАТЕЛЬ, А НЕ УДЕРЖАНИЕ (2026-08-11, «сделай как в GTA на телефоне»).
+--
+-- Удержание требовало держать палец на кнопке, а он в этот момент нужен на газе: газ,
+-- тормоз и гашетка стоят ОДНОЙ КОЛОНКОЙ под одним большим пальцем, и нажать две сразу
+-- физически нельзя. Поэтому стрелять на ходу не получалось вовсе — приходилось бросать
+-- газ. Теперь тап включает огонь, тап выключает, палец сразу возвращается на газ.
+--
+-- Целиться при этом не нужно: цель выбирает автонаводка в TurretAimClient. Вдвоём эти
+-- две правки и дают «стрельбу на ходу», по отдельности — нет.
+--
+-- bind() здесь не подходит: он гасит подсветку на отпускании пальца, а переключателю
+-- надо СВЕТИТЬСЯ, пока огонь включён. Отсюда свой обработчик.
+local firingOn = false
+local function setFiring(on: boolean)
+	firingOn = on
+	player:SetAttribute("TouchFire", on)
+	setAlpha(fire.plate, on and HELD_ALPHA or IDLE_ALPHA)
+	fire.pop.Scale = on and 0.93 or 1
+end
+
+fire.plate.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Touch
+		or input.UserInputType == Enum.UserInputType.MouseButton1 then
+		setFiring(not firingOn)
+	end
 end)
 
 -- // Когда показывать -------------------------------------------------------
@@ -382,7 +404,9 @@ local function releaseAll()
 	player:SetAttribute("TouchSteer", 0)
 	player:SetAttribute("TouchThrottle", 0)
 	player:SetAttribute("TouchBrake", 0)
-	player:SetAttribute("TouchFire", false)
+	-- Через setFiring, а не напрямую: гашетка теперь переключатель, и её надо не только
+	-- погасить, но и снять подсветку — иначе кнопка осталась бы гореть «включённой».
+	setFiring(false)
 	for input, release in heldBy do
 		heldBy[input] = nil
 		release()

@@ -84,6 +84,10 @@ end
 -- сюда оно не доходит. Значит вся остальная площадь экрана — прицел, и левше
 -- целиться так же удобно, как правше. Ход один к одному: прямое перетаскивание
 -- читается лучше любой чувствительности, подобранной на глаз.
+-- ПРОТЯЖКА ПАЛЬЦЕМ БОЛЬШЕ НЕ НАВОДИТ (2026-08-11): на сенсоре цель выбирает автонаводка
+-- ниже, и getMouseHit до aimRay даже не доходит. Слушатели оставлены живыми ради
+-- ForceTouchUI на десктопе — там TouchActive поднят вручную, а мышь есть, — но на
+-- настоящем телефоне aimPoint теперь ни на что не влияет.
 local aimTouch: InputObject? = nil
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if touchMode() and not gameProcessed and input.UserInputType == Enum.UserInputType.Touch then
@@ -107,11 +111,104 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
+-- // АВТОНАВОДКА НА СЕНСОРЕ ---------------------------------------------------
+-- «Как в GTA на телефоне» (2026-08-11, решение юзера). Там вручную не целятся вовсе —
+-- игра сама держит цель, и ровно поэтому на ходу вообще можно стрелять.
+--
+-- У нас та же причина, только жёстче: пальцев ровно два, левый на стрелках руля, правый
+-- на газе, а газ, тормоз и гашетка стоят одной колонкой под одним большим пальцем.
+-- Третьему пальцу взяться неоткуда, и протяжка для наводки требовала бросить руль или
+-- газ. Разбор целиком — в MOBILE_AUDIT.md.
+--
+-- ЗАХВАТ ДЕРЖИТСЯ, пока цель жива и в радиусе. Без этого турель дёргалась бы между
+-- одинаково близкими зомби, а трассер метался по экрану. Перевыбор — не чаще пяти раз в
+-- секунду: перебор всех зомби каждый кадр не нужен, они не телепортируются.
+local lockedTarget: Model? = nil
+local nextPick = 0
+local AUTO_PICK_PERIOD = 0.2
+
+local function zombiePoint(z: Model): Vector3?
+	local ok, pivot = pcall(function()
+		return z:GetPivot()
+	end)
+	if not ok then
+		return nil
+	end
+	return pivot.Position + Vector3.new(0, 1.5, 0) -- по груди, а не по ногам
+end
+
+local function zombieAlive(z: Model): boolean
+	if not z.Parent then
+		return false
+	end
+	local hum = z:FindFirstChildWhichIsA("Humanoid")
+	return hum == nil or hum.Health > 0
+end
+
+local function pickTarget(origin: Vector3): Model?
+	local best: Model? = nil
+	local bestDist = math.huge
+	for _, z in CollectionService:GetTagged("Zombie") do
+		if z:IsA("Model") and zombieAlive(z) then
+			local p = zombiePoint(z)
+			if p then
+				local d = (p - origin).Magnitude
+				if d < bestDist and d <= GameConfig.Weapon.Range then
+					best, bestDist = z, d
+				end
+			end
+		end
+	end
+	return best
+end
+
+-- Куда смотрит турель на сенсоре: в захваченного зомби, а если целей нет — по ходу
+-- машины, чтобы ствол не замирал в случайном положении.
+local function autoAim(vehicle: Model?): (Vector3?, Instance?)
+	local seat = vehicle and vehicle:FindFirstChild("DriveSeat")
+	if not (seat and seat:IsA("BasePart")) then
+		return nil, nil
+	end
+	local origin = (seat :: BasePart).Position
+
+	local locked = lockedTarget
+	if not (locked and zombieAlive(locked)) then
+		locked = nil
+	elseif locked then
+		local p = zombiePoint(locked)
+		if not p or (p - origin).Magnitude > GameConfig.Weapon.Range then
+			locked = nil
+		end
+	end
+
+	local now = os.clock()
+	if not locked and now >= nextPick then
+		nextPick = now + AUTO_PICK_PERIOD
+		locked = pickTarget(origin)
+	end
+	lockedTarget = locked
+
+	if locked then
+		local p = zombiePoint(locked)
+		if p then
+			-- вторым отдаём деталь зомби: по ней крест красится зелёным
+			return p, locked:FindFirstChildWhichIsA("BasePart", true)
+		end
+	end
+	return origin + (seat :: BasePart).CFrame.LookVector * 80, nil
+end
+
 -- Точка в мире под перекрестием (курсором). mouse.UnitRay учитывает
 -- инсет топ-бара правильно (в отличие от ViewportPointToRay+GetMouseLocation,
 -- что давало вертикальный сдвиг и промах мимо прицела). Вторым
 -- возвращает объект под курсором — чтобы красить крест зелёным на зомби.
 local function getMouseHit(excludeVehicle: Model?): (Vector3, Instance?)
+	if touchMode() then
+		local p, inst = autoAim(excludeVehicle)
+		if p then
+			return p, inst
+		end
+	end
 	local unitRay = aimRay()
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
