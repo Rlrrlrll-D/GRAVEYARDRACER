@@ -45,8 +45,17 @@ if ($loops.Count -ne 3) { Write-Error ("Ожидалось 3 контура, р�
 
 $SIZE = 512
 $ASPECT = 1.139
-$SKULL_H = 310.0
-$SKULL_CY = 200.0
+# Череп и шевроны — ОДНА ГРУППА, и центрируется она целиком (2026-08-11, по замечанию
+# юзера). Раньше числа стояли на глаз: сверху оставалось 45 пикселей воздуха, снизу 5, и
+# композиция кренилась вниз. Теперь положение считается — задаются только размеры и
+# зазор, а сдвиг выводится из настоящих габаритов, поэтому поменяешь размер черепа и
+# центровка не поедет.
+$SKULL_H = 270.0
+$GAP = 16.0          # воздух между зубами и верхним шевроном
+$ROW_STEP = 40.0     # расстояние между шевронами
+$PEAK = 36.0         # насколько шеврон поднимается к вершине
+$PEN_W = 24.0        # толщина шеврона. НЕ называть $PEN: имена в PowerShell
+                     # регистронезависимы, и объект пера $pen ниже затирал бы это число.
 
 function Hex([string]$h) { return [System.Drawing.ColorTranslator]::FromHtml($h) }
 function ARGB([int]$a, [string]$h) {
@@ -64,23 +73,57 @@ $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
 $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
 $g.Clear((Hex $MOSS))
 
+# --- где что лежит -----------------------------------------------------------
+# Череп строим пробно в центре холста, чтобы узнать НАСТОЯЩИЕ габариты: контур не
+# симметричен относительно своей середины, на глаз их не угадать.
+$scale = $SKULL_H / $ASPECT
+function Build-Skull([double]$cy) {
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $path.FillMode = [System.Drawing.Drawing2D.FillMode]::Alternate
+  foreach ($loop in $loops) {
+    $arr = New-Object 'System.Drawing.PointF[]' $loop.Count
+    for ($i = 0; $i -lt $loop.Count; $i++) {
+      $p = $loop[$i]
+      $arr[$i] = New-Object System.Drawing.PointF([single](256 + $p.X * $scale), [single]($cy - $p.Y * $scale))
+    }
+    $path.AddPolygon($arr)
+  }
+  return $path
+}
+
+$probePath = Build-Skull 256.0
+$pb = $probePath.GetBounds()
+$probePath.Dispose()
+
+# Шевроны считаем от низа черепа. Нижний ряд — самый нижний пиксель группы.
+# Каждое значение считаем отдельной строкой: арифметика прямо внутри литерала массива
+# в PowerShell разбирается не так, как ожидаешь (запятая связывает крепче, чем плюс).
+$rowTop = $pb.Bottom + $GAP + $PEAK + $PEN_W / 2.0   # центр ВЕРХНЕГО ряда
+$rowMid = $rowTop + $ROW_STEP
+$rowBottom = $rowTop + 2 * $ROW_STEP
+$rows = @($rowBottom, $rowMid, $rowTop)            # порядок = по убыванию яркости
+$groupTop = $pb.Top                                 # у черепа обводки нет, край = контур
+$groupBottom = $rowBottom + $PEN_W / 2.0
+
+# Один сдвиг на всю группу: её середину совмещаем с серединой холста.
+$shift = ($SIZE - ($groupBottom - $groupTop)) / 2.0 - $groupTop
+Write-Output ("Группа: {0:N0}..{1:N0}, высота {2:N0}, сдвиг {3:N0}, поля сверху/снизу {4:N0}" -f `
+  $groupTop, $groupBottom, ($groupBottom - $groupTop), $shift, ($groupTop + $shift))
+
 # --- шевроны ----------------------------------------------------------------
 # Рисуем ДО черепа: если зазор всё же съедется, череп ляжет поверх, а не наоборот.
-$pen = New-Object System.Drawing.Pen((Hex $ARROW), 26)
+$pen = New-Object System.Drawing.Pen((Hex $ARROW), [single]$PEN_W)
 $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
 $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
 $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
-# 494, а не 500: при толщине пера 26 нижний ряд иначе вылезает за край холста на пиксель.
-$rows = @(494, 452, 410)
-$alpha = @(255, 145, 65)
-$peak = 42
+$alpha = @(255, 145, 65) # нижний ярче: шевроны гаснут кверху, читается как «вперёд»
 for ($i = 0; $i -lt 3; $i++) {
   $pen.Color = (ARGB $alpha[$i] $ARROW)
-  $y = $rows[$i]
-  $pts = New-Object 'System.Drawing.Point[]' 3
-  $pts[0] = New-Object System.Drawing.Point(132, $y)
-  $pts[1] = New-Object System.Drawing.Point(256, ($y - $peak))
-  $pts[2] = New-Object System.Drawing.Point(380, $y)
+  $y = [single]($rows[$i] + $shift)
+  $pts = New-Object 'System.Drawing.PointF[]' 3
+  $pts[0] = New-Object System.Drawing.PointF(132, $y)
+  $pts[1] = New-Object System.Drawing.PointF(256, [single]($y - $PEAK))
+  $pts[2] = New-Object System.Drawing.PointF(380, $y)
   $g.DrawLines($pen, $pts)
 }
 $pen.Dispose()
@@ -88,17 +131,7 @@ $pen.Dispose()
 # --- череп ------------------------------------------------------------------
 # Y инвертируется: в контурах ось вверх, в растре вниз. Глазницы вырезает
 # правило чётности (FillMode.Alternate), руками дырки делать не нужно.
-$scale = $SKULL_H / $ASPECT
-$path = New-Object System.Drawing.Drawing2D.GraphicsPath
-$path.FillMode = [System.Drawing.Drawing2D.FillMode]::Alternate
-foreach ($loop in $loops) {
-  $arr = New-Object 'System.Drawing.PointF[]' $loop.Count
-  for ($i = 0; $i -lt $loop.Count; $i++) {
-    $p = $loop[$i]
-    $arr[$i] = New-Object System.Drawing.PointF([single](256 + $p.X * $scale), [single]($SKULL_CY - $p.Y * $scale))
-  }
-  $path.AddPolygon($arr)
-}
+$path = Build-Skull (256.0 + $shift)
 $sb = New-Object System.Drawing.SolidBrush (Hex $GOLD)
 $g.FillPath($sb, $path)
 
@@ -106,8 +139,12 @@ $out = Join-Path $outDir "game_icon.png"
 $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
 Write-Output ("Готово: " + $out)
 
-# Зазор для проверки: нижний край зубов и верхний пик шеврона.
+# Контроль: зазор между зубами и шевроном плюс поля сверху и снизу — по ним видно,
+# что группа действительно по центру, а не «примерно».
 $bounds = $path.GetBounds()
-Write-Output ("Низ черепа: {0:N0}, верхний пик шеврона: {1:N0}, зазор: {2:N0} px" -f $bounds.Bottom, ($rows[2] - $peak), (($rows[2] - $peak) - $bounds.Bottom))
+$topGap = $bounds.Top
+$bottomGap = $SIZE - (($rows[0] + $shift) + $PEN_W / 2.0)
+Write-Output ("Зазор зубы/шеврон: {0:N0} px" -f ((($rows[2] + $shift) - $PEAK) - $bounds.Bottom))
+Write-Output ("Поле сверху: {0:N0} px, снизу: {1:N0} px — расхождение {2:N0}" -f $topGap, $bottomGap, [math]::Abs($topGap - $bottomGap))
 
 $sb.Dispose(); $path.Dispose(); $g.Dispose(); $bmp.Dispose()

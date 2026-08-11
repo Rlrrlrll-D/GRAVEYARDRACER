@@ -389,6 +389,26 @@ local function releaseAll()
 	end
 end
 
+-- ШТАТНОЕ УПРАВЛЕНИЕ ГАСИМ, И ЭТО НЕ КОСМЕТИКА (2026-08-11, жалобы с телефона:
+-- «загружается штатный круг внизу слева под нашими стрелками» и «нет управления
+-- стволом»). Обе — одна причина.
+--
+-- Roblox рисует свой джойстик поверх нашей раскладки, но хуже другое: DynamicThumbstick
+-- ловит касания на ВСЕЙ ЛЕВОЙ ПОЛОВИНЕ экрана и метит их gameProcessed. А наводка турели
+-- в TurretAimClient ведётся перетаскиванием любого свободного пальца и касания с
+-- gameProcessed отсеивает — иначе прицел дёргался бы от нажатий на наши же кнопки.
+-- В итоге штатный джойстик СЪЕДАЛ половину жестов наводки, и ствол не слушался.
+--
+-- Ходить пешком в игре негде: игрок либо в машине, либо заморожен в лобби, либо смотрит
+-- заезд зрителем. Прыжок и джойстик не нужны нигде.
+local okControls = pcall(function()
+	local playerModule = require(player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule")) :: any
+	playerModule:GetControls():Disable()
+end)
+if not okControls then
+	warn("[TouchControls] не удалось выключить штатное управление — штатный джойстик останется поверх раскладки")
+end
+
 player:SetAttribute("TouchActive", true)
 
 RunService.Heartbeat:Connect(function()
