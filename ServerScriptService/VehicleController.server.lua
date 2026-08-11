@@ -104,14 +104,93 @@ local function setupVehicle(vehicle: Model)
 	end
 
 	-- Ремонт на старте: позиция, скорости, статы, сиденье снова активно.
+	--
+	-- ТЕЛЕПОРТ ИДЁТ ЧЕРЕЗ ЯКОРЬ, И ЭТО ОБЯЗАТЕЛЬНО (2026-08-11, жалоба «сгорела, а
+	-- возродилась совсем поломанной»). Двигает машину СЕРВЕР, а физикой владеет КЛИЕНТ —
+	-- без этого A-Chassis не едет вовсе, — и водитель на респавне намеренно остаётся в
+	-- кресле (см. burnAndRespawn). Голый PivotTo по клиентской сборке расходится: сервер
+	-- переставил детали, клиент продолжает считать от своего состояния, а держатся они
+	-- ШАРНИРАМИ, А НЕ СВАРКОЙ — подвеску и колёса растягивает, и машина возвращается
+	-- разобранной.
+	--
+	-- В STUDIO ЭТОГО НЕ УВИДЕТЬ: клиент и сервер там в одном процессе, расхождению
+	-- неоткуда взяться. Баг живёт только в настоящем клиенте, где между ними сеть.
+	--
+	-- Порядок ровно тот, что обкатан в PlayerFlow.holdVehicle/releaseVehicleHold (ими же
+	-- пользуется MatchManager на отсчёте): заякорить ВСЕ детали — только шасси мало,
+	-- колёса на шарнирах докрутятся и сорвут машину с места на разякоривании, — потом
+	-- переставить, снять якорь и ВЕРНУТЬ ВЛАДЕНИЕ. Возврат обязателен: якорь сбрасывает
+	-- владение на сервер, и без него получим второй известный баг — «машина не едет».
 	local function repairAtHome()
+		local occupant = (driveSeat :: VehicleSeat).Occupant
+		local driver: Player? = nil
+		if occupant and occupant.Parent then
+			driver = Players:GetPlayerFromCharacter(occupant.Parent)
+		end
+
+		local wasAnchored: { [BasePart]: boolean } = {}
+		for _, inst in vehicle:GetDescendants() do
+			if inst:IsA("BasePart") then
+				local part = inst :: BasePart
+				wasAnchored[part] = part.Anchored
+				part.Anchored = true
+			end
+		end
+
 		vehicle:PivotTo(homeCFrame)
-		for _, part in vehicle:GetDescendants() do
-			if part:IsA("BasePart") then
+
+		for part, anchored in wasAnchored do
+			if part.Parent then
+				part.Anchored = anchored
+			end
+		end
+		-- Инерцию гасим ПОСЛЕ разякоривания: у заякоренной детали скорости и так нули,
+		-- присвоение до снятия ушло бы в никуда.
+		for part in wasAnchored do
+			if part.Parent and not part.Anchored then
 				part.AssemblyLinearVelocity = Vector3.zero
 				part.AssemblyAngularVelocity = Vector3.zero
 			end
 		end
+
+		-- Владение обратно водителю. ТУРЕЛЬ ОТДЕЛЬНО: `Turret` и `GunCradle` — свои
+		-- физические сборки (их держат шарниры), якорь снял владение и с них. Не вернуть
+		-- — вернётся старая жалоба «точка выстрела запаздывает при поворотах»
+		-- (см. PlayerFlow.giveTurretOwnership).
+		if driver then
+			local owner = driver :: Player
+			local function grant()
+				pcall(function()
+					(driveSeat :: VehicleSeat):SetNetworkOwner(owner)
+				end)
+				for _, name in { "Turret", "GunCradle", "GunMesh" } do
+					local found = vehicle:FindFirstChild(name, true)
+					if found and found:IsA("BasePart") and not (found :: BasePart).Anchored then
+						pcall(function()
+							(found :: BasePart):SetNetworkOwner(owner)
+						end)
+					end
+				end
+			end
+			grant()
+			-- Ретрай с проверкой, как в PlayerFlow: одиночный SetNetworkOwner иногда не
+			-- прижимается, пока сборка оседает, и это ровно «стреляет, но не едет».
+			task.spawn(function()
+				for _ = 1, 12 do
+					local current: Player? = nil
+					pcall(function()
+						current = (driveSeat :: VehicleSeat):GetNetworkOwner()
+					end)
+					if current == owner then
+						return
+					end
+					grant()
+					task.wait(0.1)
+				end
+				warn(`[VehicleController] владение {vehicle.Name} не вернулось водителю после респавна`)
+			end)
+		end
+
 		vehicle:SetAttribute("Health", GameConfig.Vehicle.MaxHealth)
 		vehicle:SetAttribute("Fuel", GameConfig.Vehicle.MaxFuel)
 		vehicle:SetAttribute("SpeedMultiplier", 1);
