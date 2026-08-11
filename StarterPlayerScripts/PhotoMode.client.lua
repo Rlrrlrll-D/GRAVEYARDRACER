@@ -704,6 +704,14 @@ local function enter()
 	hideNametags()
 	hideCoreGui()
 	setCharacterControls(false)
+	-- ЭТОГО МАЛО, ЧТОБЫ МАШИНА ВСТАЛА. setCharacterControls глушит только штатный
+	-- PlayerModule, а A-Chassis и турель читают клавиатуру САМИ, напрямую через
+	-- UserInputService (Drive: InputBegan/Changed/Ended). Поэтому в живом клиенте
+	-- WASD одновременно вели камеру и рулили машиной, а левая кнопка стреляла прямо
+	-- в кадр. Флаг снимают три места: Drive (газ, руль, ручник) и TurretAimClient
+	-- (наводка и огонь). Атрибут, а не _G, потому что этим же мостом до A-Chassis
+	-- доезжает сенсорное управление — см. TouchControls.
+	player:SetAttribute("PhotoMode", true)
 
 	overlayGui.Enabled = true
 	panelGui.Enabled = true
@@ -744,6 +752,7 @@ local function leave()
 	restoreNametags()
 	restoreCoreGui()
 	setCharacterControls(true)
+	player:SetAttribute("PhotoMode", false)
 
 	if dof then
 		dof:Destroy()

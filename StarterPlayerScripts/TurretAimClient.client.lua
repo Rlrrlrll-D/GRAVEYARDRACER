@@ -383,7 +383,18 @@ local function applyAimSpeed(hinge: HingeConstraint)
 	end
 	hinge.AngularSpeed = (base :: number) * 2 * aimSens
 end
+-- ФОТО-РЕЖИМ ГЛУШИТ ТУРЕЛЬ ЦЕЛИКОМ. Флаг ставит PhotoMode на входе и снимает на выходе
+-- (атрибут, а не _G: тем же мостом до A-Chassis доезжает сенсорное управление). Без него
+-- в режиме съёмки ствол ездил бы за мышью, которой водят камеру, а левая кнопка стреляла
+-- бы прямо в кадр — с трассером и вспышкой. Наводку глушим тоже, а не только огонь:
+-- турель должна ЗАМЕРЕТЬ в том положении, в каком её застали, иначе кадр не выставить.
+local function photoMode(): boolean
+	return player:GetAttribute("PhotoMode") == true
+end
+
 RunService.RenderStepped:Connect(function()
+	if photoMode() then return end
+
 	local vehicle = findMyVehicle()
 	if not vehicle then return end
 
@@ -470,6 +481,7 @@ end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
+	if photoMode() then return end -- в режиме съёмки левая кнопка возит ползунки панели
 	-- На сенсоре стреляет ТОЛЬКО гашетка: там касание экрана — это наводка
 	-- прицела, и стрельба по каждому касанию высаживала бы очередь на каждый
 	-- поворот. На ноутбуке с сенсорным экраном (клавиатура есть, TouchActive нет)
