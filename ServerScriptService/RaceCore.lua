@@ -235,6 +235,30 @@ function Session.standings(self: Session, extraProgresses: { number }?): { [Play
 	return rows
 end
 
+-- Прогресс лидера среди ЖИВЫХ гонщиков, в кругах. По нему призраки-соперники
+-- держат темп (RaceScene.stepGhosts). Считаем по чекпоинтам, а не по проекции на
+-- полилинию: значение монотонное и не прыгает на круг при пересечении финиша.
+function Session.leadProgress(self: Session): number?
+	local best: number? = nil
+	for _, racer in self.racers do
+		local p = racer.laps + (racer.cpIndex - 1) / #checkpoints
+		if best == nil or p > best then
+			best = p
+		end
+	end
+	return best
+end
+
+-- Победа призрака: имя есть, игрока-победителя нет — значит все живые получают
+-- исход «lost» (outcomeFor в MatchManager). Живой победитель, если он уже есть,
+-- всегда важнее: призрак не может перебить закрытые круги.
+function Session.setGhostWinner(self: Session, name: string)
+	if not self.winnerName then
+		self.winner = nil
+		self.winnerName = name
+	end
+end
+
 function Session.isEliminated(self: Session, plr: Player): boolean
 	return self.eliminated[plr] == true
 end

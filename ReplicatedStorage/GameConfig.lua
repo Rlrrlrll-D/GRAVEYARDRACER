@@ -43,11 +43,14 @@ export type GameConfigType = {
 		SoloWaitSeconds: number, -- сколько держим место за соперниками, прежде чем пустить тех, кто есть
 		CountdownSeconds: number,
 		CheckpointRadius: number, -- studs; насколько близко надо проехать к чекпоинту
-		GhostsEnabled: boolean, -- false = чистый PvP без призраков-пейсеров
+		GhostsEnabled: boolean, -- false = чистый PvP: неполный состав едет как есть
+		GhostFillTo: number, -- сколько машин должно быть на гриде; недостающих добирают призраки
+		GhostCatchUp: number, -- доля скорости (0..1), на которую призрак ускоряется/тормозит, догоняя темп лидера
+		GhostBand: number, -- studs отставания/отрыва, на которых подстройка выходит на полную
 		CheckpointStyle: string, -- "orb" или "skull" (череп-Каспер)
 		StumbleChancePerSecond: number, -- шанс "спотыкания" призрака в секунду
 		StumbleDuration: number,
-		Ghosts: {{ Name: string, Speed: number, Color: Color3 }}, -- Speed в studs/сек
+		Ghosts: {{ Name: string, Speed: number, Offset: number, Color: Color3 }}, -- Speed в studs/сек, Offset — где призрак держится относительно лидера (studs)
 	},
 	Map: {
 		GenerateRoad: boolean, -- true = MapBuilder красит Terrain-дорогу по MapLayout.TrackPolyline
@@ -112,14 +115,26 @@ local GameConfig: GameConfigType = {
 		SoloWaitSeconds = 45, -- 45с: успеть осмотреться и не заскучать; правится одной цифрой
 		CountdownSeconds = 5,
 		CheckpointRadius = 40, -- ≥ полуширины дороги (22.4) + запас на широкую траекторию в поворотах, чтобы никто не «промахивался» мимо чекпоинта и не застревал
-		GhostsEnabled = false, -- фокус на реальных игроках; true = призраки-пейсеры для тренировки (но НЕ побеждают)
+		-- ПРИЗРАКИ = ДОБОР СОСТАВА. Пустая трасса убивает гонку сильнее слабой графики:
+		-- одиночка, которому не с кем ехать, просто выходит. Поэтому если живых меньше
+		-- GhostFillTo, недостающие места на гриде занимают призраки — и они МОГУТ
+		-- выиграть, иначе «YOU WIN» выдавалось бы даже приехавшему последним.
+		GhostsEnabled = true,
+		GhostFillTo = 3, -- 1 живой → 2 призрака, 2 живых → 1, трое и больше → ни одного
+		-- Темп: база + мягкая подстройка под лидера. Фиксированная скорость на нашей
+		-- трассе (круг ~3128 studs) либо уезжает за горизонт, либо отстаёт на круг —
+		-- призрак должен ехать РЯДОМ, за это и отвечает подстройка.
+		GhostCatchUp = 0.3,
+		GhostBand = 260,
 		CheckpointStyle = "skull", -- "orb" (магический шар) или "skull" (череп-Каспер)
 		StumbleChancePerSecond = 0.06,
 		StumbleDuration = 2,
+		-- Offset — «своё место» призрака относительно лидера: один норовит идти впереди,
+		-- другой висит на хвосте. Без этого призраки слипаются в одну точку.
 		Ghosts = {
-			{ Name = "Bone Shaker", Speed = 30, Color = Color3.fromRGB(120, 255, 180) },
-			{ Name = "Grave Digger", Speed = 34, Color = Color3.fromRGB(150, 200, 255) },
-			{ Name = "Ghost Rider", Speed = 38, Color = Color3.fromRGB(255, 160, 120) },
+			{ Name = "Bone Shaker", Speed = 62, Offset = -70, Color = Color3.fromRGB(120, 255, 180) },
+			{ Name = "Grave Digger", Speed = 66, Offset = 40, Color = Color3.fromRGB(150, 200, 255) },
+			{ Name = "Ghost Rider", Speed = 70, Offset = 110, Color = Color3.fromRGB(255, 160, 120) },
 		},
 	},
 	Map = {

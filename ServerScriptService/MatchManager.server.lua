@@ -7,7 +7,12 @@
 --         ──▶ Countdown ──▶ Racing ──▶ Results ──▶ Lobby
 --
 -- Разделение труда: RaceCore — логика заезда (чекпоинты/круги/победитель),
--- RaceScene — визуал (маркеры, призраки), PlayerFlow — игрок/машины/лобби.
+-- RaceScene — сцена (маркеры, призраки-соперники), PlayerFlow — игрок/машины/лобби.
+--
+-- ДОБОР СОСТАВА: если живых гонщиков меньше Race.GhostFillTo, недостающие места
+-- на решётке занимают призраки (RaceScene.spawnGhosts на отсчёте, clearGhosts в
+-- итогах). Они считаются в позициях и МОГУТ выиграть заезд — одиночка едет
+-- гонку, а не круг почёта по пустой трассе.
 --
 -- КЛЮЧЕВОЕ: выбывший (кончились жизни) НЕ выкидывается сразу — он остаётся
 -- ЗРИТЕЛЕМ (spectate) и досматривает гонку; в лобби все возвращаются ВМЕСТЕ
@@ -285,7 +290,16 @@ local function runCountdown(): { Player }
 			end
 		end
 	end
-	print(`[MatchManager] На гриде {#participants} машин(ы).`)
+	-- ДОБОР СОСТАВА ПРИЗРАКАМИ. Одиночка не должен ехать по пустой трассе: пустой
+	-- грид читается как «в игре никого» и игрок уходит, не доехав первый круг.
+	-- Поэтому недостающие до GhostFillTo места занимают призраки — на настоящих
+	-- местах решётки, следом за живыми, и они МОГУТ выиграть (см. runRacing).
+	local ghostCount = 0
+	if cfg.GhostsEnabled and #participants > 0 then
+		ghostCount = math.clamp(cfg.GhostFillTo - #participants, 0, PlayerFlow.MaxSlots - #participants)
+	end
+	RaceScene.spawnGhosts(ghostCount, #participants + 1)
+	print(`[MatchManager] На гриде {#participants} машин(ы) и {RaceScene.ghostCount()} призрак(ов).`)
 
 	-- ФАЛЬСТАРТ ЗАПРЕЩЁН: машины держим на месте весь отсчёт. Держать надо ПОСЛЕ
 	-- посадки — holdVehicle якорит машину, а якорь снимает владение, которое
@@ -293,7 +307,6 @@ local function runCountdown(): { Player }
 	for _, plr in participants do
 		PlayerFlow.holdVehicle(plr)
 	end
-	RaceScene.resetGhosts()
 
 	for c = cfg.CountdownSeconds, 1, -1 do
 		broadcastLobby()
@@ -328,7 +341,8 @@ local function runRacing(participants: { Player }): (Player?, string?, RaceCore.
 		local payload: { [string]: any } = {
 			Phase = "Racing", Go = true,
 			Lap = 1, Laps = cfg.Laps, Position = 1,
-			Racers = math.max(#participants, 1), NextCheckpoint = 1,
+			-- призраки-соперники тоже гонщики: и в счётчике HUD, и в позиции (standings)
+			Racers = math.max(#participants + RaceScene.ghostCount(), 1), NextCheckpoint = 1,
 		}
 		if table.find(participants, plr) then
 			payload.Participant = true
@@ -383,18 +397,36 @@ local function runRacing(participants: { Player }): (Player?, string?, RaceCore.
 		lastTick = now
 
 		local frame = session:step(occupiedSeats())
+		if frame.allOut then
+			-- Живых на дистанции не осталось: победу забирает ведущий призрак, если он
+			-- есть (иначе в итогах у выбывшего одиночки стояло бы «no one wins»).
+			--
+			-- РЕЖИМ ЗРИТЕЛЯ ЗДЕСЬ НЕ ВКЛЮЧАЕМ, и проверка стоит ВЫШЕ рассылки Spectate
+			-- намеренно: экран итогов придёт в этом же кадре, и зритель успел бы только
+			-- моргнуть баннером «OUT OF LIVES — SPECTATING» и кинуть камеру в пустое
+			-- небо (следить не за кем — живых машин нет). Разбор машин сделает
+			-- returnPlayerToLobby в итогах.
+			local lead = RaceScene.leadGhostName()
+			if lead then
+				session:setGhostWinner(lead)
+			end
+			break -- гонщиков не осталось — заезд окончен
+		end
 		for _, plr in frame.newlyEliminated do
 			spectate(plr, leaderUserId) -- НЕ в лобби: зритель до конца заезда
 			spectators[plr] = true
-		end
-		if frame.allOut then
-			break -- гонщиков не осталось — заезд окончен без победителя
 		end
 		if not session.everRaced and now - startClock > RACE_ABORT_SECONDS then
 			break -- никто так и не сел за руль (все ушли на отсчёте)
 		end
 
-		RaceScene.stepGhosts(now, dt)
+		RaceScene.stepGhosts(now, dt, session:leadProgress())
+		-- Призрак закрыл круги раньше живых → заезд окончен, у живых исход «lost».
+		local ghostWinner = RaceScene.finishedGhost()
+		if ghostWinner then
+			session:setGhostWinner(ghostWinner)
+			break
+		end
 
 		if now - lastBroadcast >= 0.4 and not session.winnerName then
 			lastBroadcast = now
@@ -444,6 +476,7 @@ end
 
 local function runResults(winner: Player?, winnerName: string?, session: RaceCore.Session, participants: { Player })
 	phase = Phase.Results
+	RaceScene.clearGhosts() -- призраки живут ровно один заезд: в лобби трасса пустая
 	broadcastLobby()
 	-- 1) полноэкранный экран итогов ВСЕМ участникам — и выжившим, и зрителям-выбывшим
 	for _, plr in participants do
@@ -501,7 +534,10 @@ local function runResults(winner: Player?, winnerName: string?, session: RaceCor
 end
 
 -- // Главный цикл матча -------------------------------------------------------
-print(`[MatchManager] Сессии включены: трасса {math.floor(RaceCore.TrackLength)} studs, {#RaceCore.Checkpoints} чекпоинтов, {RaceScene.GhostCount} призраков.`)
+print(
+	`[MatchManager] Сессии включены: трасса {math.floor(RaceCore.TrackLength)} studs, {#RaceCore.Checkpoints} чекпоинтов, `
+		.. (cfg.GhostsEnabled and `состав добирается призраками до {cfg.GhostFillTo}.` or `призраки выключены.`)
+)
 
 while true do
 	runLobby()
