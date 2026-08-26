@@ -23,7 +23,9 @@ for _, eventName in Net.Events do
 end
 
 -- // Collision Groups ---------------------------------------------------
-local GROUPS = { "Vehicles", "Zombies", "Obstacles", "Environment", "Projectiles" }
+-- Bystanders — те, кто сейчас НЕ в заезде: стоят у старта замороженные (PlayerFlow).
+-- Увернуться они не могут, поэтому машина обязана проходить сквозь них.
+local GROUPS = { "Vehicles", "Zombies", "Obstacles", "Environment", "Projectiles", "Bystanders" }
 
 for _, groupName in GROUPS do
 	local ok = pcall(function()
@@ -45,5 +47,8 @@ PhysicsService:CollisionGroupSetCollidable("Zombies", "Obstacles", false)
 PhysicsService:CollisionGroupSetCollidable("Zombies", "Environment", true)
 PhysicsService:CollisionGroupSetCollidable("Projectiles", "Zombies", false) -- hits are raycast, not physical
 PhysicsService:CollisionGroupSetCollidable("Projectiles", "Environment", false)
+-- Ждущих в лобби машина не сбивает: они заморожены у старта, а трасса замкнута —
+-- гонщик проезжает мимо них на каждом круге.
+PhysicsService:CollisionGroupSetCollidable("Vehicles", "Bystanders", false)
 
 print("[Bootstrap] Remotes created and collision groups configured.")

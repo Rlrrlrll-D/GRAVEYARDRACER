@@ -25,6 +25,22 @@ local vehicleOfPlayer: { [Player]: Model } = {}
 -- замораживается, пока не сядет в машину. Никакой платформы/диорамы.
 local START_CF = CFrame.new(28, 5, 28)
 
+-- Обочина для ждущих: полполотна 22.4 + запас, чтобы гонщика не тянуло в толпу.
+local LOBBY_SIDE = 32
+local LOBBY_CLEAR_RADIUS = 7 -- в каком радиусе считаем декор, выбирая сторону
+
+-- Пока игрок не за рулём, машина обязана проходить сквозь него (он заморожен у
+-- старта и увернуться не может). Группа заведена в Bootstrap.
+local function setCharacterGroup(char: Model, group: string)
+	for _, d in char:GetDescendants() do
+		if d:IsA("BasePart") then
+			pcall(function()
+				d.CollisionGroup = group
+			end)
+		end
+	end
+end
+
 local function freeze(hum: Humanoid)
 	hum.WalkSpeed = 0
 	hum.JumpPower = 0
@@ -56,8 +72,10 @@ function PlayerFlow.sendToLobby(player: Player)
 		hum.Sit = false
 	end
 	task.wait() -- дать физике отпустить персонажа
-	local scatter = Vector3.new(math.random(-6, 6), 0, math.random(-6, 6))
+	-- разброс ВДОЛЬ обочины, а не куда попало: вбок он выталкивал бы обратно на полотно
+	local scatter = START_CF.RightVector * math.random(-5, 5)
 	char:PivotTo(START_CF + scatter)
+	setCharacterGroup(char, "Bystanders") -- сквозь ждущих машина проезжает
 	if hum then
 		freeze(hum) -- под заставкой не бродим
 	end
@@ -479,7 +497,8 @@ function PlayerFlow.seatDriver(player: Player)
 	if not (car and seat and seat:IsA("VehicleSeat") and char and hum and hum.Health > 0) then
 		return
 	end
-	unfreeze(hum :: Humanoid); -- разморозить перед посадкой
+	unfreeze(hum :: Humanoid) -- разморозить перед посадкой
+	setCharacterGroup(char :: Model, "Default"); -- за рулём он снова обычное тело
 	(seat :: VehicleSeat).Disabled = false
 	-- Надёжная посадка: под StreamingEnabled одиночный Sit сразу после спавна (машина
 	-- ещё оседает на террейн) часто НЕ регистрирует Occupant на сервере — а пока
@@ -663,14 +682,36 @@ function PlayerFlow.init()
 		local dir = Vector3.new(sd.X, 0, sd.Y).Unit
 
 		-- Место игрока под заставкой — ПОЗАДИ всей колонны (иначе машина заднего
-		-- ряда спавнится прямо в стоящего игрока) и тоже по осевой, не по прямой.
+		-- ряда спавнится прямо в стоящего игрока) и НА ОБОЧИНЕ.
+		--
+		-- Раньше точка лежала прямо на осевой — то есть ждущие стояли посреди
+		-- полотна. Трасса замкнута, гонщик проходит это место КАЖДЫЙ круг, а
+		-- ждущие заморожены и увернуться не могут: получалась толпа на racing line
+		-- (юзер поймал это на скриншоте с тестовыми клиентами Studio). Отходим вбок
+		-- за край полотна и выбираем ту сторону, где меньше декора.
+		local function sideIsClear(at: Vector3): number
+			local n = 0
+			for _, part in workspace:GetPartBoundsInRadius(at, LOBBY_CLEAR_RADIUS) do
+				if part.CollisionGroup == "Obstacles" then -- весь декор карты
+					n += 1
+				end
+			end
+			return n
+		end
 		local function lobbyCF(y: number): CFrame
 			local depth = gridDepthStuds > 0 and gridDepthStuds or (GRID_ROWS - 1) * GRID_ROW_GAP
-			local p = trackPointBehind(depth + 22)
-			if p then
-				return CFrame.new(Vector3.new(p.X, y, p.Y))
+			local p, fwd = trackPointBehind(depth + 22)
+			local at, forward
+			if p and fwd then
+				at, forward = Vector3.new(p.X, y, p.Y), Vector3.new(fwd.X, 0, fwd.Y)
+			else
+				at, forward = Vector3.new(sx, y, sz) - dir * (depth + 22), dir
 			end
-			return CFrame.new(Vector3.new(sx, y, sz) - dir * (depth + 22))
+			local side = Vector3.new(-forward.Z, 0, forward.X) -- перпендикуляр к полотну
+			local left, right = at - side * LOBBY_SIDE, at + side * LOBBY_SIDE
+			local spot = sideIsClear(left) <= sideIsClear(right) and left or right
+			-- лицом к трассе: под заставкой видно решётку и проезжающих
+			return CFrame.lookAt(spot, Vector3.new(at.X, spot.Y, at.Z))
 		end
 
 		-- дефолт до готовности террейна
