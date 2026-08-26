@@ -199,11 +199,21 @@ ONE MORE LIFE 25, SACK OF BONES 49. Ненастроенный товар на �
 > trigger and let the turret do the talking. Lose all three lives and you're out —
 > the race goes on without you.
 >
+> Empty grid? The dead take the free slots. Ghost racers line up beside you, hold
+> your pace lap for lap, and take the win if you drop it.
+>
 > • Races for up to 8 drivers, three laps, last one breathing takes it
+> • Ghost racers fill an empty grid — you never roll out alone
 > • Turret on the roll cage: aim with the mouse, hold to fire
 > • Every zombie you put down is bones
 > • Spend bones in the shop — skins, an extra life, a sack of bones
 > • Fog, bats, and things moving just past the headlights
+>
+> 🏆 Can you collect all 4 secret skull badges? 💀
+
+872 символа из 1000 — влезает. Абзац про призраков добавлен 2026-08-26 вместе с
+добором состава (`Race.GhostFillTo`): страница обещает ровно то, что видит первый
+зашедший — грид не пустует.
 
 **Теги:** racing, zombie, horror, survival, cars, spooky, halloween, shooter
 
@@ -221,8 +231,10 @@ ONE MORE LIFE 25, SACK OF BONES 49. Ненастроенный товар на �
   `Bones` клиент переписать не может: серверные атрибуты с клиента не реплицируются.
 - **Сохранения переживают сбой сети.** `PlayerData` ходит в DataStore через `withRetry`
   (4 попытки), держит замок сессии и автосохраняется раз в 150 с.
-- **Одиночка не заперт в лобби.** Порог `MinRacers = 3` мягкий: через
-  `Race.SoloWaitSeconds = 45` заезд стартует с теми, кто есть.
+- **Одиночка не заперт в лобби и не едет по пустой трассе.** Порог `MinRacers = 3`
+  мягкий: через `Race.SoloWaitSeconds = 45` заезд стартует с теми, кто есть, а
+  недостающие места на решётке занимают призраки (`Race.GhostFillTo = 3`). Они
+  считаются в позициях HUD и могут выиграть — «YOU WIN» за круг почёта не выдаётся.
 - **Новичку объясняют игру.** Пять подсказок первого заезда, флаг в записи DataStore.
 - **Бэкдоров в месте нет.** Проверены все 73 скрипта, включая сторонние (A-Chassis,
   `Animate` зомби) — разбор в `SECURITY_AUDIT.md`. Там же закрытая дыра в ремоутах
