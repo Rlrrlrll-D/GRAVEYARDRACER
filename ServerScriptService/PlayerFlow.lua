@@ -244,6 +244,66 @@ local function ensureTemplate(): Model?
 	return template
 end
 
+-- // Успокоить механику A-Chassis --------------------------------------------
+-- ЖАЛОБА 2026-08-27 (планшет, живой клиент): «на старте багги улетела к дереву,
+-- передняя подвеска деформировалась».
+--
+-- Разбор. Машину на отсчёте держит ЯКОРЬ (holdVehicle ниже), а клиентский Drive всё
+-- это время продолжает крутиться и 15 раз в секунду переписывает силовые объекты
+-- AC6: `#AV` (BodyAngularVelocity на каждом колесе, P = 1e9) и `Steer` (BodyGyro на
+-- рычаге, P = 90000, MaxTorque 50000 — при массе рычага 0.8). У ЗАЯКОРЕННОЙ детали
+-- владельца нет, поэтому эти записи НИКУДА НЕ ЕДУТ: они живут только у клиента, а на
+-- сервере остаются значения пятисекундной давности.
+--
+-- На GO сервер снимает якорь и отдаёт владение. Передача владения идёт по сети — на
+-- планшете это сотни миллисекунд, и всё это окно СЕРВЕР считает физику по своим,
+-- протухшим силам, а клиент по своим. В момент, когда владение перещёлкивается, две
+-- версии механизма сходятся рывком: рычаг получает удар от гироскопа, пружину
+-- (Stiffness 8000, ход 2.1..3.3) пробивает за упор — и машину выкидывает с грида.
+--
+-- В STUDIO ЭТОГО НЕ УВИДЕТЬ, как и родственного бага с респавном (VehicleController):
+-- там передача владения мгновенная, окна расхождения не существует.
+--
+-- Лечится не подбором сил, а тем, чтобы отдавать машину клиенту с ПОКОЯЩЕЙСЯ
+-- механикой: обнуляем моторы колёс и просим гироскопы держать ровно ту позу, в
+-- которой рычаги уже стоят. Через кадр-другой Drive перепишет всё сам — но уже
+-- будучи владельцем, то есть без спора с сервером.
+local function quietChassis(car: Model)
+	local wheels = car:FindFirstChild("Wheels")
+	if wheels then
+		for _, w in wheels:GetChildren() do
+			local av = w:FindFirstChild("#AV")
+			if av and av:IsA("BodyAngularVelocity") then
+				(av :: BodyAngularVelocity).AngularVelocity = Vector3.zero;
+				(av :: BodyAngularVelocity).MaxTorque = Vector3.zero
+			end
+			local arm = w:FindFirstChild("Arm")
+			local steer = arm and arm:FindFirstChild("Steer")
+			if arm and arm:IsA("BasePart") and steer and steer:IsA("BodyGyro") then
+				-- цель = ТЕКУЩАЯ поза рычага: гироскопу нечего доворачивать
+				(steer :: BodyGyro).CFrame = (arm :: BasePart).CFrame
+			end
+		end
+	end
+	local seat = car:FindFirstChild("DriveSeat")
+	local flip = seat and seat:FindFirstChild("Flip")
+	if flip and flip:IsA("BodyGyro") then
+		(flip :: BodyGyro).MaxTorque = Vector3.zero -- дуга «переворота» на старте не нужна
+	end
+end
+PlayerFlow.quietChassis = quietChassis -- тем же пользуется VehicleController на респавне
+
+-- Погасить инерцию. Только ПОСЛЕ разякоривания: у заякоренной детали скорости и так
+-- нули, присвоение до снятия якоря ушло бы в никуда.
+local function stillVelocities(car: Model)
+	for _, p in car:GetDescendants() do
+		if p:IsA("BasePart") and not (p :: BasePart).Anchored then
+			(p :: BasePart).AssemblyLinearVelocity = Vector3.zero;
+			(p :: BasePart).AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+end
+
 -- // ТУРЕЛЬ: ставим на место и привариваем ПОСЛЕ спавна ------------------------
 -- Жалоба юзера: «пулемёт висит в воздухе над машиной». Разбор показал, что в шаблоне
 -- вся машина держится ЯКОРЯМИ (детали `Part` — невидимые заякоренные плиты
@@ -358,12 +418,59 @@ local function tuneHeadlights(car: Model)
 	end
 end
 
+-- Турель уже стоит на месте? Сверяем позу `TurretBase` относительно сиденья с
+-- шаблонной: если совпала, второй проход не нужен, а лишний проход по машине с
+-- водителем опасен (см. ниже).
+local TURRET_POSE_TOL = 0.25
+local function turretMounted(car: Model): boolean
+	local t = template
+	local tSeat = t and t:FindFirstChild("DriveSeat")
+	local tBase = t and t:FindFirstChild("TurretBase", true)
+	local seat = car:FindFirstChild("DriveSeat")
+	local base = car:FindFirstChild("TurretBase", true)
+	if
+		not (
+			tSeat
+			and tSeat:IsA("BasePart")
+			and tBase
+			and tBase:IsA("BasePart")
+			and seat
+			and seat:IsA("BasePart")
+			and base
+			and base:IsA("BasePart")
+		)
+	then
+		return false
+	end
+	local want = (tSeat :: BasePart).CFrame:Inverse() * (tBase :: BasePart).CFrame
+	local have = (seat :: BasePart).CFrame:Inverse() * (base :: BasePart).CFrame
+	return (want.Position - have.Position).Magnitude <= TURRET_POSE_TOL
+end
+
 local function mountTurret(car: Model, player: Player?)
 	local t = template
 	local tSeat = t and t:FindFirstChild("DriveSeat")
 	local seat = car:FindFirstChild("DriveSeat")
 	if not (tSeat and tSeat:IsA("BasePart") and seat and seat:IsA("BasePart")) then
 		return
+	end
+	-- МАШИНУ С ВОДИТЕЛЕМ ПЕРЕБИРАТЬ «НА ЖИВУЮ» НЕЛЬЗЯ. Как только игрок сел, физикой
+	-- владеет КЛИЕНТ, и любая перестановка детали с сервера расходится с его сборкой:
+	-- сервер переставил, клиент считает от своего — держатся детали шарнирами, а не
+	-- сваркой, и подвеску растягивает. Это тот же механизм, по которому машина
+	-- «возвращалась разобранной» после респавна (VehicleController.repairAtHome), и
+	-- лечится он тем же: всю операцию делаем НА ЯКОРЕ, а потом возвращаем владение.
+	local occupied = seat:IsA("VehicleSeat") and (seat :: VehicleSeat).Occupant ~= nil
+	local frozen: { [BasePart]: boolean }? = nil
+	if occupied then
+		local snapshot: { [BasePart]: boolean } = {}
+		for _, d in car:GetDescendants() do
+			if d:IsA("BasePart") then
+				snapshot[d :: BasePart] = (d :: BasePart).Anchored;
+				(d :: BasePart).Anchored = true
+			end
+		end
+		frozen = snapshot
 	end
 	-- ПОРЯДОК ВАЖЕН. Двигать деталь, уже вваренную в сборку машины, НЕЛЬЗЯ: сдвиг
 	-- тащит ВСЮ сборку — кузов с колёсами, — и подвеску рвёт (машина буквально
@@ -399,7 +506,9 @@ local function mountTurret(car: Model, player: Player?)
 		local src = t:FindFirstChild(name, true)
 		local dst = car:FindFirstChild(name, true)
 		if src and src:IsA("BasePart") and dst and dst:IsA("BasePart") then
-			dst.Anchored = false
+			if not frozen then
+				dst.Anchored = false -- на замороженной машине якорь как раз и нужен: двигаем ОДНУ деталь
+			end
 			-- поза из шаблона, пересчитанная от текущего сиденья
 			dst.CFrame = seat.CFrame * (tSeat.CFrame:Inverse() * src.CFrame)
 		end
@@ -416,6 +525,20 @@ local function mountTurret(car: Model, player: Player?)
 			w.Part1 = part
 			w.C0 = seat.CFrame:Inverse() * part.CFrame
 			w.Parent = part
+		end
+	end
+	if frozen then
+		for p, wasAnchored in frozen do
+			if p.Parent then
+				p.Anchored = wasAnchored
+			end
+		end
+		quietChassis(car)
+		stillVelocities(car)
+		if player then
+			pcall(function()
+				(seat :: VehicleSeat):SetNetworkOwner(player :: Player)
+			end)
 		end
 	end
 	if player then
@@ -469,15 +592,19 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 	CollectionService:AddTag(car, "PlayerVehicle") -- VehicleController подхватит
 	vehicleOfPlayer[player] = car
 	-- Турель ставим ПОСЛЕ инициализации A-Chassis: он на старте разякоривает детали и
-	-- сваривает машину по-своему, поэтому раньше времени крепить бесполезно —
-	-- перетрёт. Повторяем дважды: первый проход ловит обычный случай, второй —
-	-- если инициализация в этот раз оказалась дольше.
+	-- сваривает машину по-своему, поэтому раньше времени крепить бесполезно — перетрёт.
 	task.spawn(function()
-		for _, delay in { 0.4, 1.6 } do
-			task.wait(delay)
-			if car.Parent then
-				pcall(mountTurret, car, player)
-			end
+		task.wait(0.4)
+		if car.Parent then
+			pcall(mountTurret, car, player)
+		end
+		-- Второй проход — ТОЛЬКО если первый не прижился (инициализация AC6 в этот раз
+		-- оказалась дольше). Гонять его вслепую нельзя: к этой секунде игрок уже за
+		-- рулём, машина у клиента, и лишняя перестановка деталей её ломает.
+		task.wait(1.6)
+		if car.Parent and not turretMounted(car) then
+			warn(`[PlayerFlow] {car.Name}: турель не прижилась с первого раза — второй проход.`)
+			pcall(mountTurret, car, player)
 		end
 	end)
 	return car
@@ -568,6 +695,9 @@ function PlayerFlow.holdVehicle(player: Player)
 			p.Anchored = true
 		end
 	end
+	-- Силовые объекты AC6 гасим и на входе в удержание: пока машина стоит на якоре,
+	-- серверная копия «моторов» не должна оставаться взведённой (см. quietChassis).
+	quietChassis(car)
 	heldCars[car] = prev
 end
 
@@ -583,6 +713,11 @@ function PlayerFlow.releaseVehicleHold(player: Player)
 			p.Anchored = wasAnchored
 		end
 	end
+	-- ОТДАЁМ МАШИНУ КЛИЕНТУ В ПОКОЕ, И ЭТО ГЛАВНОЕ В ЭТОЙ ФУНКЦИИ. Разбор — над
+	-- quietChassis: без этого на GO сервер и клиент секунду считают физику по разным
+	-- силам, и на планшете машину выкидывало с грида с вывернутой подвеской.
+	quietChassis(car)
+	stillVelocities(car)
 	local seat = car:FindFirstChild("DriveSeat")
 	if not (seat and seat:IsA("VehicleSeat")) then
 		return

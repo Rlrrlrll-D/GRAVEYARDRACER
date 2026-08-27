@@ -19,6 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local VehicleRegistry = require(ReplicatedStorage:WaitForChild("VehicleRegistry"))
+local PlayerFlow = require(script.Parent:WaitForChild("PlayerFlow"))
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local updateStats = remotes:WaitForChild("UpdateStats") :: RemoteEvent
@@ -152,6 +153,11 @@ local function setupVehicle(vehicle: Model)
 				part.AssemblyAngularVelocity = Vector3.zero
 			end
 		end
+		-- Инерции мало: у AC6 своя силовая обвязка (моторы колёс `#AV`, гироскопы руля),
+		-- и пока машина стояла на якоре, серверная копия этих сил осталась взведённой, а
+		-- клиентская ушла вперёд — на передаче владения они сходятся рывком и рвут
+		-- подвеску. Разбор целиком — над PlayerFlow.quietChassis.
+		PlayerFlow.quietChassis(vehicle)
 
 		-- Владение обратно водителю. ТУРЕЛЬ ОТДЕЛЬНО: `Turret` и `GunCradle` — свои
 		-- физические сборки (их держат шарниры), якорь снял владение и с них. Не вернуть
@@ -357,6 +363,126 @@ local function setupVehicle(vehicle: Model)
 			part.Touched:Connect(onPartTouched)
 		end
 	end
+
+	-- // Вахта за целостностью шасси --------------------------------------
+	-- ЖАЛОБА 2026-08-27 (планшет): «на старте багги улетела к дереву, передняя
+	-- подвеска деформировалась». Первопричину закрывает PlayerFlow (машину отдают
+	-- клиенту с покоящейся механикой, см. quietChassis), но само порванное шасси не
+	-- лечилось ничем: игрок доигрывал заезд на растянутой машине, и по сути заезд был
+	-- для него кончен. Поэтому — сторож: заметил разрыв, собрал машину обратно.
+	--
+	-- Порог намеренно грубый, и это не небрежность. Колесо держит шарнир, а ход
+	-- пружины 2.1..3.3 studs — уехать от сиденья на 8 studs ДАЛЬШЕ, чем было собрано,
+	-- у целой машины оно физически не может. Значит срабатывание = механизм правда
+	-- разорван, а не «подпрыгнули на кочке». Выдержка в секунду добавлена, чтобы не
+	-- ловить одиночный кадр рассинхрона на передаче владения.
+	--
+	-- Чиним НА МЕСТЕ, а не телепортом на старт: разорвана сборка, а не позиция, и
+	-- отбрасывать игрока к решётке посреди круга было бы наказанием за наш же баг.
+	-- Поза каждой детали снимается относительно СИДЕНЬЯ один раз, когда A-Chassis
+	-- собрал шасси и турель уже приварена, — это и есть эталон «как собрано».
+	local TEAR_SLACK = 8
+	local TEAR_HOLD = 1
+	local TEAR_COOLDOWN = 5
+
+	task.spawn(function()
+		local wheels: Instance? = nil
+		for _ = 1, 100 do -- ждём, пока AC6 достроит шасси (создаёт `Arm` у каждого колеса)
+			local w = vehicle:FindFirstChild("Wheels")
+			local any = w and w:FindFirstChildWhichIsA("BasePart")
+			if any and any:FindFirstChild("Arm") then
+				wheels = w
+				break
+			end
+			task.wait(0.1)
+		end
+		if not wheels or not vehicle.Parent then
+			return
+		end
+		task.wait(0.6) -- дать PlayerFlow приварить турель: её поза тоже входит в эталон
+
+		local seatCF = (driveSeat :: VehicleSeat).CFrame
+		local restPose: { [BasePart]: CFrame } = {}
+		for _, d in vehicle:GetDescendants() do
+			if d:IsA("BasePart") then
+				restPose[d :: BasePart] = seatCF:Inverse() * (d :: BasePart).CFrame
+			end
+		end
+		local restDist: { [BasePart]: number } = {}
+		for _, w in (wheels :: Instance):GetChildren() do
+			if w:IsA("BasePart") then
+				restDist[w :: BasePart] = ((w :: BasePart).Position - (driveSeat :: VehicleSeat).Position).Magnitude
+			end
+		end
+
+		local function rebuild()
+			local occupant = (driveSeat :: VehicleSeat).Occupant
+			local driver: Player? = nil
+			if occupant and occupant.Parent then
+				driver = Players:GetPlayerFromCharacter(occupant.Parent)
+			end
+			local wasAnchored: { [BasePart]: boolean } = {}
+			for _, d in vehicle:GetDescendants() do
+				if d:IsA("BasePart") then
+					wasAnchored[d :: BasePart] = (d :: BasePart).Anchored;
+					(d :: BasePart).Anchored = true
+				end
+			end
+			local home = (driveSeat :: VehicleSeat).CFrame
+			for part, rel in restPose do
+				if part.Parent then
+					part.CFrame = home * rel
+				end
+			end
+			for part, anchored in wasAnchored do
+				if part.Parent then
+					part.Anchored = anchored
+				end
+			end
+			for part in wasAnchored do
+				if part.Parent and not part.Anchored then
+					part.AssemblyLinearVelocity = Vector3.zero
+					part.AssemblyAngularVelocity = Vector3.zero
+				end
+			end
+			PlayerFlow.quietChassis(vehicle)
+			if driver then
+				pcall(function()
+					(driveSeat :: VehicleSeat):SetNetworkOwner(driver :: Player)
+				end)
+			end
+			warn(`[VehicleController] {vehicle.Name}: шасси разорвано — собрано заново на месте.`)
+		end
+
+		local tornSince: number? = nil
+		local nextRebuildAt = 0
+		while vehicle.Parent do
+			task.wait(0.5)
+			local seat = driveSeat :: VehicleSeat
+			-- на якоре (отсчёт, съёмка) и на горящей машине не сторожим: там ничего не едет
+			if seat.Anchored or vehicle:GetAttribute("Destroyed") then
+				tornSince = nil
+				continue
+			end
+			local torn = false
+			for part, dist in restDist do
+				if part.Parent and (part.Position - seat.Position).Magnitude > dist + TEAR_SLACK then
+					torn = true
+					break
+				end
+			end
+			if not torn then
+				tornSince = nil
+			else
+				tornSince = tornSince or os.clock()
+				if os.clock() - (tornSince :: number) >= TEAR_HOLD and os.clock() >= nextRebuildAt then
+					nextRebuildAt = os.clock() + TEAR_COOLDOWN
+					tornSince = nil
+					pcall(rebuild)
+				end
+			end
+		end
+	end)
 end
 
 for _, vehicle in CollectionService:GetTagged(TAG) do
