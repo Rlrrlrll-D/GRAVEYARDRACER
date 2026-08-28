@@ -98,14 +98,59 @@ backdrop.BackgroundTransparency = 1
 backdrop.Visible = false
 backdrop.Parent = gui
 
+-- // РАЗМЕТКА ИТОГА: строки не шире букв тайтла --------------------------------
+--
+-- ЖАЛОБА 2026-08-28: «„game over“ нужно увеличить, чтобы то, что под ним не выходило
+-- за его границы, и если нужно — уменьшить надпись под ним».
+--
+-- Замер живого экрана (окно 1530x560) объяснил, почему тайтл мелкий. У него
+-- `TextScaled` и коробка высотой 150, но движок упирает TextSize в 100 — тот же
+-- потолок, что и у заставки (см. разбор в LobbyUI). Поэтому «GAME OVER» рисовался
+-- 344 px в ширину при коробке 1377, а подпись под ним — 566 px, то есть на 222 px
+-- ШИРЕ тайтла. Растить буквы сверх сотни умеет только `UIScale`.
+--
+-- И ГЛАВНОЕ: У ТАЙТЛА СНЯТ `TextScaled`. Замер (та же сцена, UIScale 1 / 2 / 1.35)
+-- показал, что с ним буквы не растут ВООБЩЕ: `TextBounds` остаётся 344x100 на любом
+-- множителе, растёт только коробка — движок каждый раз пересчитывает кегль под неё
+-- и каждый раз упирается в потолок TextSize = 100. Стоит поставить фиксированный
+-- кегль, и тот же `UIScale` даёт честные 686 px при множителе 2. Ровно поэтому в
+-- заставке (LobbyUI) тайтл тоже с выключенным `TextScaled` — там на эти грабли уже
+-- наступали.
+--
+-- Множитель считаем как в заставке: тайтл занимает TITLE_FILL ширины экрана, но не
+-- выше TITLE_MAX_H его высоты — иначе на низком окне буквы съедают весь кадр.
+--
+-- А строки под ним получают КОРОБКУ РОВНО ПО БУКВАМ ТАЙТЛА. У них `TextScaled`
+-- остался, и он ужимает их сам, ровно настолько, насколько нужно: «уменьшить надпись
+-- под ним» происходит без единой подобранной цифры и не ломается ни на длинном имени
+-- победителя, ни на другом разрешении.
+local TITLE_Y = 0.42 -- где стоит центр тайтла, доля высоты экрана
+local TITLE_SIZE = 100 -- потолок TextSize у движка; крупнее делает уже UIScale
+local TITLE_FILL = 0.62 -- какую долю ширины занимают его буквы
+-- ВЫСОТА БУКВ — РОВНО КАК У «GRAVEYARD RACER» (просьба юзера: «сделай размер
+-- „game over“ = „graveyard racer“»). Цифра не на глаз, а из замера обеих надписей
+-- в одной сессии: у заставки коробка тайтла 100 при общем множителе цепочки 1.679,
+-- то есть строка занимает 168 px из 560 — 30% высоты экрана. Здесь коробка тоже
+-- ровно TITLE_SIZE, значит тот же процент даёт тот же кегль.
+--
+-- Слово короче («GAME OVER» против «GRAVEYARD RACER»), поэтому по ширине оно
+-- меньше — но это и есть «тот же размер»: одинаковый кегль, не одинаковая длина.
+local TITLE_MAX_H = 0.30 -- и не выше этой доли высоты
+local SUB_H = 44 -- высота коробки подписи (она же кегль: TextScaled)
+local BONES_H = 40
+local LINE_GAP = 16 -- отбивка строк от букв тайтла и друг от друга
+
 local title = Instance.new("TextLabel")
 title.Name = "ResultTitle"
 title.AnchorPoint = Vector2.new(0.5, 0.5)
-title.Size = UDim2.new(0.9, 0, 0, 150)
-title.Position = UDim2.new(0.5, 0, 0.42, 0)
+-- Коробка с запасом по ширине: при фиксированном кегле длинное «<ИМЯ> WINS» не
+-- должно упираться в её край (перенос выключен — обрезало бы буквы).
+title.Size = UDim2.new(0.9, 0, 0, TITLE_SIZE)
+title.Position = UDim2.new(0.5, 0, TITLE_Y, 0)
 title.BackgroundTransparency = 1
 title.Font = UITheme.Font
-title.TextScaled = true
+title.TextScaled = false
+title.TextSize = TITLE_SIZE
 title.TextStrokeTransparency = 0.2
 title.Text = ""
 title.Parent = backdrop
@@ -115,7 +160,7 @@ titleScale.Parent = title
 local sub = Instance.new("TextLabel")
 sub.Name = "ResultSub"
 sub.AnchorPoint = Vector2.new(0.5, 0.5)
-sub.Size = UDim2.new(0.7, 0, 0, 44)
+sub.Size = UDim2.new(0.7, 0, 0, SUB_H) -- уточнит fitResult, когда померит тайтл
 sub.Position = UDim2.new(0.5, 0, 0.56, 0)
 sub.BackgroundTransparency = 1
 sub.Font = UITheme.Font
@@ -127,7 +172,7 @@ sub.Parent = backdrop
 local earnedLabel = Instance.new("TextLabel")
 earnedLabel.Name = "ResultBones"
 earnedLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-earnedLabel.Size = UDim2.new(0.7, 0, 0, 40)
+earnedLabel.Size = UDim2.new(0.7, 0, 0, BONES_H)
 earnedLabel.Position = UDim2.new(0.5, 0, 0.64, 0)
 earnedLabel.BackgroundTransparency = 1
 earnedLabel.Font = UITheme.Font
@@ -137,6 +182,50 @@ earnedLabel.TextStrokeColor3 = UITheme.Shadow
 earnedLabel.TextStrokeTransparency = 0.35
 earnedLabel.Text = ""
 earnedLabel.Parent = backdrop
+
+-- Итоговый множитель тайтла: его же цель у твина появления, иначе буквы
+-- «выпрыгивали» бы к единице и схлопывались обратно к посчитанному размеру.
+local titleRest = 1
+
+-- Меряется ТОЛЬКО на множителе 1: `TextBounds` отдаёт уже отмасштабированные буквы,
+-- и считать по ним новый масштаб — значит умножать на самого себя. Вызывать после
+-- того, как текст выставлен и прошёл кадр отрисовки: раньше границы ещё старые.
+local function fitResult()
+	local vp = backdrop.AbsoluteSize
+	local tw, th = title.TextBounds.X, title.TextBounds.Y
+	if vp.X <= 0 or tw <= 0 or th <= 0 then
+		titleRest = 1
+		return
+	end
+	-- Нижняя граница ниже единицы намеренно: если имя победителя окажется таким
+	-- длинным, что строка при кегле 100 не влезает в экран, её надо УМЕНЬШИТЬ.
+	titleRest = math.clamp(math.min(vp.X * TITLE_FILL / tw, vp.Y * TITLE_MAX_H / th), 0.5, 4)
+
+	local lineW = math.max(160, math.floor(tw * titleRest))
+	sub.Size = UDim2.new(0, lineW, 0, SUB_H)
+	earnedLabel.Size = UDim2.new(0, lineW, 0, BONES_H)
+
+	-- Под САМИ БУКВЫ, а не под коробку: коробка тайтла 150 при буквах 100, и от
+	-- центра до низа букв меньше, чем до низа коробки. Иначе между тайтлом и
+	-- подписью зияла бы дыра, а на крупном множителе буквы наезжали бы на строку.
+	local lettersBottom = vp.Y * TITLE_Y + th * titleRest / 2
+	sub.Position = UDim2.new(0.5, 0, 0, math.floor(lettersBottom + LINE_GAP + SUB_H / 2))
+	earnedLabel.Position =
+		UDim2.new(0.5, 0, 0, math.floor(lettersBottom + LINE_GAP * 2 + SUB_H + BONES_H / 2))
+end
+
+-- Смена разрешения (поворот планшета, окно Studio) на живом экране итога.
+backdrop:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+	if not backdrop.Visible then
+		return
+	end
+	task.spawn(function()
+		titleScale.Scale = 1
+		task.wait()
+		fitResult()
+		titleScale.Scale = titleRest
+	end)
+end)
 
 -- // Режим зрителя -----------------------------------------------------------
 local spectating = false
@@ -262,8 +351,27 @@ local function showResult(outcome: string, winner: string?, zombies: number, ear
 	backdrop.Visible = true
 	backdrop.BackgroundTransparency = 1
 	TweenService:Create(backdrop, TweenInfo.new(0.35), { BackgroundTransparency = 0.25 }):Play()
-	titleScale.Scale = 0.35
-	TweenService:Create(titleScale, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+
+	-- ОДИН КАДР ПРЯЧЕМ БУКВЫ. `TextBounds` появляются только после отрисовки, а
+	-- строка каждый раз своя («GAME OVER» против «NIGHTSHADE_RIDER WINS»), поэтому
+	-- померить заранее нельзя. Без этой паузы тайтл мигнул бы нерастянутым, а
+	-- подпись — на месте от прошлого заезда. Фон в этот момент как раз проявляется,
+	-- так что кадра не видно.
+	title.TextTransparency = 1
+	sub.TextTransparency = 1
+	earnedLabel.TextTransparency = 1
+	titleScale.Scale = 1
+	task.wait()
+	if not backdrop.Visible then
+		return -- экран успели погасить (новый отсчёт), доигрывать нечего
+	end
+	fitResult()
+	title.TextTransparency = 0
+	sub.TextTransparency = 0
+	earnedLabel.TextTransparency = 0
+
+	titleScale.Scale = 0.35 * titleRest
+	TweenService:Create(titleScale, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = titleRest }):Play()
 	emberBurst(outcome == "won" and GOLD or UITheme.Palette.Red)
 end
 
