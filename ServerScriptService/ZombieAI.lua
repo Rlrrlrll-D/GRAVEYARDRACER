@@ -449,6 +449,79 @@ function ZombieAI.PlayDeath(zombie: Model)
 	end
 end
 
+-- // ГАБАРИТ КУЗОВА: ВОКРУГ ЧЕГО ДЕРЖАТСЯ ЗОМБИ ------------------------------
+--
+-- ЖАЛОБА: «в толпе зомби машину складывает, уехать невозможно». Корень — здесь, в
+-- том, ОТ ЧЕГО меряется дистанция.
+--
+-- Раньше и «догнал», и «дошёл, стой и бей» считались от `DriveSeat.Position`. Но
+-- сиденье сидит почти в геометрическом центре багги, а кузов — 8.3 x 12.6 studs.
+-- Зомби, упёршийся в БАМПЕР, оказывался от сиденья в 6.3+ studs, то есть условие
+-- «дошёл» у него не выполнялось НИКОГДА. Он не останавливался — он до скончания века
+-- шёл вперёд на полном ходу, всей силой Humanoid, прямо в кузов. Умножьте на десяток
+-- тел с разных сторон: машина стоит в тисках из постоянных боковых сил, а стоит дать
+-- газ — эти силы никуда не деваются и складываются с тягой как попало.
+--
+-- Теперь дистанция меряется до КОРОБКИ КУЗОВА, и по горизонтали: высота не при чём,
+-- зомби всё равно ходит по земле.
+--
+-- Коробку берём у `BuggyBody` — это видимый кузов, и его собственные оси совпадают с
+-- машиной. Габарит МОДЕЛИ для этого не годится: pivot шаблона повёрнут на 83°, и
+-- `Model:GetBoundingBox()` возвращает косой ящик заметно крупнее самой багги.
+type Footprint = { cf: CFrame, hx: number, hy: number, hz: number }
+
+local function vehicleFootprint(vehicle: Model): Footprint?
+	local body = vehicle:FindFirstChild("BuggyBody")
+	if body and body:IsA("BasePart") then
+		local s = (body :: BasePart).Size
+		return { cf = (body :: BasePart).CFrame, hx = s.X * 0.5, hy = s.Y * 0.5, hz = s.Z * 0.5 }
+	end
+	-- Запасной вариант — круг вокруг сиденья по габариту модели. Грубее (зомби встанут
+	-- дальше, чем нужно), но безопасно: внутрь машины они всё равно не полезут.
+	local seat = vehicle:FindFirstChild("DriveSeat")
+	if seat and seat:IsA("BasePart") then
+		local ext = vehicle:GetExtentsSize()
+		local r = math.max(ext.X, ext.Z) * 0.5
+		return { cf = (seat :: BasePart).CFrame, hx = r, hy = r, hz = r }
+	end
+	return nil
+end
+
+-- Расстояние ПО ГОРИЗОНТАЛИ от точки до коробки кузова + точка, где зомби следует
+-- стоять (на `pad` от борта) + признак «точка внутри машины».
+--
+-- Возврат `dist` = 0 означает, что зомби уже в габарите кузова. Тогда `stand` — это
+-- ближайший выход наружу по КРАТЧАЙШЕЙ стороне: вылезать через всю длину капота,
+-- когда до борта полшага, ему незачем.
+local function surfacePoint(fp: Footprint, p: Vector3, pad: number): (number, Vector3, boolean)
+	local lp = fp.cf:PointToObjectSpace(p)
+	local dx = math.clamp(lp.X, -fp.hx, fp.hx)
+	local dz = math.clamp(lp.Z, -fp.hz, fp.hz)
+	local ox, oz = lp.X - dx, lp.Z - dz
+	local dist = math.sqrt(ox * ox + oz * oz)
+	-- «Внутри» — это внутри и по высоте тоже: зомби на дне оврага под мостом, над
+	-- которым проехала багги, попадать под выталкивание не должен.
+	local inside = dist <= 1e-4 and math.abs(lp.Y) <= fp.hy + 3
+
+	local px, pz = 0, 0
+	if dist <= 1e-4 then
+		local gx = (fp.hx + pad) * (if lp.X >= 0 then 1 else -1)
+		local gz = (fp.hz + pad) * (if lp.Z >= 0 then 1 else -1)
+		if math.abs(gx - lp.X) <= math.abs(gz - lp.Z) then
+			px, pz = gx, lp.Z
+		else
+			px, pz = lp.X, gz
+		end
+	else
+		-- (dx,dz) — ближайшая точка НА коробке, (ox,oz) — вектор от неё к зомби.
+		-- Отступ откладываем от КОРОБКИ по этому направлению, а не от зомби:
+		-- масштаб именно pad/dist, а не (dist+pad)/dist.
+		local k = pad / dist
+		px, pz = dx + ox * k, dz + oz * k
+	end
+	return dist, fp.cf:PointToWorldSpace(Vector3.new(px, lp.Y, pz)), inside
+end
+
 local function findNearestVehicle(position: Vector3): (Model?, number)
 	local nearest: Model? = nil
 	local nearestDistance = math.huge
@@ -518,9 +591,42 @@ function ZombieAI.Run(zombie: Model)
 	-- а мелкий доставал бы оттуда, куда его кулак заведомо не дотягивается. Атрибут
 	-- ставит спавнер; нет атрибута — значит рост обычный.
 	local attackRange = (zombie:GetAttribute("AttackRange") :: number?) or GameConfig.Zombie.AttackRange
+	local standoff = (zombie:GetAttribute("Standoff") :: number?) or GameConfig.Zombie.Standoff
 	local lastAttackAt = 0
 	local idleSince = os.clock()
 	local nextMoanAt = os.clock() + math.random() * 3 -- редкий протяжный стон при погоне
+
+	-- // ПРЕДОХРАНИТЕЛЬ: ВНУТРИ МАШИНЫ ТЕЛУ НЕ МЕСТО -------------------------
+	--
+	-- Дистанцию до кузова держит цикл ниже, но въехать в стоящего зомби машина может
+	-- быстрее, чем он успеет отойти, — а видимый кузов багги (`BuggyBody`) вообще
+	-- CanCollide = false, останавливать тело на подходе физике нечем. Зомби
+	-- проваливается ВНУТРЬ и встаёт на тонкие плиты пола: дальше Humanoid честно
+	-- пытается стоять и идти на движущейся опоре, упираясь в кресло и дуги. Он весит
+	-- сопоставимо со всей багги — вот вам и «непредсказуемая реакция».
+	--
+	-- Выталкиваем ПЕРЕСТАНОВКОЙ, а не снятием контакта. Соблазн выключить CanCollide
+	-- был, но у этого рига стоят на земле ровно торс и корень (руки и ноги в шаблоне
+	-- бесконтактные) — сняв контакт с них, мы роняем зомби сквозь планету. Высоту не
+	-- трогаем вовсе, двигаем только по горизонтали: ноги уже на грунте, а машина стоит
+	-- на той же дороге.
+	--
+	-- Выдержка в полсекунды — чтобы на ходу это не превратилось в дрожь: пока машина
+	-- едет сквозь толпу, тело либо гибнет под колёсами, либо остаётся позади само.
+	local lastEvictAt = 0
+	local function evict(to: Vector3)
+		local now = os.clock()
+		if now - lastEvictAt < 0.5 or zombie:GetAttribute("Dead") then
+			return
+		end
+		lastEvictAt = now
+		local pivot = zombie:GetPivot()
+		zombie:PivotTo(pivot + Vector3.new(to.X - pivot.Position.X, 0, to.Z - pivot.Position.Z))
+		if rootPart.Parent then
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
 
 	while zombie.Parent and humanoid.Health > 0 do
 		-- ПАУЗА НА ВРЕМЯ СЪЁМКИ (дев-режим PhotoMode, флаг ставит PhotoModeService и
@@ -546,11 +652,28 @@ function ZombieAI.Run(zombie: Model)
 			idleSince = os.clock()
 		end
 
+		local bodyDistance = math.huge -- до КУЗОВА, а не до сиденья (см. vehicleFootprint)
+
 		if vehicle and distance <= GameConfig.Zombie.ChaseRadius then
 			local driveSeat = vehicle:FindFirstChild("DriveSeat") :: VehicleSeat
+			local fp = vehicleFootprint(vehicle)
+			local stand = driveSeat and driveSeat.Position or rootPart.Position
+			local inside = false
+			if fp then
+				bodyDistance, stand, inside = surfacePoint(fp :: Footprint, rootPart.Position, standoff)
+			end
 
-			if distance <= attackRange then
-				humanoid:MoveTo(rootPart.Position) -- stop moving
+			if inside then
+				-- Влипли в габарит: наружу, и своим ходом тоже.
+				evict(stand)
+				humanoid.WalkSpeed = GameConfig.Zombie.WalkSpeed
+				humanoid:MoveTo(stand)
+			elseif bodyDistance <= attackRange then
+				-- СТОП — СКОРОСТЬЮ, А НЕ `MoveTo` В СЕБЯ. Прежний приём (`MoveTo` в
+				-- собственную позицию) Humanoid отрабатывает как микро-цель: он всё
+				-- время «доходит» и промахивается, дрожа на месте, — и всё это время
+				-- давит на кузов. Нулевая скорость снимает силу движения совсем.
+				humanoid.WalkSpeed = 0
 
 				local now = os.clock()
 				if now - lastAttackAt >= GameConfig.Zombie.AttackCooldown then
@@ -568,8 +691,12 @@ function ZombieAI.Run(zombie: Model)
 					playSwing()
 
 					local seatNow = vehicle:FindFirstChild("DriveSeat") :: BasePart?
-					local stillClose = seatNow ~= nil
-						and (seatNow.Position - rootPart.Position).Magnitude <= attackRange
+					local fpNow = vehicle.Parent and vehicleFootprint(vehicle) or nil
+					local stillClose = false
+					if fpNow and humanoid.Health > 0 then
+						local d = select(1, surfacePoint(fpNow :: Footprint, rootPart.Position, 0))
+						stillClose = d <= attackRange
+					end
 					-- ProtectedUntil — тот же авторитет неуязвимости, что и в onPartTouched:
 					-- на отсчёт+грейс (и после респавна) укус зомби не проходит.
 					local protected = os.clock() < ((vehicle:GetAttribute("ProtectedUntil") :: number?) or 0)
@@ -582,7 +709,9 @@ function ZombieAI.Run(zombie: Model)
 						end
 
 						-- ФИДБЕК УДАРА: лязг по кузову + лёгкая тряска камеры водителю
-						playSoundAt(HIT_SOUND_ID, (seatNow :: BasePart).Position, 0.65, 0.95, 1.1)
+						if seatNow then
+							playSoundAt(HIT_SOUND_ID, (seatNow :: BasePart).Position, 0.65, 0.95, 1.1)
+						end
 						local occupant = driveSeat and driveSeat.Occupant
 						if occupant then
 							local driver = Players:GetPlayerFromCharacter(occupant.Parent)
@@ -593,16 +722,28 @@ function ZombieAI.Run(zombie: Model)
 					end
 				end
 			else
-				humanoid:MoveTo(driveSeat.Position)
+				humanoid.WalkSpeed = GameConfig.Zombie.WalkSpeed
+				-- Идём не в СИДЕНЬЕ, а в точку у борта: цель снаружи машины, и дойдя
+				-- до неё, зомби останавливается сам, а не упирается в кузов.
+				humanoid:MoveTo(stand)
 				if os.clock() >= nextMoanAt then
 					nextMoanAt = os.clock() + 3 + math.random() * 3
 					playSoundAt(GROWL_SOUND_ID, rootPart.Position, 0.42, 0.7, 0.85) -- стон: тише и ниже рыка
 				end
 			end
+		else
+			humanoid.WalkSpeed = GameConfig.Zombie.WalkSpeed
 		end
 
-		-- Stagger updates across zombies so 25 of them don't all think every frame.
-		task.wait(0.4 + math.random() * 0.2)
+		-- Шаг мышления. Вдали редкий (25 тел не должны думать каждый кадр), но у самой
+		-- машины — частый: на прежних 0.4-0.6с зомби между решениями проходил 4-6 studs,
+		-- то есть от «ещё далеко» до «внутри кузова» ровно за один такт. Быстро думают
+		-- только те, кто рядом, и их всегда единицы.
+		if bodyDistance <= 22 then
+			task.wait(0.1 + math.random() * 0.05)
+		else
+			task.wait(0.4 + math.random() * 0.2)
+		end
 	end
 end
 

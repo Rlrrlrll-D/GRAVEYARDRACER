@@ -27,6 +27,25 @@ local updateStats = remotes:WaitForChild("UpdateStats") :: RemoteEvent
 local TAG = "PlayerVehicle"
 local BASE_MAX_SPEED = 50 -- studs/sec at full throttle before hazard penalties
 
+-- // Группы столкновений машины -----------------------------------------------
+-- Кузов — "Vehicles", колёса и подвеска — "VehicleWheels" (правила в Bootstrap:
+-- зомби в подвеску не попадают, всё остальное как у кузова).
+--
+-- ЗОВЁТСЯ ДВАЖДЫ, И ЭТО ОБЯЗАТЕЛЬНО. A-Chassis достраивает шасси уже ПОСЛЕ того, как
+-- машина появилась в Workspace: он сам создаёт рычаги (`Arm`), гироскопы и весовой
+-- кирпич. Детали, рождённые после первого прохода, оставались в группе "Default" —
+-- то есть жили по правилам «сталкиваюсь со всем», включая зомби. Второй проход
+-- (из вахты ниже, там уже есть ожидание готового `Arm`) их подбирает.
+local function applyCollisionGroups(vehicle: Model)
+	local wheels = vehicle:FindFirstChild("Wheels")
+	for _, part in vehicle:GetDescendants() do
+		if part:IsA("BasePart") then
+			local inWheels = wheels ~= nil and part:IsDescendantOf(wheels :: Instance)
+			part.CollisionGroup = if inWheels then "VehicleWheels" else "Vehicles"
+		end
+	end
+end
+
 local function setupVehicle(vehicle: Model)
 	local driveSeat = vehicle:FindFirstChild("DriveSeat")
 	if not driveSeat or not driveSeat:IsA("VehicleSeat") then
@@ -34,11 +53,7 @@ local function setupVehicle(vehicle: Model)
 		return
 	end
 
-	for _, part in vehicle:GetDescendants() do
-		if part:IsA("BasePart") then
-			part.CollisionGroup = "Vehicles"
-		end
-	end
+	applyCollisionGroups(vehicle)
 
 	vehicle:SetAttribute("Health", GameConfig.Vehicle.MaxHealth)
 	vehicle:SetAttribute("MaxHealth", GameConfig.Vehicle.MaxHealth)
@@ -400,6 +415,7 @@ local function setupVehicle(vehicle: Model)
 			return
 		end
 		task.wait(0.6) -- дать PlayerFlow приварить турель: её поза тоже входит в эталон
+		applyCollisionGroups(vehicle) -- второй проход: рычаги подвески от AC6 уже на месте
 
 		local seatCF = (driveSeat :: VehicleSeat).CFrame
 		local restPose: { [BasePart]: CFrame } = {}

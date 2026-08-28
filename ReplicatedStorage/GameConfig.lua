@@ -17,12 +17,14 @@ export type GameConfigType = {
 		MaxHealth: number,
 		WalkSpeed: number,
 		ChaseRadius: number,
-		AttackRange: number,
+		AttackRange: number, -- досягаемость удара ОТ КУЗОВА машины (не от сиденья)
 		AttackDamage: number,
 		AttackCooldown: number,
 		SpawnInterval: number,
 		MaxZombies: number,
 		SpawnRadius: number,
+		MinSpawnDistance: number, -- ближе этого к машине из могилы не лезут
+		Standoff: number, -- на столько studs зомби останавливается ОТ КУЗОВА
 	},
 	Weapon: {
 		Damage: number,
@@ -83,12 +85,27 @@ local GameConfig: GameConfigType = {
 		MaxHealth = 50,
 		WalkSpeed = 10,
 		ChaseRadius = 60,
-		AttackRange = 6,
+		-- ДОСЯГАЕМОСТЬ МЕРЯЕТСЯ ОТ КУЗОВА, А НЕ ОТ СИДЕНЬЯ, и это правка не косметическая.
+		-- Багги 12.6 studs в длину, сиденье сидит почти в её центре. Пока порог был
+		-- «6 studs до DriveSeat», зомби, подошедший к БАМПЕРУ, был от сиденья в 6.3+ —
+		-- то есть условие «дошёл, стой и бей» у него не выполнялось НИКОГДА, и он
+		-- продолжал переть в кузов на полном ходу. Отсюда и «коллапс в толпе»: десяток
+		-- тел вечно ломится внутрь машины. Теперь порог — расстояние до КОРОБКИ кузова,
+		-- и 2.9 studs это ровно вытянутая рука R6 (у крупных больше, см. ARM_REACH).
+		AttackRange = 2.9,
 		AttackDamage = 5,
 		AttackCooldown = 1.5,
 		SpawnInterval = 4,
 		MaxZombies = 25,
 		SpawnRadius = 80,
+		-- Из могилы, которая ближе этого к любой машине, никто не вылезает. Подъём идёт
+		-- 1.2с ЗАЯКОРЕННЫМ телом, а якорь для физики — бесконечная масса: зомби, начавший
+		-- расти прямо под багги, был для неё стеной. Радиус берём с запасом от габарита
+		-- (полдлины кузова 6.3 + ход подъёма).
+		MinSpawnDistance = 26,
+		-- Дистанция, на которой зомби ОСТАНАВЛИВАЕТСЯ перед кузовом. Меньше AttackRange,
+		-- иначе он замирал бы в шаге от того, до чего не дотягивается.
+		Standoff = 2.1,
 	},
 	Weapon = {
 		Damage = 20,

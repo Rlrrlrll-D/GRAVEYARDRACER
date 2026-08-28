@@ -82,6 +82,28 @@ local BRUTE_CHANCE = 0.08 -- каждый двенадцатый примерн�
 local BRUTE_MIN, BRUTE_MAX = 2.025, 2.175 -- было 1.35 / 1.45
 local ARM_REACH = 2 -- studs: длина руки R6, на столько меняется досягаемость на каждую единицу роста
 
+-- // ВЕС НЕ РАСТЁТ ВМЕСТЕ С РОСТОМ ------------------------------------------
+--
+-- ЖАЛОБА: «в толпе зомби багги ведёт себя непредсказуемо». Замер живой машины
+-- в заезде объясняет, почему толпа вообще способна ею вертеть:
+--     сборка кузова с водителем   46.5   <- A-Chassis делает всё лишнее Massless
+--     колесо (отдельная сборка)    1.7
+--     зомби ростом 1.79           36.1   <- 78% от всей машины
+--     зомби-здоровяк              64.8   <- ТЯЖЕЛЕЕ машины в полтора раза
+-- То есть один покойник — это почти вторая багги, а десяток вокруг весит как
+-- грузовик. При таких числах любое касание двигает не зомби, а машину.
+--
+-- И это не изначальная задумка, а побочный эффект правки от 2026-08-10 («зомби
+-- лилипуты какие-то»): все размеры подняли ×1.5, а масса растёт КУБОМ размера —
+-- то есть выросла в 3.375 раза, молча. До той правки самый крупный весил 19, и
+-- физика толпы никого не смущала.
+--
+-- Поэтому вес возвращаем к дореформенному: плотность делим ровно на тот куб,
+-- на который её умножил рост. Смотреться зомби продолжает крупным — он и остаётся
+-- крупным, меняется только то, чего не видно.
+local SIZE_BOOST = 1.5 -- на столько подняли рост 2026-08-10
+local DENSITY_FIX = 1 / (SIZE_BOOST ^ 3) -- ...и на столько же долой из плотности
+
 -- Рост шаблона меряем один раз: от него считается и глубина могилы, чтобы высокий
 -- покойник не начинал подъём, торча из земли по пояс.
 local BASE_HEIGHT = select(2, template:GetBoundingBox()).Y
@@ -150,11 +172,15 @@ local function pickGrave(): BasePart?
 	-- будущем) — иначе зомби вылезают у грида и роятся ещё до GO, стартовать невозможно.
 	-- Спавним только вокруг реально едущих (незащищённых) машин.
 	local occupiedSeats: {BasePart} = {}
+	local allSeats: {BasePart} = {} -- ВСЕ машины, а не только едущие: см. «слишком близко» ниже
 	for _, vehicle in CollectionService:GetTagged("PlayerVehicle") do
 		local seat = vehicle:FindFirstChild("DriveSeat")
 		local protected = os.clock() < ((vehicle:GetAttribute("ProtectedUntil") :: number?) or 0)
-		if seat and seat:IsA("BasePart") and seat.Occupant and not protected then
-			table.insert(occupiedSeats, seat)
+		if seat and seat:IsA("BasePart") then
+			table.insert(allSeats, seat)
+			if seat.Occupant and not protected then
+				table.insert(occupiedSeats, seat)
+			end
 		end
 	end
 
@@ -162,12 +188,33 @@ local function pickGrave(): BasePart?
 		return nil -- nobody is driving, keep the graveyard quiet
 	end
 
+	-- СЛИШКОМ БЛИЗКО — НЕ ВЫЛЕЗАЕМ, и это про физику, а не про честность.
+	--
+	-- Подъём из могилы идёт 1.2с ЗАЯКОРЕННЫМ телом (riseFromGrave), а якорь для
+	-- решателя — бесконечная масса. Нижней границы у радиуса спавна не было вовсе:
+	-- могила в трёх studs от багги считалась подходящей ровно так же, как дальняя, —
+	-- и в машину, увязшую в толпе, каждые четыре секунды вырастала неподвижная стена
+	-- прямо под кузовом. Это и есть «попытался уехать — и всё разлетелось».
+	--
+	-- Считаем от ЛЮБОЙ машины, включая пустую и защищённую: под чужой стоящей багги
+	-- вырастать так же нельзя.
+	local function tooClose(grave: BasePart): boolean
+		for _, seat in allSeats do
+			if (grave.Position - seat.Position).Magnitude < GameConfig.Zombie.MinSpawnDistance then
+				return true
+			end
+		end
+		return false
+	end
+
 	local nearGraves: {BasePart} = {}
 	for _, grave in graves do
-		for _, seat in occupiedSeats do
-			if (grave.Position - seat.Position).Magnitude <= GameConfig.Zombie.SpawnRadius then
-				table.insert(nearGraves, grave)
-				break
+		if not tooClose(grave) then
+			for _, seat in occupiedSeats do
+				if (grave.Position - seat.Position).Magnitude <= GameConfig.Zombie.SpawnRadius then
+					table.insert(nearGraves, grave)
+					break
+				end
 			end
 		end
 	end
@@ -199,11 +246,23 @@ local function riseFromGrave(zombie: Model, finalCFrame: CFrame): boolean
 	local buriedCFrame = finalCFrame * CFrame.new(0, -depth, 0)
 	zombie:PivotTo(buriedCFrame)
 
+	-- НА ВРЕМЯ ПОДЪЁМА ТЕЛО НЕ СТАЛКИВАЕТСЯ НИ С ЧЕМ. Оно заякорено, а заякоренная
+	-- деталь для физики — бесконечная масса: машина, влетевшая в вылезающего зомби,
+	-- бьётся о стену, а не о тело. Ловится это редко и выглядит как «на ровном месте
+	-- подкинуло». Минимальную дистанцию спавна уже держит pickGrave, но в неё можно
+	-- ВЪЕХАТЬ — от этого страхует уже только вот это.
+	--
+	-- Прежнее CanCollide запоминаем поимённо: у R6-зомби руки и ноги в шаблоне и так
+	-- бесконтактные, восстанавливать всем подряд «true» нельзя.
 	local parts: {BasePart} = {}
+	local wasCollide: { [BasePart]: boolean } = {}
 	for _, descendant in zombie:GetDescendants() do
 		if descendant:IsA("BasePart") then
-			table.insert(parts, descendant)
-			descendant.Anchored = true
+			local part = descendant :: BasePart
+			table.insert(parts, part)
+			wasCollide[part] = part.CanCollide
+			part.CanCollide = false
+			part.Anchored = true
 		end
 	end
 
@@ -236,9 +295,26 @@ local function riseFromGrave(zombie: Model, finalCFrame: CFrame): boolean
 
 	for _, part in parts do
 		part.Anchored = false
+		part.CanCollide = wasCollide[part]
 	end
 	if humanoid then
 		humanoid.PlatformStand = false
+	end
+
+	-- ВЛАДЕНИЕ ФИЗИКОЙ ЗОМБИ — У СЕРВЕРА, ЯВНО. По умолчанию владение раздаётся
+	-- автоматически: сборку без якоря движок отдаёт ближайшему игроку. То есть стаю,
+	-- сбежавшуюся к багги, считал ТЕЛЕФОН ВОДИТЕЛЯ — вдобавок к самой A-Chassis
+	-- (четыре колеса на пружинах, BodyAngularVelocity с P = 1e9, гироскопы). На слабом
+	-- клиенте кадр проседает, шаг физики растёт, и первым это чувствует шасси: рывки
+	-- руля и подвески, «непредсказуемая реакция». Плюс владение перещёлкивалось прямо
+	-- во время контакта — каждый переход это разрыв в физике.
+	--
+	-- Только ПОСЛЕ снятия якоря: у заякоренной детали владельца нет и вызов упадёт.
+	local root = zombie:FindFirstChild("HumanoidRootPart")
+	if root and root:IsA("BasePart") then
+		pcall(function()
+			(root :: BasePart):SetNetworkOwner(nil)
+		end)
 	end
 	return true
 end
@@ -289,14 +365,28 @@ local function spawnZombie()
 	zombie:ScaleTo(scale) -- ScaleTo двигает и суставы, поэтому замах не разъезжается
 	dressZombie(zombie)
 	zombie:SetAttribute("BodyScale", scale)
-	-- Досягаемость растёт не пропорционально всей дистанции, а ровно на длину руки:
-	-- в шести studs базовой дальности сидит ещё и полкорпуса машины, и множить их на
-	-- рост незачем — здоровяк начал бы бить с двух метров пустоты.
+	-- Досягаемость растёт ровно на длину руки, а не пропорционально всей дистанции:
+	-- база `AttackRange` — это зазор от БОРТА КУЗОВА (см. ZombieAI.surfacePoint), в нём
+	-- нет ничего, что стоило бы множить на рост, кроме самой руки.
 	zombie:SetAttribute("AttackRange", GameConfig.Zombie.AttackRange + (scale - 1) * ARM_REACH)
+	-- Где остановиться перед кузовом. Растёт вместе с телом, но медленнее руки: иначе
+	-- здоровяк вставал бы дальше, чем достаёт. Разница Standoff↔AttackRange — это и
+	-- есть запас, в котором удар засчитывается.
+	zombie:SetAttribute("Standoff", GameConfig.Zombie.Standoff + (scale - 1) * (ARM_REACH * 0.5))
 
 	for _, part in zombie:GetDescendants() do
 		if part:IsA("BasePart") then
-			part.CollisionGroup = "Zombies"
+			local p = part :: BasePart
+			p.CollisionGroup = "Zombies"
+			-- вес — дореформенный, см. DENSITY_FIX
+			local pp = p.CurrentPhysicalProperties
+			p.CustomPhysicalProperties = PhysicalProperties.new(
+				pp.Density * DENSITY_FIX,
+				pp.Friction,
+				pp.Elasticity,
+				pp.FrictionWeight,
+				pp.ElasticityWeight
+			)
 		end
 	end
 
@@ -326,6 +416,29 @@ local function spawnZombie()
 	-- ОБЯЗАТЕЛЬНО до смерти: иначе Humanoid на Died разрывает все Motor6D, риг
 	-- распадается на отдельные детали и анимировать падение уже нечем.
 	humanoid.BreakJointsOnDeath = false
+
+	-- ЗОМБИ НЕ ПАДАЕТ, НЕ КУВЫРКАЕТСЯ И НЕ САДИТСЯ ЗА РУЛЬ.
+	--
+	-- Humanoid сам переходит в FallingDown / Ragdoll, когда его толкнули или он
+	-- запнулся, — и тогда тело перестаёт стоять и растекается по земле ПОД машиной,
+	-- ровно туда, где ему быть нельзя. GettingUp довершает: тело рывком поднимается,
+	-- упираясь в кузов. Нашей смерти эти состояния не нужны вовсе — падение отыгрывает
+	-- ZombieAI.PlayDeath по Motor6D, на заякоренном теле.
+	--
+	-- Seated отключён по другой причине: DriveSeat — это VehicleSeat, и он усаживает
+	-- ЛЮБОЙ коснувшийся Humanoid. Стоит водителю на миг встать (выброс, респавн), как
+	-- за руль садится зомби — вместе с машиной.
+	for _, state in {
+		Enum.HumanoidStateType.FallingDown,
+		Enum.HumanoidStateType.Ragdoll,
+		Enum.HumanoidStateType.GettingUp,
+		Enum.HumanoidStateType.Seated,
+		Enum.HumanoidStateType.Climbing,
+	} do
+		pcall(function()
+			humanoid:SetStateEnabled(state, false)
+		end)
+	end
 
 	task.spawn(function()
 		if riseFromGrave(zombie, finalCFrame) then
