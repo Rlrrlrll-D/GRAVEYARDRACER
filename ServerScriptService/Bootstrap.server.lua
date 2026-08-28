@@ -27,7 +27,7 @@ end
 -- Увернуться они не могут, поэтому машина обязана проходить сквозь них.
 -- VehicleWheels — КОЛЁСА И ПОДВЕСКА, отдельно от кузова. Разбор ниже, у правила
 -- «VehicleWheels ↔ Zombies = false».
-local GROUPS = { "Vehicles", "VehicleWheels", "Zombies", "Obstacles", "Environment", "Projectiles", "Bystanders" }
+local GROUPS = { "Vehicles", "VehicleWheels", "VehicleShell", "Zombies", "Obstacles", "Environment", "Projectiles", "Bystanders" }
 
 for _, groupName in GROUPS do
 	local ok = pcall(function()
@@ -76,6 +76,24 @@ PhysicsService:CollisionGroupSetCollidable("VehicleWheels", "Bystanders", false)
 PhysicsService:CollisionGroupSetCollidable("VehicleWheels", "Projectiles", false) -- как и всё: попадания лучом
 PhysicsService:CollisionGroupSetCollidable("VehicleWheels", "Obstacles", true)
 PhysicsService:CollisionGroupSetCollidable("VehicleWheels", "Environment", true)
+
+-- // Невидимый корпус: чтобы машина не протыкала декор ----------------------
+--
+-- ЖАЛОБА 2026-08-28: «багги проходит сквозь надгробья и кресты». Так и есть —
+-- твёрдого корпуса у неё почти нет (разбор у buildCollisionShell в
+-- VehicleController). Коробку-корпус варит код, а живёт она в СВОЕЙ группе, и это
+-- не педантизм: турель — ОТДЕЛЬНАЯ физическая сборка на шарнирах, она стоит внутри
+-- этого объёма, и в общей группе "Vehicles" корпус заклинил бы её намертво.
+--
+-- Итог: с миром и зомби корпус твёрдый, со своими же железками — нет.
+PhysicsService:CollisionGroupSetCollidable("VehicleShell", "Vehicles", false) -- своя турель и кузов
+PhysicsService:CollisionGroupSetCollidable("VehicleShell", "VehicleWheels", false) -- свои колёса
+PhysicsService:CollisionGroupSetCollidable("VehicleShell", "Bystanders", false) -- как и кузов: ждущих не сбиваем
+PhysicsService:CollisionGroupSetCollidable("VehicleShell", "Projectiles", false) -- попадания лучом
+PhysicsService:CollisionGroupSetCollidable("VehicleShell", "Obstacles", true) -- ради этого всё и затевалось
+PhysicsService:CollisionGroupSetCollidable("VehicleShell", "Environment", true)
+PhysicsService:CollisionGroupSetCollidable("VehicleShell", "Zombies", true)
+PhysicsService:CollisionGroupSetCollidable("VehicleShell", "VehicleShell", true) -- две машины друг сквозь друга не ездят
 PhysicsService:CollisionGroupSetCollidable("Zombies", "Obstacles", false)
 PhysicsService:CollisionGroupSetCollidable("Zombies", "Environment", true)
 PhysicsService:CollisionGroupSetCollidable("Projectiles", "Zombies", false) -- hits are raycast, not physical

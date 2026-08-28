@@ -27,6 +27,86 @@ local updateStats = remotes:WaitForChild("UpdateStats") :: RemoteEvent
 local TAG = "PlayerVehicle"
 local BASE_MAX_SPEED = 50 -- studs/sec at full throttle before hazard penalties
 
+-- // НЕПРОХОДИМЫЙ КОРПУС ------------------------------------------------------
+--
+-- ЖАЛОБА 2026-08-28: «багги не должен проникать сквозь объекты — надгробья, кресты».
+--
+-- Разбор шаблона. Твёрдых деталей у машины семнадцать, и шестнадцать из них — это
+-- четыре колеса (низ 5.40) да тонкие плиты пола A-Chassis на высоте 10.2..11.9.
+-- Видимый кузов `BuggyBody` (габарит 8.3 x 4.6 x 12.6, низ 6.40) стоит с
+-- CanCollide = FALSE. То есть препятствия ловят только колёса: всё, что проходит
+-- между ними и ниже плит, машина протыкает насквозь — носа, бортов и дуг для
+-- физики не существует.
+--
+-- ПОЧЕМУ НЕ ВКЛЮЧИТЬ CanCollide САМОМУ КУЗОВУ. Низ его габарита на 6.40, колёса
+-- касаются земли на 5.40 — просвет ровно стад. Ход пружины 2.2 и жёсткость 8000
+-- при массе сборки 46.5: на первой же кочке машина села бы днищем и поехала,
+-- цепляя грунт. Поэтому варим отдельную коробку по силуэту, но НАЧИНАЯ С ОСИ
+-- КОЛЁС: до земли ей 1.6 стада при любом сжатии подвески, а всё, что выше оси,
+-- она честно останавливает. Надгробья и кресты выше оси — как раз они.
+--
+-- Коробка невесома (Massless): развесовка, инерция и управляемость не меняются —
+-- добавляется ровно объём.
+--
+-- Группа своя, "VehicleShell" (правила в Bootstrap): со своими железками корпус не
+-- сталкивается, иначе заклинил бы турель, которая стоит внутри него отдельной
+-- сборкой на шарнирах.
+local SHELL_NAME = "CollisionShell"
+
+local function buildCollisionShell(vehicle: Model): BasePart?
+	local existing = vehicle:FindFirstChild(SHELL_NAME)
+	if existing and existing:IsA("BasePart") then
+		return existing :: BasePart
+	end
+	local body = vehicle:FindFirstChild("BuggyBody")
+	local wheels = vehicle:FindFirstChild("Wheels")
+	if not (body and body:IsA("BasePart")) or not wheels then
+		return nil -- нестандартная сборка: лучше без корпуса, чем с косым
+	end
+	local b = body :: BasePart
+	-- Коробку строим в осях кузова, а значит его «верх» обязан быть мировым верхом:
+	-- у наклонённого меша тот же расчёт дал бы скошенный ящик, и машина возила бы
+	-- невидимый клин. Лучше не строить вовсе.
+	if math.abs(b.CFrame.UpVector.Y) < 0.9 then
+		warn(`[VehicleController] {vehicle.Name}: кузов стоит криво — корпус не построен.`)
+		return nil
+	end
+	local sum, n = 0, 0
+	for _, w in wheels:GetChildren() do
+		if w:IsA("BasePart") then
+			sum += (w :: BasePart).Position.Y
+			n += 1
+		end
+	end
+	if n == 0 then
+		return nil
+	end
+	local axleY = sum / n -- низ коробки = линия осей: до грунта всегда радиус колеса
+	local topY = b.Position.Y + b.Size.Y / 2
+	if topY - axleY < 1 then
+		return nil
+	end
+
+	local shell = Instance.new("Part")
+	shell.Name = SHELL_NAME
+	-- Чуть уже силуэта: иначе невидимые углы цепляли бы то, мимо чего кузов проходит.
+	shell.Size = Vector3.new(b.Size.X * 0.96, topY - axleY, b.Size.Z * 0.96)
+	shell.CFrame = b.CFrame * CFrame.new(0, (topY + axleY) / 2 - b.Position.Y, 0)
+	shell.Transparency = 1
+	shell.CanCollide = true
+	shell.CanQuery = false -- лучи её не видят: ни прицел, ни посадка декора, ни грунт под зомби
+	shell.CanTouch = true -- а Touched нужен: по нему давятся зомби и срабатывают hazard'ы
+	shell.Massless = true
+	shell.CollisionGroup = "VehicleShell"
+	shell.Parent = vehicle
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = b
+	weld.Part1 = shell
+	weld.Parent = shell
+	return shell
+end
+
 -- // Группы столкновений машины -----------------------------------------------
 -- Кузов — "Vehicles", колёса и подвеска — "VehicleWheels" (правила в Bootstrap:
 -- зомби в подвеску не попадают, всё остальное как у кузова).
@@ -39,7 +119,7 @@ local BASE_MAX_SPEED = 50 -- studs/sec at full throttle before hazard penalties
 local function applyCollisionGroups(vehicle: Model)
 	local wheels = vehicle:FindFirstChild("Wheels")
 	for _, part in vehicle:GetDescendants() do
-		if part:IsA("BasePart") then
+		if part:IsA("BasePart") and part.Name ~= SHELL_NAME then -- корпус живёт в своей группе
 			local inWheels = wheels ~= nil and part:IsDescendantOf(wheels :: Instance)
 			part.CollisionGroup = if inWheels then "VehicleWheels" else "Vehicles"
 		end
@@ -423,6 +503,12 @@ local function setupVehicle(vehicle: Model)
 			return
 		end
 		task.wait(0.6) -- дать PlayerFlow приварить турель: её поза тоже входит в эталон
+		-- Корпус строим ЗДЕСЬ, а не в setupVehicle: до этого момента AC6 ещё двигает
+		-- детали и колёс на местах нет, а коробка меряется как раз по ним.
+		local shell = buildCollisionShell(vehicle)
+		if shell then
+			shell.Touched:Connect(onPartTouched) -- сбитые корпусом зомби тоже считаются
+		end
 		applyCollisionGroups(vehicle) -- второй проход: рычаги подвески от AC6 уже на месте
 
 		local seatCF = (driveSeat :: VehicleSeat).CFrame
