@@ -34,6 +34,8 @@ local RUNTIME_SOUNDS = {
 	"rbxassetid://130598693233260", -- DrivingMusic: музыка заезда
 	"rbxassetid://9125386815", -- BatFX: залп крыльев колонии (скример)
 	"rbxassetid://9117009021", -- BatFX: визг стаи (скример)
+	"rbxassetid://9119446673", -- BatFX: человеческий вскрик (скример)
+	"rbxassetid://72166668675269", -- TurretAimClient: осечка (заезд решён)
 	"rbxassetid://9112764040", -- GraveyardAmbience: сверчки
 	"rbxassetid://121066883602737", -- ZombieAI: рык при замахе
 	"rbxassetid://9116771817", -- ZombieAI: лязг по кузову

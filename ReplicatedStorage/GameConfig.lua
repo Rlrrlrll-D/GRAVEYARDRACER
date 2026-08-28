@@ -25,6 +25,7 @@ export type GameConfigType = {
 		SpawnRadius: number,
 		MinSpawnDistance: number, -- ближе этого к машине из могилы не лезут
 		Standoff: number, -- на столько studs зомби останавливается ОТ КУЗОВА
+		MaxAttackers: number, -- сколько зомби бьют ОДНУ машину одновременно
 	},
 	Weapon: {
 		Damage: number,
@@ -106,6 +107,13 @@ local GameConfig: GameConfigType = {
 		-- Дистанция, на которой зомби ОСТАНАВЛИВАЕТСЯ перед кузовом. Меньше AttackRange,
 		-- иначе он замирал бы в шаге от того, до чего не дотягивается.
 		Standoff = 2.1,
+		-- ПОТОЛОК УРОНА ТОЛПЫ. Кусает зомби по-прежнему на AttackDamage, но по кузову
+		-- одновременно работают только столько — очередь держит ZombieAI.claimAttackSlot.
+		-- Весь урон толпы, сколько бы их ни собралось, теперь ровно
+		--     MaxAttackers * AttackDamage / AttackCooldown = 3 * 5 / 1.5 = 10 в секунду,
+		-- то есть 10 секунд на жизнь и 30 на все три. Было — по 3.3 с КАЖДОГО: четырнадцать
+		-- окруживших давали 46 в секунду и съедали машину целиком за две.
+		MaxAttackers = 3,
 	},
 	Weapon = {
 		Damage = 20,

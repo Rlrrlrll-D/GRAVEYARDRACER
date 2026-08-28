@@ -50,8 +50,16 @@ fireWeapon.OnServerEvent:Connect(function(player: Player, origin: unknown, direc
 
 	local vehicle = VehicleRegistry.GetVehicleForPlayer(player)
 	if not vehicle then return end
-	-- выбывший и сгоревший не стреляют: и то и другое сервер ставит сам
-	if vehicle:GetAttribute("Eliminated") or vehicle:GetAttribute("Destroyed") then return end
+	-- Выбывший, сгоревший и доигравший не стреляют — все три флага ставит сервер.
+	-- `WeaponsLocked` появляется, когда заезд уже решён (MatchManager.runResults):
+	-- пока висит экран итогов, проигравший остаётся в машине, и без замка турель
+	-- продолжала бы работать — можно было набивать зомби после конца гонки.
+	if vehicle:GetAttribute("Eliminated")
+		or vehicle:GetAttribute("Destroyed")
+		or vehicle:GetAttribute("WeaponsLocked")
+	then
+		return
+	end
 
 	local originVec = origin :: Vector3
 	local directionVec = (direction :: Vector3).Unit

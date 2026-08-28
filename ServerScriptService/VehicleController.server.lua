@@ -64,6 +64,8 @@ local function setupVehicle(vehicle: Model)
 	vehicle:SetAttribute("Lives", GameConfig.Race.Lives)
 	vehicle:SetAttribute("Eliminated", false)
 	vehicle:SetAttribute("Invulnerable", false)
+	-- Ставит MatchManager, когда заезд решён: турель молчит и сбитые не засчитываются.
+	vehicle:SetAttribute("WeaponsLocked", false)
 
 	-- // Death & respawn ---------------------------------------------------
 	-- On Destroyed: eject the driver and disable the seat (this also stops
@@ -356,7 +358,13 @@ local function setupVehicle(vehicle: Model)
 		-- тормозит машину физически, массой тел.
 		local speed = (vehicle:GetAttribute("Speed") :: number?) or 0
 		if speed >= GameConfig.Vehicle.CrushSpeedThreshold then
-			local killer = VehicleRegistry.GetPlayerForVehicle(vehicle)
+			-- Тот же замок, что и у турели: после решённого заезда сбитый зомби НИКОМУ
+			-- не засчитывается, иначе запрет на стрельбу обходился бы бампером. Гибнуть
+			-- под колёсами он не перестаёт — меняется только то, кому идёт счёт.
+			local killer: Player? = nil
+			if not vehicle:GetAttribute("WeaponsLocked") then
+				killer = VehicleRegistry.GetPlayerForVehicle(vehicle)
+			end
 			if killer then
 				zombieModel:SetAttribute("KilledBy", killer.UserId)
 			end

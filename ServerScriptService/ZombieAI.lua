@@ -542,6 +542,46 @@ local function findNearestVehicle(position: Vector3): (Model?, number)
 	return nearest, nearestDistance
 end
 
+-- // ОЧЕРЕДЬ К КУЗОВУ: сколько зомби бьют машину ОДНОВРЕМЕННО ----------------
+--
+-- Смягчаем именно ТОЛПУ, а не укус. Сила одного покойника не тронута
+-- (`AttackDamage` / `AttackCooldown` те же), а вот сумма больше не растёт линейно с
+-- числом тел: замер живого заезда показал 14 зомби вокруг стоящей машины = 46 урона
+-- в секунду, то есть весь запас в 100 HP за две секунды и все три жизни секунд за
+-- семь. Уехать из такого попросту нечем.
+--
+-- Слот занимается на время перезарядки, поэтому пропускная способность толпы жёстко
+-- равна `MaxAttackers * AttackDamage / AttackCooldown` при любом её размере.
+-- Оставшиеся без слота не превращаются в истуканов: они так же стоят у борта, рычат
+-- и берут слот, едва он освободится, — очередь всё время перемешивается, и со стороны
+-- это читается как «бьют по очереди», а не как «половина толпы выключилась».
+--
+-- Ключи слабые: удалённые машины и зомби уходят вместе со сборкой мусора, чистить
+-- вручную нечего.
+local attackSlots = (setmetatable({}, { __mode = "k" }) :: any) :: { [Model]: { [Model]: number } }
+
+local function claimAttackSlot(vehicle: Model, zombie: Model): boolean
+	local slots = attackSlots[vehicle]
+	if not slots then
+		slots = (setmetatable({}, { __mode = "k" }) :: any) :: { [Model]: number }
+		attackSlots[vehicle] = slots
+	end
+	local now = os.clock()
+	local busy = 0
+	for holder, expiry in slots do
+		if expiry <= now or not holder.Parent then
+			slots[holder] = nil -- отбил своё (или его уже нет) — слот свободен
+		else
+			busy += 1
+		end
+	end
+	if busy >= GameConfig.Zombie.MaxAttackers then
+		return false
+	end
+	slots[zombie] = now + GameConfig.Zombie.AttackCooldown
+	return true
+end
+
 function ZombieAI.Run(zombie: Model)
 	local humanoid = zombie:FindFirstChildOfClass("Humanoid")
 	local rootPart = zombie:FindFirstChild("HumanoidRootPart") :: BasePart?
@@ -675,8 +715,13 @@ function ZombieAI.Run(zombie: Model)
 				-- давит на кузов. Нулевая скорость снимает силу движения совсем.
 				humanoid.WalkSpeed = 0
 
+				-- Порядок условий важен: за слотом идём, только когда своя перезарядка
+				-- уже вышла, иначе очередь дёргали бы десять раз в секунду впустую.
+				-- Не досталось — просто стоим и напираем, попробуем на следующем такте.
 				local now = os.clock()
-				if now - lastAttackAt >= GameConfig.Zombie.AttackCooldown then
+				if now - lastAttackAt >= GameConfig.Zombie.AttackCooldown
+					and claimAttackSlot(vehicle, zombie)
+				then
 					lastAttackAt = now
 
 					if attackTrack then

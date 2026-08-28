@@ -38,13 +38,23 @@ for _, groupName in GROUPS do
 	end
 end
 
--- Zombies physically collide with vehicles (gives the crush a physical feel)
--- but not with each other or obstacles, to avoid clumping/jitter since we
--- are not doing full pathfinding around scenery.
+-- Zombies physically collide with vehicles (gives the crush a physical feel).
+-- Сквозь ДЕКОР они по-прежнему ходят: полноценного обхода препятствий у них нет,
+-- и без этого стая застревала бы в надгробиях по дороге к машине.
 PhysicsService:CollisionGroupSetCollidable("Vehicles", "Zombies", true)
 PhysicsService:CollisionGroupSetCollidable("Vehicles", "Obstacles", true)
 PhysicsService:CollisionGroupSetCollidable("Vehicles", "Environment", true)
-PhysicsService:CollisionGroupSetCollidable("Zombies", "Zombies", false)
+
+-- ДРУГ В ДРУГА НЕ ПРОНИКАЮТ (2026-08-28, просьба юзера). Раньше стояло `false` — и
+-- это было не косметическое решение, а плата за отсутствие обхода препятствий: тела
+-- слипались в одну точку, зато не толкались.
+--
+-- Теперь плата не нужна. Толпа больше не ломится в кузов (каждый останавливается у
+-- борта, ZombieAI.surfacePoint), а вес тела вернули к дореформенному (ZombieSpawner,
+-- DENSITY_FIX) — то есть куча-мала из пятнадцати тел, ради страховки от которой
+-- контакт и выключали, физически стала лёгкой. Заодно исчезает главная нелепость
+-- прежнего варианта: десяток покойников, слитых в один силуэт у борта.
+PhysicsService:CollisionGroupSetCollidable("Zombies", "Zombies", true)
 
 -- // Колёса: с миром как кузов, но зомби в подвеску не попадают -------------
 --

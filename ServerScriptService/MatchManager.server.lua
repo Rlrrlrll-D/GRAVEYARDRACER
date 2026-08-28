@@ -476,6 +476,24 @@ end
 
 local function runResults(winner: Player?, winnerName: string?, session: RaceCore.Session, participants: { Player })
 	phase = Phase.Results
+
+	-- ЗАЕЗД РЕШЁН — ОРУЖИЕ МОЛЧИТ.
+	--
+	-- Экран итогов держится RESULTS_SECONDS, и всё это время проигравший ещё сидит в
+	-- машине с рабочей турелью: победитель уже объявлен, а он спокойно достреливает
+	-- зомби вокруг, набивая кости и счётчик убитых уже ПОСЛЕ конца гонки. Замок
+	-- ставится всем участникам сразу, включая победителя: доигрывать нечего никому.
+	--
+	-- Живёт замок на машине и проверяется НА СЕРВЕРЕ (WeaponServer, а для сбитых
+	-- колёсами — VehicleController), поэтому от состояния клиента он не зависит и
+	-- подделать его нельзя. Снимать не нужно: машину на каждый заезд выдают новую.
+	for _, plr in participants do
+		local car = PlayerFlow.getVehicle(plr)
+		if car then
+			car:SetAttribute("WeaponsLocked", true)
+		end
+	end
+
 	RaceScene.clearGhosts() -- призраки живут ровно один заезд: в лобби трасса пустая
 	broadcastLobby()
 	-- 1) полноэкранный экран итогов ВСЕМ участникам — и выжившим, и зрителям-выбывшим

@@ -32,15 +32,25 @@ local mouse = player:GetMouse()
 -- bullet on every client, so all players hear each shot positionally.
 local GUNSHOT_SOUND_ID = "rbxassetid://88311346538102"
 
+-- ОСЕЧКА: сухой щелчок вместо выстрела, когда стрелять уже нельзя (заезд решён,
+-- см. WeaponsLocked ниже). Без звука нажатие проваливалось в тишину, и это читалось
+-- как «игра зависла», а не как «оружие заперто». Free Creator Store, 0.23с — короче
+-- самого выстрела, чтобы удержанная гашетка не превратилась в трещотку.
+local DRYFIRE_SOUND_ID = "rbxassetid://72166668675269"
+local DRYFIRE_INTERVAL = 0.45 -- реже темпа стрельбы: щелчок должен читаться поштучно
+
 -- Предзагрузка звука выстрела — чтобы первые выстрелы не запаздывали.
 task.spawn(function()
 	local ContentProvider = game:GetService("ContentProvider")
 	local s = Instance.new("Sound")
 	s.SoundId = GUNSHOT_SOUND_ID
+	local d = Instance.new("Sound")
+	d.SoundId = DRYFIRE_SOUND_ID
 	pcall(function()
-		ContentProvider:PreloadAsync({ s })
+		ContentProvider:PreloadAsync({ s, d })
 	end)
 	s:Destroy()
+	d:Destroy()
 end)
 
 local function findMyVehicle(): Model?
@@ -316,6 +326,33 @@ local function createMuzzleFlash(source: EffectSource)
 	Debris:AddItem(flash, FLASH_LIFE)
 end
 
+-- Щелчок осечки. Тем же приёмом, что и выстрел (временный динамик + Debris), но
+-- тише и с коротким хвостом: это механический звук самого оружия, а не удар по
+-- окрестностям, и разноситься на две сотни studs ему незачем.
+local function playDryFire(position: Vector3)
+	local speaker = Instance.new("Part")
+	speaker.Anchored = true
+	speaker.CanCollide = false
+	speaker.CanQuery = false
+	speaker.Transparency = 1
+	speaker.Size = Vector3.new(0.2, 0.2, 0.2)
+	speaker.CFrame = CFrame.new(position)
+
+	local sound = Instance.new("Sound")
+	sound.SoundId = DRYFIRE_SOUND_ID
+	sound.Volume = 0.7
+	sound.SoundGroup = Audio.SFX
+	sound.RollOffMode = Enum.RollOffMode.InverseTapered
+	sound.RollOffMinDistance = 6
+	sound.RollOffMaxDistance = 60
+	sound.PlaybackSpeed = 0.97 + math.random() * 0.08
+	sound.Parent = speaker
+
+	speaker.Parent = workspace
+	sound:Play()
+	Debris:AddItem(speaker, 1)
+end
+
 local function playGunshot(position: Vector3)
 	local speaker = Instance.new("Part")
 	speaker.Anchored = true
@@ -533,11 +570,28 @@ end)
 
 -- // Firing ------------------------------------------------------------
 local lastLocalFire = 0
+local lastDryFire = 0
 local firing = false
 
 local function tryFire()
 	local vehicle = findMyVehicle()
 	if not vehicle then return end
+	-- ЗАЕЗД РЕШЁН — НЕ СТРЕЛЯЕМ, НО И НЕ МОЛЧИМ. Замок ставит сервер
+	-- (MatchManager.runResults), он же его и проверяет, так что обойти эту строку
+	-- бесполезно. Но выстрел рисуется ПРЕДСКАЗАНИЕМ, до ответа сервера: без проверки
+	-- проигравший на экране итогов видел бы трассеры и слышал очередь, по которой
+	-- никто не умирает. Вместо этого — сухой щелчок осечки: понятно, что оружие
+	-- заперто, а не что игра перестала отвечать.
+	if vehicle:GetAttribute("WeaponsLocked") then
+		local nowLocked = os.clock()
+		if nowLocked - lastDryFire >= DRYFIRE_INTERVAL then
+			lastDryFire = nowLocked
+			local m = vehicle:FindFirstChild("Muzzle", true)
+			local at = (m and m:IsA("Attachment")) and (m :: Attachment).WorldPosition or vehicle:GetPivot().Position
+			playDryFire(at)
+		end
+		return
+	end
 
 	local muzzle = vehicle:FindFirstChild("Muzzle", true) -- дуло переехало на GunCradle
 	if not muzzle or not muzzle:IsA("Attachment") then return end

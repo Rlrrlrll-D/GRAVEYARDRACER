@@ -37,9 +37,17 @@ local batScare = Net.get(Net.Events.BatScare)
 --            целой колонии, а не одиночный взмах;
 --   SQUEAL — «Mouse Vocal, Rapid Chatter, Squeaky, Shrill» (2.0с): собственно визг,
 --            он и пугает. Задран по высоте — иначе слышно крысу, а не летучую мышь.
--- Пустая строка у любого из двух = этот слой молчит.
+--   SCREAM — человеческий вскрик поверх писка (юзер: «резкий крик помимо писка,
+--            желательно женский, но короткий»). Слой третий и он же главный по
+--            испугу: писк — это ЗВЕРЬ, а крик — это РЕАКЦИЯ, и мозг достраивает
+--            опасность сам. Взят кусок «Woman Screaming» из той же библиотеки
+--            ProSoundEffects; играем только SCREAM_CUT секунд от начала — там
+--            резкий вскрик, а дальше на записи идут причитания, которые всё портят.
+-- Пустая строка у любого из трёх = этот слой молчит.
 local WINGS_ID = "rbxassetid://9125386815"
 local SQUEAL_ID = "rbxassetid://9117009021"
+local SCREAM_ID = "rbxassetid://9119446673"
+local SCREAM_CUT = 0.55 -- сек: сколько играем от начала записи
 -- Рой (до 52) + эмбиент + запас: занятую мышь НИКОГДА не отбираем. РАСТИТЬ ВМЕСТЕ С
 -- ЧИСЛОМ В BatManager: если пул меньше запрошенной стаи, take() вернёт nil и лишние
 -- мыши просто не появятся — молча, без ошибки в логе.
@@ -76,6 +84,11 @@ local squeal = Instance.new("Sound")
 squeal.SoundId = SQUEAL_ID
 squeal.Volume = 0.85
 squeal.Parent = SoundService
+
+local scream = Instance.new("Sound")
+scream.SoundId = SCREAM_ID
+scream.Volume = 0.9
+scream.Parent = SoundService
 
 -- Части модели вместе с корнем (шаблон может быть и Model, и одиночным MeshPart).
 local function partsOf(inst: Instance): { BasePart }
@@ -400,6 +413,19 @@ batScare.OnClientEvent:Connect(function(origin: Vector3, count: number, kind: st
 		if SQUEAL_ID ~= "" then
 			squeal.PlaybackSpeed = 1.18 + math.random() * 0.22
 			squeal:Play()
+		end
+		if SCREAM_ID ~= "" then
+			-- Чуть выше и резче оригинала, разброс — чтобы третий скример за заезд не
+			-- звучал заученно. Обрываем по таймеру: `PlaybackRegion` есть не везде, а
+			-- Stop через task.delay работает одинаково на любом клиенте.
+			scream.PlaybackSpeed = 1.12 + math.random() * 0.18
+			scream.TimePosition = 0
+			scream:Play()
+			task.delay(SCREAM_CUT, function()
+				if scream.IsPlaying then
+					scream:Stop()
+				end
+			end)
 		end
 		for _ = 1, count do
 			launchOne(origin, true)
