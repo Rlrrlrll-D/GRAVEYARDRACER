@@ -605,27 +605,36 @@ end
 -- они не помещаются, а без второго ряда опоздавшие снова сбились бы в затылок.
 local RING_SLOTS = 12 -- мест в одном кольце
 local RING_OUTER_PAD = 3.4 -- насколько внешний ряд дальше внутреннего
-local RING_CHOICE = 2 -- из скольких ближайших свободных мест выбираем наугад
-local SLOT_ARRIVED = 2.2 -- «я на месте»: примерно ширина тела
+local RING_CHOICE = 5 -- из скольких ближайших свободных мест выбираем наугад
+-- «Я на месте» меряется ПО ГОРИЗОНТАЛИ. С обычным расстоянием в зачёт шла и
+-- разница высот (точка кольца лежит на уровне центра кузова, зомби стоит на
+-- земле), зомби до места «не доходил» никогда — стоял у борта и не бил.
+local SLOT_ARRIVED = 3.0
 local SLOT_PATIENCE = 2.5 -- дольше этого к своему месту не пробиваемся, бьём откуда стоим
+local ORBIT_PAD = 1.4 -- обход идёт чуть шире стоянки, чтобы не тереться о кузов
+local TURN_STEP = math.rad(35) -- на сколько доворачиваемся к машине за такт мышления
 
 -- vehicle → { [slot] = zombie }. Обе таблицы слабые: уехавшая машина и удалённый
 -- зомби уходят сами, чистить руками нечего.
 local ringOwners: { [Model]: { [number]: Model } } = setmetatable({}, { __mode = "k" }) :: any
 
--- Точка слота в мире. Периметр прямоугольника (кузов + отступ) разложен по кругу:
--- индекс задаёт долю периметра, jitter (своя у каждого тела) сдвигает внутри своей
--- доли — иначе места читались бы как разметка парковки.
-local function ringPoint(fp: Footprint, index: number, jitter: number, pad: number): Vector3
+-- Место на кольце задаётся долей периметра t (0..1). Индекс слота переводится в
+-- долю здесь — и только здесь, чтобы обход кольца и сама точка считались по одной
+-- формуле. jitter (своя у каждого тела) сдвигает внутри своей доли, иначе места
+-- читались бы как разметка парковки.
+local function ringParamOf(index: number, jitter: number): (number, boolean)
 	local outer = index > RING_SLOTS
 	local slot = if outer then index - RING_SLOTS else index
-	local p = pad + (if outer then RING_OUTER_PAD else 0)
-	local ex, ez = fp.hx + p, fp.hz + p
-	local perim = 4 * (ex + ez)
 	-- внешний ряд смещён на полшага: иначе он встал бы ровно за спинами внутреннего
-	local step = (slot - 1 + jitter + (if outer then 0.5 else 0)) / RING_SLOTS
-	local s = (step % 1) * perim
+	local t = (slot - 1 + jitter + (if outer then 0.5 else 0)) / RING_SLOTS
+	return t % 1, outer
+end
 
+-- Точка на периметре прямоугольника (кузов + отступ) по доле t.
+local function ringPointAt(fp: Footprint, t: number, pad: number): Vector3
+	local ex, ez = fp.hx + pad, fp.hz + pad
+	local perim = 4 * (ex + ez)
+	local s = (t % 1) * perim
 	local x, z
 	if s < 2 * ex then
 		x, z = -ex + s, ez
@@ -636,8 +645,39 @@ local function ringPoint(fp: Footprint, index: number, jitter: number, pad: numb
 	else
 		x, z = -ex, -ez + (s - 4 * ex - 2 * ez)
 	end
-	local world = fp.cf:PointToWorldSpace(Vector3.new(x, 0, z))
-	return world
+	return fp.cf:PointToWorldSpace(Vector3.new(x, 0, z))
+end
+
+local function ringPoint(fp: Footprint, index: number, jitter: number, pad: number): Vector3
+	local t, outer = ringParamOf(index, jitter)
+	return ringPointAt(fp, t, pad + (if outer then RING_OUTER_PAD else 0))
+end
+
+-- Обратное преобразование: на какой доле периметра стоит сам зомби. Нужно, чтобы
+-- понять, в какую сторону ОБХОДИТЬ машину — по часовой или против.
+local function ringParamAt(fp: Footprint, p: Vector3, pad: number): number
+	local lp = fp.cf:PointToObjectSpace(p)
+	local ex, ez = fp.hx + pad, fp.hz + pad
+	local perim = 4 * (ex + ez)
+	local cx = math.clamp(lp.X, -ex, ex)
+	local cz = math.clamp(lp.Z, -ez, ez)
+	local s
+	-- Какая грань ближе, решает не абсолютное расстояние, а доля полуразмера:
+	-- кузов длиннее, чем шире, и по абсолютным метрам бок «выигрывал» бы всегда.
+	if math.abs(lp.X) / ex >= math.abs(lp.Z) / ez then
+		if lp.X > 0 then
+			s = 2 * ex + (ez - cz) -- правый борт
+		else
+			s = 4 * ex + 2 * ez + (cz + ez) -- левый борт
+		end
+	else
+		if lp.Z > 0 then
+			s = cx + ex -- нос
+		else
+			s = 2 * ex + 2 * ez + (ex - cx) -- корма
+		end
+	end
+	return (s / perim) % 1
 end
 
 -- Занять место. Возвращает индекс слота либо nil, если все 24 разобраны.
@@ -797,6 +837,7 @@ function ZombieAI.Run(zombie: Model)
 	-- Своя доля внутри слота: с общим нулём места легли бы ровной разметкой.
 	local ringJitter = 0.15 + math.random() * 0.7
 	local slotSince = os.clock() -- с какого момента идём к своему месту (см. SLOT_PATIENCE)
+	local lastRingGap = 1 -- прошлый разрыв по кольцу: по нему видно, идём мы или буксуем
 	local lastAttackAt = 0
 	local idleSince = os.clock()
 	local nextMoanAt = os.clock() + math.random() * 3 -- редкий протяжный стон при погоне
@@ -865,14 +906,43 @@ function ZombieAI.Run(zombie: Model)
 			local stand = driveSeat and driveSeat.Position or rootPart.Position
 			local inside = false
 			local atSlot = true -- нет слотов (все заняты) — прежнее поведение
+			local ringGap = 0 -- насколько далеко до своего места ПО КОЛЬЦУ (доля периметра)
 			if fp then
 				bodyDistance, stand, inside = surfacePoint(fp :: Footprint, rootPart.Position, standoff)
 				-- ИДЁМ НА СВОЁ МЕСТО, А НЕ В БЛИЖАЙШУЮ ТОЧКУ КУЗОВА.
 				if not inside then
 					local slot = claimRingSlot(vehicle, zombie, fp :: Footprint, standoff, ringJitter)
 					if slot then
-						stand = ringPoint(fp :: Footprint, slot, ringJitter, standoff)
-						atSlot = (rootPart.Position - stand).Magnitude <= SLOT_ARRIVED
+						local seatPoint = ringPoint(fp :: Footprint, slot, ringJitter, standoff)
+						local flat = Vector3.new(
+							seatPoint.X - rootPart.Position.X,
+							0,
+							seatPoint.Z - rootPart.Position.Z
+						).Magnitude
+						atSlot = flat <= SLOT_ARRIVED
+						stand = seatPoint
+
+						-- ОБХОД, А НЕ НАПРЯМИК. Humanoid ходит по прямой, и зомби,
+						-- которому досталось место на том борту, честно шёл В КУЗОВ:
+						-- утыкался, буксовал и оставался стоять боком. Поэтому пока
+						-- разница по кольцу больше шага, целимся не в само место, а в
+						-- СЛЕДУЮЩУЮ точку кольца в нужную сторону — получается обход
+						-- машины по дуге. Идём чуть шире стоянки (ORBIT_PAD), чтобы
+						-- не тереться о борт на ходу.
+						if not atSlot then
+							local tSlot = ringParamOf(slot, ringJitter)
+							local tMe = ringParamAt(fp :: Footprint, rootPart.Position, standoff)
+							local d = (tSlot - tMe + 0.5) % 1 - 0.5 -- знаковая разница по кольцу
+							ringGap = math.abs(d)
+							if math.abs(d) > 1 / RING_SLOTS and bodyDistance <= 12 then
+								local dir = if d >= 0 then 1 else -1
+								stand = ringPointAt(
+									fp :: Footprint,
+									tMe + dir / RING_SLOTS,
+									standoff + ORBIT_PAD
+								)
+							end
+						end
 					end
 				end
 			end
@@ -884,11 +954,20 @@ function ZombieAI.Run(zombie: Model)
 			--
 			-- ТЕРПЕНИЕ обязательно: в плотной толпе до слота можно не дойти вовсе —
 			-- упрёшься в чужие спины и будешь толкаться вечно, ни разу не ударив.
-			-- Не дошёл за SLOT_PATIENCE секунд — бьём оттуда, где стоим.
-			if not atSlot and os.clock() - slotSince > SLOT_PATIENCE then
-				atSlot = true
-			elseif atSlot then
+			--
+			-- Но считать его глухим таймером нельзя: обход половины машины занимает
+			-- пару секунд, и такой таймер обрывал бы обход на полпути — зомби вставал
+			-- бы боком там, где его застало. Поэтому терпение тратится, только пока
+			-- разрыв по кольцу НЕ СОКРАЩАЕТСЯ: идёшь — иди сколько нужно, встал —
+			-- через SLOT_PATIENCE бьём оттуда, где стоим.
+			if atSlot then
 				slotSince = os.clock()
+				lastRingGap = ringGap
+			elseif ringGap < lastRingGap - 0.005 then
+				lastRingGap = ringGap
+				slotSince = os.clock()
+			elseif os.clock() - slotSince > SLOT_PATIENCE then
+				atSlot = true
 			end
 
 			if inside then
@@ -902,6 +981,27 @@ function ZombieAI.Run(zombie: Model)
 				-- время «доходит» и промахивается, дрожа на месте, — и всё это время
 				-- давит на кузов. Нулевая скорость снимает силу движения совсем.
 				humanoid.WalkSpeed = 0
+
+				-- РАЗВОРОТ К МАШИНЕ. Humanoid поворачивает тело по ходу движения, а
+				-- на своё место зомби приходит СБОКУ или в обход — и замирает,
+				-- глядя вдоль борта («стоят и смотрят в сторону»). Пока он стоит,
+				-- Humanoid его не крутит, поэтому доворачиваем сами, по шагу за такт:
+				-- рывком на 90° это выглядело бы телепортом головы.
+				if driveSeat then
+					local to = Vector3.new(
+						(driveSeat :: BasePart).Position.X - rootPart.Position.X,
+						0,
+						(driveSeat :: BasePart).Position.Z - rootPart.Position.Z
+					)
+					if to.Magnitude > 0.5 then
+						local want = CFrame.lookAt(rootPart.Position, rootPart.Position + to.Unit)
+						local _, dy = rootPart.CFrame:ToObjectSpace(want):ToEulerAnglesYXZ()
+						if math.abs(dy) > math.rad(3) then
+							rootPart.CFrame = rootPart.CFrame
+								* CFrame.Angles(0, math.clamp(dy, -TURN_STEP, TURN_STEP), 0)
+						end
+					end
+				end
 
 				-- Порядок условий важен: за слотом идём, только когда своя перезарядка
 				-- уже вышла, иначе очередь дёргали бы десять раз в секунду впустую.
