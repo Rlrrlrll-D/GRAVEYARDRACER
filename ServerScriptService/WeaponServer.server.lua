@@ -92,6 +92,7 @@ fireWeapon.OnServerEvent:Connect(function(player: Player, origin: unknown, direc
 				-- Куда опрокинуть тело, если этот выстрел окажется смертельным:
 				-- пуля толкает зомби ОТ стрелка (ZombieAI.PlayDeath читает атрибут).
 				zombieModel:SetAttribute("DeathPush", Vector3.new(directionVec.X, 0, directionVec.Z))
+				zombieModel:SetAttribute("DeathCause", "gun") -- выбор варианта падения, см. ZombieAI.PlayDeath
 				humanoid:TakeDamage(GameConfig.Weapon.Damage)
 			end
 		end

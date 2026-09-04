@@ -258,9 +258,71 @@ function ZombieAI.PlayDeath(zombie: Model)
 	push = Vector3.new(push.X, 0, push.Z)
 	push = push.Magnitude > 1e-3 and push.Unit
 		or Vector3.new(-startPivot.LookVector.X, 0, -startPivot.LookVector.Z).Unit
+	-- // ВАРИАНТ ПАДЕНИЯ --------------------------------------------------------
+	-- Жалоба: «каждый раз падают навзничь». Само падение было направленным и
+	-- раньше — тело валится в сторону push, — но стреляют почти всегда спереди, а
+	-- зомби стоит лицом к машине: направление выходило одно и то же.
+	--
+	-- Поэтому направление теперь ВЫБИРАЕТСЯ, а не выводится из одного push:
+	--   back     — навзничь, как было;
+	--   side     — на бок: ось наклона довёрнута на 60-85°, тело ложится боком;
+	--   face     — лицом вниз: валимся ПО ходу собственного взгляда;
+	--   collapse — ноги подкосились: глубокая просадка на месте, потом завал в
+	--              случайную сторону. Самый заметный, поэтому и самый редкий.
+	--
+	-- Контекст решает, что уместно: сбила машина сзади (push совпадает со взглядом)
+	-- — падать лицом вниз естественно, а «навзничь» смотрелось бы неправдой.
+	-- Остальное — жребий, но с весами: чаще всё-таки классическое падение назад.
+	local facing = Vector3.new(startPivot.LookVector.X, 0, startPivot.LookVector.Z)
+	facing = facing.Magnitude > 1e-3 and facing.Unit or push
+	local fromBehind = facing:Dot(push) > 0.4 -- толкает В спину: удар прилетел сзади
+	local cause = tostring(zombie:GetAttribute("DeathCause") or "")
+
+	local style: string
+	local roll = math.random()
+	if fromBehind then
+		style = if roll < 0.6 then "face" else "side"
+	elseif cause == "car" then
+		-- Из-под колёс тело выбрасывает: назад или вбок, но не «оседает».
+		style = if roll < 0.5 then "back" else "side"
+	else
+		style = if roll < 0.4 then "back" elseif roll < 0.75 then "side" else "collapse"
+	end
+
+	-- Направление опрокидывания под выбранный вариант.
+	local tipDir = push
+	if style == "face" then
+		tipDir = facing
+	elseif style == "side" then
+		local a = math.rad(60 + math.random() * 25) * (if math.random() < 0.5 then 1 else -1)
+		tipDir = (CFrame.Angles(0, a, 0) * push)
+	elseif style == "collapse" then
+		tipDir = (CFrame.Angles(0, math.random() * math.pi * 2, 0) * push)
+	end
+	tipDir = Vector3.new(tipDir.X, 0, tipDir.Z)
+	tipDir = tipDir.Magnitude > 1e-3 and tipDir.Unit or push
 	-- Ось наклона перпендикулярна направлению падения; поворот вокруг неё уводит
-	-- макушку в сторону push (проверено по правилу правой руки для up × push).
-	local tipAxis = Vector3.yAxis:Cross(push)
+	-- макушку в сторону tipDir (проверено по правилу правой руки для up × dir).
+	local tipAxis = Vector3.yAxis:Cross(tipDir)
+
+	-- Разброс в мелочах — то, что отличает две смерти одного варианта. Без него
+	-- четыре стиля читаются как четыре заранее записанных ролика.
+	local speed = 0.85 + math.random() * 0.35 -- множитель длительностей
+	local hitTime = DEATH_HIT_TIME * speed
+	local buckleTime = DEATH_BUCKLE_TIME * speed * (if style == "collapse" then 1.8 else 1)
+	local fallTime = DEATH_FALL_TIME * speed * (if style == "collapse" then 0.75 else 1)
+	local bounceTime = DEATH_BOUNCE_TIME * speed
+	local fallAngle = DEATH_FALL_ANGLE * (0.94 + math.random() * 0.1)
+	local buckleDrop = DEATH_BUCKLE_DROP * (if style == "collapse" then 2.4 else 0.85 + math.random() * 0.4)
+	local bounceAngle = DEATH_BOUNCE_ANGLE * (0.6 + math.random() * 0.9)
+	local bounceLift = DEATH_BOUNCE_LIFT * (0.6 + math.random() * 0.8)
+	-- Доворот вокруг собственной вертикали: он же решает, ляжет тело плашмя или
+	-- вполоборота. Копится по ходу падения, а не ставится скачком.
+	local twist = math.rad(10 + math.random() * 30) * (if math.random() < 0.5 then 1 else -1)
+	if style == "side" then
+		twist *= 1.8
+	end
+	local limb = 0.85 + math.random() * 0.3 -- общий разброс амплитуды рук/головы
 
 	-- Самая низкая точка тела ПРЯМО СЕЙЧАС, по реальным деталям.
 	--
@@ -305,9 +367,13 @@ function ZombieAI.PlayDeath(zombie: Model)
 
 	-- Положение всей модели: поворот на angle вокруг мировой точки pivotPoint
 	-- плюс просадка drop по мировой вертикали.
-	local function bodyCF(angle: number, drop: number): CFrame
+	-- `turn` — доворот вокруг собственной вертикали ДО опрокидывания: пока тело
+	-- стоит, это разворот на месте, а после наклона он же превращается в крен вдоль
+	-- корпуса. Отсюда и разница «лёг плашмя» / «лёг вполоборота».
+	local function bodyCF(angle: number, drop: number, turn: number?): CFrame
 		local spin = CFrame.new(pivotPoint) * CFrame.fromAxisAngle(tipAxis, angle) * CFrame.new(-pivotPoint)
-		return CFrame.new(0, -drop, 0) * spin * startPivot
+		local stand = startPivot * CFrame.Angles(0, turn or 0, 0)
+		return CFrame.new(0, -drop, 0) * spin * stand
 	end
 
 	-- Земля под телом.
@@ -386,23 +452,25 @@ function ZombieAI.PlayDeath(zombie: Model)
 	playSoundAt(GROWL_SOUND_ID, startPivot.Position, 0.75, 0.5, 0.62) -- предсмертный хрип: ниже и длиннее рыка
 
 	-- 1. РЫВОК: голова запрокидывается, руки вскидываются врозь, корпус выгибает.
-	if not phase(zombie, DEATH_HIT_TIME, easeOut, function(a)
-		set(neck, -0.55 * a, 0, 0)
-		set(spine, -0.30 * a, 0, 0)
-		set(rs, -0.85 * a, 0, 1.15 * a)
-		set(ls, -0.85 * a, 0, -0.95 * a) -- левая чуть иначе: симметрия читается как робот
+	if not phase(zombie, hitTime, easeOut, function(a)
+		set(neck, -0.55 * limb * a, 0, 0)
+		set(spine, -0.30 * limb * a, 0, 0)
+		set(rs, -0.85 * limb * a, 0, 1.15 * limb * a)
+		set(ls, -0.85 * limb * a, 0, -0.95 * limb * a) -- левая чуть иначе: симметрия читается как робот
 	end) then
 		return
 	end
 
-	-- 2. НОГИ ПОДКОСИЛИСЬ: бёдра складываются вперёд, тело проседает.
-	if not phase(zombie, DEATH_BUCKLE_TIME, easeSmooth, function(a)
+	-- 2. НОГИ ПОДКОСИЛИСЬ: бёдра складываются вперёд, тело проседает. У варианта
+	-- collapse эта фаза длиннее и просадка втрое глубже — тело именно оседает,
+	-- а уже потом заваливается.
+	if not phase(zombie, buckleTime, easeSmooth, function(a)
 		set(rh, 0, 0, 0.70 * a)
 		set(lh, 0, 0, -0.55 * a)
 		set(neck, -0.55 + 0.25 * a, 0.18 * a, 0)
 		set(rs, -0.85 + 0.45 * a, 0, 1.15 - 0.55 * a)
 		set(ls, -0.85 + 0.45 * a, 0, -0.95 + 0.40 * a)
-		zombie:PivotTo(bodyCF(0, DEATH_BUCKLE_DROP * a))
+		zombie:PivotTo(bodyCF(0, buckleDrop * a, twist * 0.3 * a))
 	end) then
 		return
 	end
@@ -416,29 +484,29 @@ function ZombieAI.PlayDeath(zombie: Model)
 	-- руку в небо, а вторую загоняет под корпус. Замер: левая рука на +3.33, правая
 	-- на +0.35, торс на ней сверху. Теперь к концу падения руки идут вдоль тела, и
 	-- лежащий силуэт получается плоским.
-	if not phase(zombie, DEATH_FALL_TIME, easeIn, function(a)
-		set(neck, -0.30 - 0.20 * a, 0.18 + 0.22 * a, 0)
-		set(rs, -0.40 + 0.28 * a, 0, 0.60 - 0.45 * a)
-		set(ls, -0.40 + 0.28 * a, 0, -0.55 + 0.40 * a)
+	if not phase(zombie, fallTime, easeIn, function(a)
+		set(neck, -0.30 - 0.20 * a, (0.18 + 0.22 * a) * limb, 0)
+		set(rs, -0.40 + 0.28 * a, 0, (0.60 - 0.45 * a) * limb)
+		set(ls, -0.40 + 0.28 * a, 0, (-0.55 + 0.40 * a) * limb)
 		set(rh, 0, 0, 0.70 - 0.58 * a)
 		set(lh, 0, 0, -0.55 + 0.45 * a)
-		zombie:PivotTo(bodyCF(DEATH_FALL_ANGLE * a, DEATH_BUCKLE_DROP))
+		zombie:PivotTo(bodyCF(fallAngle * a, buckleDrop, twist * (0.3 + 0.7 * a)))
 		settle(a) -- к концу падения низ тела ложится ровно на грунт
 	end) then
 		return
 	end
 
 	-- 4. ОТСКОК: перелёт на пару градусов и возврат — вес тела на удар о землю.
-	if not phase(zombie, DEATH_BOUNCE_TIME, easeSmooth, function(a)
+	if not phase(zombie, bounceTime, easeSmooth, function(a)
 		local over = math.sin(a * math.pi) -- 0 → 1 → 0
-		zombie:PivotTo(bodyCF(DEATH_FALL_ANGLE + DEATH_BOUNCE_ANGLE * over, DEATH_BUCKLE_DROP))
+		zombie:PivotTo(bodyCF(fallAngle + bounceAngle * over, buckleDrop, twist))
 		-- руки остаются лежать вдоль тела, на отскоке лишь чуть подбрасывает
-		set(rs, -0.12 - 0.10 * over, 0, 0.15)
-		set(ls, -0.12 - 0.08 * over, 0, -0.15)
-		set(neck, -0.50, 0.40 + 0.10 * over, 0)
+		set(rs, -0.12 - 0.10 * over, 0, 0.15 * limb)
+		set(ls, -0.12 - 0.08 * over, 0, -0.15 * limb)
+		set(neck, -0.50, (0.40 + 0.10 * over) * limb, 0)
 		settle(1)
 		-- отскок: на миг приподнимаем тело над грунтом и тут же роняем обратно
-		zombie:PivotTo(zombie:GetPivot() + Vector3.new(0, DEATH_BOUNCE_LIFT * over, 0))
+		zombie:PivotTo(zombie:GetPivot() + Vector3.new(0, bounceLift * over, 0))
 	end) then
 		return
 	end

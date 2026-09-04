@@ -457,6 +457,9 @@ local function setupVehicle(vehicle: Model)
 			if flat.Magnitude > 1 then
 				zombieModel:SetAttribute("DeathPush", flat.Unit)
 			end
+			-- Чем убило — тоже подсказка для падения: из-под колёс тело выбрасывает,
+			-- «осесть на месте» под машиной оно не может (ZombieAI.PlayDeath, стили).
+			zombieModel:SetAttribute("DeathCause", "car")
 			humanoid:TakeDamage(GameConfig.Vehicle.CrushDamageToZombie)
 		end
 	end
