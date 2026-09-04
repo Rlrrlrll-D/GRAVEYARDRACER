@@ -522,6 +522,100 @@ local function surfacePoint(fp: Footprint, p: Vector3, pad: number): (number, Ve
 	return dist, fp.cf:PointToWorldSpace(Vector3.new(px, lp.Y, pz)), inside
 end
 
+-- // МЕСТА ВОКРУГ МАШИНЫ ------------------------------------------------------
+--
+-- ЗАЧЕМ. `surfacePoint` ведёт каждого в БЛИЖАЙШУЮ к нему точку кузова, и все,
+-- кто прибежал с одной стороны, вставали друг другу в затылок: бьёт передний,
+-- остальные подпирают его спину и с дороги вообще не читаются как толпа.
+--
+-- Теперь у каждого своё место на кольце вокруг кузова. Слот занимается ОДИН раз
+-- и держится, пока зомби жив: если перевыбирать его каждый такт, соседи начнут
+-- меняться местами и толпа будет ёрзать.
+--
+-- Колец два. Внутреннее — на расстоянии удара, внешнее на RING_OUTER_PAD дальше:
+-- зомби на карте до 25 (GameConfig.Zombie.MaxZombies), в один ряд вокруг багги
+-- они не помещаются, а без второго ряда опоздавшие снова сбились бы в затылок.
+local RING_SLOTS = 12 -- мест в одном кольце
+local RING_OUTER_PAD = 3.4 -- насколько внешний ряд дальше внутреннего
+local RING_CHOICE = 2 -- из скольких ближайших свободных мест выбираем наугад
+local SLOT_ARRIVED = 2.2 -- «я на месте»: примерно ширина тела
+local SLOT_PATIENCE = 2.5 -- дольше этого к своему месту не пробиваемся, бьём откуда стоим
+
+-- vehicle → { [slot] = zombie }. Обе таблицы слабые: уехавшая машина и удалённый
+-- зомби уходят сами, чистить руками нечего.
+local ringOwners: { [Model]: { [number]: Model } } = setmetatable({}, { __mode = "k" }) :: any
+
+-- Точка слота в мире. Периметр прямоугольника (кузов + отступ) разложен по кругу:
+-- индекс задаёт долю периметра, jitter (своя у каждого тела) сдвигает внутри своей
+-- доли — иначе места читались бы как разметка парковки.
+local function ringPoint(fp: Footprint, index: number, jitter: number, pad: number): Vector3
+	local outer = index > RING_SLOTS
+	local slot = if outer then index - RING_SLOTS else index
+	local p = pad + (if outer then RING_OUTER_PAD else 0)
+	local ex, ez = fp.hx + p, fp.hz + p
+	local perim = 4 * (ex + ez)
+	-- внешний ряд смещён на полшага: иначе он встал бы ровно за спинами внутреннего
+	local step = (slot - 1 + jitter + (if outer then 0.5 else 0)) / RING_SLOTS
+	local s = (step % 1) * perim
+
+	local x, z
+	if s < 2 * ex then
+		x, z = -ex + s, ez
+	elseif s < 2 * ex + 2 * ez then
+		x, z = ex, ez - (s - 2 * ex)
+	elseif s < 4 * ex + 2 * ez then
+		x, z = ex - (s - 2 * ex - 2 * ez), -ez
+	else
+		x, z = -ex, -ez + (s - 4 * ex - 2 * ez)
+	end
+	local world = fp.cf:PointToWorldSpace(Vector3.new(x, 0, z))
+	return world
+end
+
+-- Занять место. Возвращает индекс слота либо nil, если все 24 разобраны.
+local function claimRingSlot(vehicle: Model, zombie: Model, fp: Footprint, pad: number, jitter: number): number?
+	local owners = ringOwners[vehicle]
+	if not owners then
+		owners = {}
+		ringOwners[vehicle] = owners
+	end
+
+	local mine: number? = nil
+	for slot, holder in owners do
+		if holder == zombie then
+			mine = slot
+		elseif not holder.Parent or holder:GetAttribute("Dead") then
+			owners[slot] = nil -- место освободилось: тело удалено или уже труп
+		end
+	end
+	if mine then
+		return mine
+	end
+
+	-- Выбор — СЛУЧАЙНЫЙ ИЗ БЛИЖАЙШИХ, а не строго ближайший. Строго ближайший
+	-- собирал всю толпу на том борту, с которого она прибежала (замер: семеро в
+	-- четырёх секторах из двенадцати, все сзади-слева). Чисто случайный из всех
+	-- гнал бы зомби через всю машину на пустое место — тоже неправда. Компромисс:
+	-- сортируем свободные места по расстоянию и берём наугад одно из RING_CHOICE
+	-- ближайших — обход получается коротким, но сторона каждый раз своя.
+	local here = zombie:GetPivot().Position
+	local free: { { slot: number, dist: number } } = {}
+	for slot = 1, RING_SLOTS * 2 do
+		if not owners[slot] then
+			table.insert(free, { slot = slot, dist = (ringPoint(fp, slot, jitter, pad) - here).Magnitude })
+		end
+	end
+	if #free == 0 then
+		return nil
+	end
+	table.sort(free, function(a, b)
+		return a.dist < b.dist
+	end)
+	local pick = free[math.random(1, math.min(RING_CHOICE, #free))].slot
+	owners[pick] = zombie
+	return pick
+end
+
 local function findNearestVehicle(position: Vector3): (Model?, number)
 	local nearest: Model? = nil
 	local nearestDistance = math.huge
@@ -632,6 +726,9 @@ function ZombieAI.Run(zombie: Model)
 	-- ставит спавнер; нет атрибута — значит рост обычный.
 	local attackRange = (zombie:GetAttribute("AttackRange") :: number?) or GameConfig.Zombie.AttackRange
 	local standoff = (zombie:GetAttribute("Standoff") :: number?) or GameConfig.Zombie.Standoff
+	-- Своя доля внутри слота: с общим нулём места легли бы ровной разметкой.
+	local ringJitter = 0.15 + math.random() * 0.7
+	local slotSince = os.clock() -- с какого момента идём к своему месту (см. SLOT_PATIENCE)
 	local lastAttackAt = 0
 	local idleSince = os.clock()
 	local nextMoanAt = os.clock() + math.random() * 3 -- редкий протяжный стон при погоне
@@ -699,8 +796,31 @@ function ZombieAI.Run(zombie: Model)
 			local fp = vehicleFootprint(vehicle)
 			local stand = driveSeat and driveSeat.Position or rootPart.Position
 			local inside = false
+			local atSlot = true -- нет слотов (все заняты) — прежнее поведение
 			if fp then
 				bodyDistance, stand, inside = surfacePoint(fp :: Footprint, rootPart.Position, standoff)
+				-- ИДЁМ НА СВОЁ МЕСТО, А НЕ В БЛИЖАЙШУЮ ТОЧКУ КУЗОВА.
+				if not inside then
+					local slot = claimRingSlot(vehicle, zombie, fp :: Footprint, standoff, ringJitter)
+					if slot then
+						stand = ringPoint(fp :: Footprint, slot, ringJitter, standoff)
+						atSlot = (rootPart.Position - stand).Magnitude <= SLOT_ARRIVED
+					end
+				end
+			end
+
+			-- ОСТАНАВЛИВАЕМСЯ ТОЛЬКО НА СВОЁМ МЕСТЕ, и это половина всей затеи.
+			-- Проверка на одну лишь дистанцию до кузова тормозила зомби там, где он
+			-- ДОТЯНУЛСЯ, — то есть у ближнего борта, куда пришли и все остальные.
+			-- Пока своё место не занято, продолжаем обходить машину.
+			--
+			-- ТЕРПЕНИЕ обязательно: в плотной толпе до слота можно не дойти вовсе —
+			-- упрёшься в чужие спины и будешь толкаться вечно, ни разу не ударив.
+			-- Не дошёл за SLOT_PATIENCE секунд — бьём оттуда, где стоим.
+			if not atSlot and os.clock() - slotSince > SLOT_PATIENCE then
+				atSlot = true
+			elseif atSlot then
+				slotSince = os.clock()
 			end
 
 			if inside then
@@ -708,7 +828,7 @@ function ZombieAI.Run(zombie: Model)
 				evict(stand)
 				humanoid.WalkSpeed = GameConfig.Zombie.WalkSpeed
 				humanoid:MoveTo(stand)
-			elseif bodyDistance <= attackRange then
+			elseif bodyDistance <= attackRange and atSlot then
 				-- СТОП — СКОРОСТЬЮ, А НЕ `MoveTo` В СЕБЯ. Прежний приём (`MoveTo` в
 				-- собственную позицию) Humanoid отрабатывает как микро-цель: он всё
 				-- время «доходит» и промахивается, дрожа на месте, — и всё это время

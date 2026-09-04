@@ -172,6 +172,52 @@ local function pickTarget(origin: Vector3): Model?
 	return best
 end
 
+-- // ПОКОЙ СТВОЛА ------------------------------------------------------------
+-- Жалоба: со старта ствол смотрит в пол. Так и было, и это не сбой наводки:
+-- целимся мы в точку ПОД КУРСОРОМ, а курсор в начале заезда стоит там, где его
+-- оставили, — обычно в середине экрана, то есть на полотне в двух десятках studs
+-- перед бампером. Возвышение к такой точке отрицательное, ствол честно опускается.
+--
+-- Точка покоя — прямо по ходу машины и НА ВЫСОТЕ САМОЙ ТУРЕЛИ: возвышение выходит
+-- нулевым (ствол горизонтально), рыскание — вдоль корпуса. Раньше на сенсоре
+-- аналогичная точка бралась от СИДЕНЬЯ, которое ниже турели, и ствол всё равно
+-- смотрел чуть под уклон.
+local REST_DISTANCE = 90
+
+local function restPoint(vehicle: Model?): Vector3?
+	local seat = vehicle and vehicle:FindFirstChild("DriveSeat")
+	if not (seat and seat:IsA("BasePart")) then
+		return nil
+	end
+	local turret = vehicle and vehicle:FindFirstChild("Turret", true)
+	local origin = (turret and turret:IsA("BasePart")) and (turret :: BasePart).Position
+		or (seat :: BasePart).Position
+	local fwd = (seat :: BasePart).CFrame.LookVector
+	fwd = Vector3.new(fwd.X, 0, fwd.Z)
+	if fwd.Magnitude < 1e-3 then
+		return nil
+	end
+	return origin + fwd.Unit * REST_DISTANCE
+end
+
+-- Тронул ли игрок наводку в этом заезде. До первого движения мыши (или выстрела)
+-- держим ствол в покое; сбрасывается при смене машины — то есть каждый заезд
+-- начинается со ствола «вперёд», а не с того, куда целились в прошлом.
+local hasAimed = false
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		local d = input.Delta
+		if math.abs(d.X) + math.abs(d.Y) > 0.5 then
+			hasAimed = true
+		end
+	end
+end)
+UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		hasAimed = true
+	end
+end)
+
 -- Куда смотрит турель на сенсоре: в захваченного зомби, а если целей нет — по ходу
 -- машины, чтобы ствол не замирал в случайном положении.
 local function autoAim(vehicle: Model?): (Vector3?, Instance?)
@@ -205,7 +251,7 @@ local function autoAim(vehicle: Model?): (Vector3?, Instance?)
 			return p, locked:FindFirstChildWhichIsA("BasePart", true)
 		end
 	end
-	return origin + (seat :: BasePart).CFrame.LookVector * 80, nil
+	return restPoint(vehicle) or (origin + (seat :: BasePart).CFrame.LookVector * 80), nil
 end
 
 -- Точка в мире под перекрестием (курсором). mouse.UnitRay учитывает
@@ -217,6 +263,15 @@ local function getMouseHit(excludeVehicle: Model?): (Vector3, Instance?)
 		local p, inst = autoAim(excludeVehicle)
 		if p then
 			return p, inst
+		end
+	end
+	-- До первого движения мыши ствол держим вперёд (см. restPoint). Проверка идёт
+	-- ПОСЛЕ сенсорной ветки: на телефоне мыши нет и hasAimed не поднимется никогда,
+	-- а автонаводка там и так знает, куда смотреть.
+	if not hasAimed then
+		local rest = restPoint(excludeVehicle)
+		if rest then
+			return rest, nil
 		end
 	end
 	local unitRay = aimRay()
@@ -526,11 +581,18 @@ local function photoMode(): boolean
 	return player:GetAttribute("PhotoMode") == true
 end
 
+-- Смена машины = новый заезд: ствол снова смотрит вперёд, пока игрок не тронет мышь.
+local lastAimVehicle: Model? = nil
+
 RunService.RenderStepped:Connect(function()
 	if photoMode() then return end
 
 	local vehicle = findMyVehicle()
 	if not vehicle then return end
+	if vehicle ~= lastAimVehicle then
+		lastAimVehicle = vehicle
+		hasAimed = false
+	end
 
 	local turretBase = vehicle:FindFirstChild("TurretBase") :: BasePart?
 	local seat = vehicle:FindFirstChild("DriveSeat") :: BasePart?
