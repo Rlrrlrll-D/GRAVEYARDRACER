@@ -49,6 +49,43 @@ screenGui.Name = "GraveyardHUD"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = playerGui
 
+-- // ОДИН МАСШТАБ НА ВЕСЬ HUD (2026-09-04, снимок с телефона юзера) -----------
+-- Вся вёрстка ниже — в ПИКСЕЛЯХ (плашка 250×46, баннер 460×78, центральная
+-- строка 520×90). На мониторе это доли экрана, а на телефоне Roblox отдаёт
+-- маленький логический вьюпорт (по снимку ≈ 575×265 точек), и те же 250 точек
+-- становятся почти половиной ширины: столбцы слева и справа сходятся в центре,
+-- плашка гонки лезет от края до края, а гашетка ложится поверх LIVES.
+--
+-- Лечится тем же приёмом, что и меню, — ОДНИМ UIScale на корневой рамке. Разница
+-- в опоре: у меню она вёрсточная (700×680, зажим 0.5), чтобы панель осталась
+-- читаемой в маленьком окне; у HUD опора ЭКРАННАЯ, потому что задача — занимать
+-- ту же долю экрана, что на компьютере.
+--   • 1400×790 — «полный экран компьютера»: на 1536×864 множитель выходит 1.09 и
+--     упирается в потолок 1, то есть НА ПК НИЧЕГО НЕ МЕНЯЕТСЯ;
+--   • на телефоне 575×265 выходит 0.34, и плашка занимает 15% ширины против 13%
+--     на мониторе — ровно то самое «пропорционально ПК-версии»;
+--   • нижний зажим 0.3, а не 0.5: на 0.5 телефон остался бы с плашками во
+--     всю ширину, ради чего всё и затевалось.
+-- Крупнее/мельче на устройстве правится ЭТИМИ ТРЕМЯ ЧИСЛАМИ, а не размерами
+-- плашек: вёрстка одна на все экраны.
+local HUD_REF_WIDTH = 1400
+local HUD_REF_HEIGHT = 790
+local HUD_MIN_SCALE = 0.3
+
+-- Корневая рамка во весь экран: UIScale множит и её саму, поэтому fitToScreen
+-- тут же задаёт ей обратный размер. Всё, что раньше висело прямо на ScreenGui,
+-- теперь лежит здесь — иначе масштаб до него не дотянется.
+local hudRoot = Instance.new("Frame")
+hudRoot.Name = "HudRoot"
+hudRoot.BackgroundTransparency = 1
+hudRoot.Size = UDim2.fromScale(1, 1)
+hudRoot.Parent = screenGui
+UITheme.fitToScreen(hudRoot, {
+	refWidth = HUD_REF_WIDTH,
+	refHeight = HUD_REF_HEIGHT,
+	minScale = HUD_MIN_SCALE,
+})
+
 -- // ПЛАШКИ HUD — ТЕ ЖЕ МАЗКИ, ЧТО В МЕНЮ (PlateArt) --------------------------
 -- Требование юзера: интерфейс в игре не должен отличаться от заставки. Прежде HUD
 -- был набором цветных прямоугольников, а меню — мазками кистью из вектора; на одном
@@ -75,7 +112,7 @@ local function hudPlate(index: number, color: Color3, anchorRight: boolean, row:
 	else
 		plate.Position = UDim2.new(0, PLATE_X, 0, PLATE_Y + row * PLATE_STEP)
 	end
-	plate.Parent = screenGui
+	plate.Parent = hudRoot
 	return plate
 end
 
@@ -132,7 +169,7 @@ wreckedPlate.Size = UDim2.fromOffset(460, 78)
 wreckedPlate.AnchorPoint = Vector2.new(0.5, 0.5)
 wreckedPlate.Position = UDim2.new(0.5, 0, 0.35, 0)
 wreckedPlate.Visible = false
-wreckedPlate.Parent = screenGui
+wreckedPlate.Parent = hudRoot
 local wreckedLabel = PlateArt.caption(wreckedPlate, "VEHICLE DESTROYED", UITheme.Ink, 34)
 
 -- // Race HUD --------------------------------------------------------------
@@ -141,7 +178,7 @@ racePlate.Name = "RaceStatus"
 racePlate.Size = UDim2.fromOffset(420, 50)
 racePlate.AnchorPoint = Vector2.new(0.5, 0)
 racePlate.Position = UDim2.new(0.5, 0, 0, PLATE_Y)
-racePlate.Parent = screenGui
+racePlate.Parent = hudRoot
 local raceLabel = PlateArt.caption(racePlate, "", UITheme.Ink, 28)
 
 local raceCenter = Instance.new("TextLabel")
@@ -154,7 +191,7 @@ raceCenter.Font = UITheme.Font
 raceCenter.TextScaled = true
 raceCenter.TextStrokeTransparency = 0.4
 raceCenter.Text = ""
-raceCenter.Parent = screenGui
+raceCenter.Parent = hudRoot
 
 -- Стрелка-компас: крутится к СЛЕДУЮЩЕМУ чекпоинту относительно камеры.
 -- На старте указывает на чекпоинт №1 — видно, в какую сторону ехать.
@@ -165,7 +202,7 @@ arrowFrame.Size = UDim2.new(0, 56, 0, 56)
 arrowFrame.Position = UDim2.new(0.5, 0, 0.72, 0)
 arrowFrame.BackgroundTransparency = 1
 arrowFrame.Visible = false
-arrowFrame.Parent = screenGui
+arrowFrame.Parent = hudRoot
 
 for _, side in { -1, 1 } do -- шеврон "∧" из двух планок
 	local wing = Instance.new("Frame")
@@ -192,7 +229,7 @@ arrowDistance.TextStrokeTransparency = 0.6
 arrowDistance.Font = UITheme.Font
 arrowDistance.TextScaled = true
 arrowDistance.Visible = false
-arrowDistance.Parent = screenGui
+arrowDistance.Parent = hudRoot
 
 local arrowTargetIndex: number? = nil -- индекс чекпоинта, куда показывает стрелка
 

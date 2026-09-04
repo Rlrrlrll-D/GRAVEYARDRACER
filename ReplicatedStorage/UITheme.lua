@@ -65,7 +65,19 @@ UITheme.RefWidth = 680
 -- поэтому размер тут же задаётся обратной величиной (1/s · s = 1) — иначе рамка
 -- съёживается вместе с содержимым и всё, что привязано к её долям (кнопки по
 -- центру, затемнение), уезжает в левый верхний угол.
-function UITheme.fitToScreen(container: GuiObject): UIScale
+-- opts позволяет мерить по СВОЕЙ опоре. Заведено под HUD (2026-09-04): у меню
+-- опора 700×680 и нижний зажим 0.5 — это вёрстка, которая обязана остаться
+-- читаемой в маленьком окне; у HUD задача обратная — занимать ту же ДОЛЮ экрана,
+-- что на компьютере, поэтому опора там экранная (1400×790) и зажим ниже.
+export type FitOpts = { refHeight: number?, refWidth: number?, minScale: number?, maxScale: number? }
+
+function UITheme.fitToScreen(container: GuiObject, opts: FitOpts?): UIScale
+	local o = opts or {}
+	local refH = o.refHeight or UITheme.RefHeight
+	local refW = o.refWidth or UITheme.RefWidth
+	local minS = o.minScale or 0.5
+	local maxS = o.maxScale or 1
+
 	local scale = container:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
 	scale.Name = "FitScale"
 	scale.Parent = container
@@ -74,10 +86,7 @@ function UITheme.fitToScreen(container: GuiObject): UIScale
 		local cam = workspace.CurrentCamera
 		if cam then
 			-- Берём меньший из двух множителей: тот, что не влезает, и решает.
-			local s = math.clamp(
-				math.min(cam.ViewportSize.Y / UITheme.RefHeight, cam.ViewportSize.X / UITheme.RefWidth),
-				0.5, 1
-			)
+			local s = math.clamp(math.min(cam.ViewportSize.Y / refH, cam.ViewportSize.X / refW), minS, maxS)
 			scale.Scale = s
 			container.Size = UDim2.fromScale(1 / s, 1 / s)
 		end
