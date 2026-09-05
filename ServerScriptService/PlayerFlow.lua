@@ -616,6 +616,45 @@ function PlayerFlow.getVehicle(player: Player): Model?
 end
 
 -- Посадить владельца за руль его машины (персонаж стоит у старта — телепортим).
+-- Подписки сторожа кресла: по одной на игрока, старая рвётся при новой посадке.
+local seatGuards: { [Player]: RBXScriptConnection } = {}
+
+-- ВЕРНУТЬ ЗА РУЛЬ, НО ТОЛЬКО КОГДА МАШИНА УСПОКОИЛАСЬ.
+--
+-- Садить водителя посреди гибели и респавна НЕЛЬЗЯ: VehicleController в этот момент
+-- якорит всю машину, переставляет её на старт и заново отдаёт сетевое владение. Наша
+-- посадка (а это PivotTo персонажа + Sit + свой SetNetworkOwner) попадает ровно в эту
+-- пересборку — и багги разлетается. Это тот же класс бага, что «машина возвращается
+-- разобранной» (см. VehicleController.repairAtHome), и поймали мы его именно так:
+-- сторож кресла ниже сработал во время респавна.
+--
+-- Признак «занята»: висит Destroyed или ещё идёт грейс ProtectedUntil (его ставит
+-- repairAtHome в самом конце). Ждём окончания, потом ещё полсекунды — и садим.
+function PlayerFlow.reseatWhenSettled(player: Player, car: Model)
+	task.spawn(function()
+		local deadline = os.clock() + 15
+		while os.clock() < deadline do
+			if vehicleOfPlayer[player] ~= car or not car.Parent then
+				return -- машину забрали: сажать некуда и незачем
+			end
+			if car:GetAttribute("Eliminated") then
+				return -- жизни кончились: пешком он теперь зритель, это законно
+			end
+			local protectedUntil = (car:GetAttribute("ProtectedUntil") :: number?) or 0
+			local busy = car:GetAttribute("Destroyed") == true or os.clock() < protectedUntil
+			if not busy then
+				break
+			end
+			task.wait(0.3)
+		end
+		task.wait(0.5)
+		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if hum and hum.Health > 0 and not (hum :: Humanoid).SeatPart and vehicleOfPlayer[player] == car then
+			PlayerFlow.seatDriver(player)
+		end
+	end)
+end
+
 function PlayerFlow.seatDriver(player: Player)
 	local car = PlayerFlow.getVehicle(player)
 	local seat = car and car:FindFirstChild("DriveSeat")
@@ -668,6 +707,32 @@ function PlayerFlow.seatDriver(player: Player)
 		-- машиной на них НЕ распространяется. Без этого сервопривод поворота считает
 		-- сервер, и прицел отстаёт на круг связи — заметнее всего на виражах.
 		giveTurretOwnership(car, player)
+
+		-- // РЕМЕНЬ: ИЗ МАШИНЫ ВО ВРЕМЯ ЗАЕЗДА НЕ ВЫХОДЯТ --------------------
+		-- Из VehicleSeat выходят ПРЫЖКОМ, поэтому «пристегнуть» — это обнулить
+		-- прыжок. Причина не в строгости: пеший гонщик — не задуманный режим.
+		-- Пешком можно было спокойно обойти трассу, а зомби пешего вообще не
+		-- видели (цель ищется среди машин С ВОДИТЕЛЕМ) — со стороны это две
+		-- поломки сразу. Прыжок вернёт unseat, когда заезд кончится.
+		hum.JumpPower = 0
+		hum.JumpHeight = 0
+
+		-- Сторож на случай, когда кресло потеряно не по своей воле: выбросило
+		-- физикой, порвало сварку, пересобрали машину. Возвращаем за руль ТОЛЬКО
+		-- пока машина цела и заезд для игрока не кончился, иначе сторож дрался бы
+		-- с законными выходами (выбывание, отправка в лобби).
+		local prevGuard = seatGuards[player]
+		if prevGuard then
+			prevGuard:Disconnect()
+		end
+		seatGuards[player] = (hum :: Humanoid):GetPropertyChangedSignal("SeatPart"):Connect(function()
+			if (hum :: Humanoid).SeatPart then
+				return
+			end
+			-- Ждать, пока машина успокоится, обязательно: посадка посреди респавна
+			-- рвёт шасси, см. комментарий у reseatWhenSettled.
+			PlayerFlow.reseatWhenSettled(player, car)
+		end)
 	end
 end
 
@@ -743,8 +808,19 @@ function PlayerFlow.releaseVehicleHold(player: Player)
 end
 
 function PlayerFlow.unseat(player: Player)
+	-- Сторож кресла снимается ПЕРВЫМ: этот выход законный, возвращать за руль нечего.
+	local guard = seatGuards[player]
+	if guard then
+		guard:Disconnect()
+		seatGuards[player] = nil
+	end
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if hum then
+		-- Ремень отстёгнут: прыжок обратно (его обнуляет seatDriver, см. там же).
+		hum.JumpPower = 50
+		hum.JumpHeight = 7.2
+	end
 	if hum and hum.Sit then
 		hum.Sit = false
 	end

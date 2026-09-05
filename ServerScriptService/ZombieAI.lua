@@ -14,6 +14,12 @@ local Players = game:GetService("Players")
 local Debris = game:GetService("Debris")
 
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
+-- PlayerFlow: он один знает, ЧЬЯ это машина, пока игрок не в кресле. VehicleRegistry
+-- для этого не годится — VehicleController стирает связь на выходе из кресла
+-- (SetDriver(vehicle, nil) по Occupant), то есть ровно в тот момент, когда игрок
+-- становится пешим и нас как раз интересует. Проверено опытом: с реестром хватка
+-- не срабатывала никогда. Цикла зависимостей нет: PlayerFlow про зомби не знает.
+local PlayerFlow = require(script.Parent:WaitForChild("PlayerFlow"))
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local cameraShake = remotes:WaitForChild("CameraShake") :: RemoteEvent
@@ -113,6 +119,85 @@ local function playSoundAt(soundId: string, position: Vector3, volume: number, m
 	speaker.Parent = workspace
 	sound:Play()
 	Debris:AddItem(speaker, 4)
+end
+
+-- // ПЕШИЙ ГОНЩИК ------------------------------------------------------------
+-- Цель ищется среди машин С ВОДИТЕЛЕМ, поэтому вышедшего из багги зомби не видели
+-- вовсе: можно было спокойно гулять по кладбищу и даже обойти трассу пешком. Теперь
+-- человек без железа — добыча, и она важнее машины, если ближе.
+--
+-- Пеший бой при этом НЕ заводим: у игрока нет оружия вне турели, а WalkSpeed зомби
+-- 10 против 16 у персонажа — «бой» свёлся бы к беготне по кругу. Вместо него
+-- ХВАТКА: догнал вплотную — рык в упор, тряска камеры и цена, ровно как у разбитой
+-- машины (минус жизнь, возврат на старт за рулём). Возврат делает штатный путь
+-- VehicleController по атрибуту Destroyed, поэтому и жизни, и выбывание считаются
+-- в одном месте, а не двумя способами.
+local FOOT_CHASE = 45 -- на таком расстоянии зомби замечает пешего
+local FOOT_GRAB = 4.5 -- дистанция хватки
+-- Пауза между хватками ОДНОГО игрока: у машины стоит толпа, и без неё три жизни
+-- сгорели бы за один кадр от трёх разных рук.
+local FOOT_GRAB_COOLDOWN = 6
+local lastGrabAt: { [Player]: number } = {}
+
+-- Пеший гонщик = игрок, у которого ЕСТЬ машина, она не выбыла, а сам он не в кресле.
+-- Это отсекает и лобби (машины ещё нет), и зрителей (машина выбыла).
+local function findFootPrey(position: Vector3): (Player?, Model?, number)
+	local bestPlayer: Player? = nil
+	local bestChar: Model? = nil
+	local bestDist = math.huge
+	for _, plr in Players:GetPlayers() do
+		local car = PlayerFlow.getVehicle(plr)
+		if not car or car:GetAttribute("Eliminated") then
+			continue
+		end
+		local char = plr.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		-- Диагностика включается атрибутом workspace.FootDebug и нужна редко: без неё
+		-- «почему хватка не сработала» приходится ловить наощупь (проверено — час).
+		if workspace:GetAttribute("FootDebug") then
+			print(("[ZombieAI] пеший? %s: машина=%s кресло=%s"):format(
+				plr.Name, tostring(car ~= nil), tostring(hum and (hum :: Humanoid).SeatPart ~= nil)))
+		end
+		if hum and root and root:IsA("BasePart") and hum.Health > 0 and not (hum :: Humanoid).SeatPart then
+			local d = ((root :: BasePart).Position - position).Magnitude
+			if d < bestDist then
+				bestPlayer, bestChar, bestDist = plr, char, d
+			end
+		end
+	end
+	return bestPlayer, bestChar, bestDist
+end
+
+local function grabOnFoot(player: Player, zombiePosition: Vector3)
+	local now = os.clock()
+	if now - (lastGrabAt[player] or -math.huge) < FOOT_GRAB_COOLDOWN then
+		return
+	end
+	lastGrabAt[player] = now
+	print(("[ZombieAI] хватка: %s пойман пешим — минус жизнь"):format(player.Name))
+
+	playSoundAt(GROWL_SOUND_ID, zombiePosition, 1.0, 0.5, 0.68) -- рык в упор, ниже обычного
+	pcall(function()
+		cameraShake:FireClient(player, 1.2, 0.7)
+	end)
+
+	local car = PlayerFlow.getVehicle(player)
+	if not car or car:GetAttribute("Eliminated") or car:GetAttribute("Destroyed") then
+		return
+	end
+	-- Сперва обратно в кресло, потом «разбили»: repairAtHome телепортирует машину
+	-- ВМЕСТЕ С СИДЯЩИМ водителем, и без посадки игрок остался бы стоять в поле.
+	pcall(function()
+		PlayerFlow.seatDriver(player)
+	end)
+	car:SetAttribute("Destroyed", true)
+
+	-- ПОДСТРАХОВКА. Посадку выше может перебить что угодно (персонаж как раз падал,
+	-- кресло на кадр занято) — а без неё игрок остался бы стоять в поле у горящей
+	-- машины. Сажаем не по таймеру, а КОГДА МАШИНА УСПОКОИТСЯ: посреди респавна её
+	-- пересобирают на якоре, и посадка в этот момент рвёт шасси.
+	PlayerFlow.reseatWhenSettled(player, car)
 end
 
 local ZombieAI = {}
@@ -915,6 +1000,26 @@ function ZombieAI.Run(zombie: Model)
 		end
 
 		local vehicle, distance = findNearestVehicle(rootPart.Position)
+
+		-- ПЕШИЙ ВАЖНЕЕ МАШИНЫ, если он ближе (см. блок про хватку наверху).
+		local preyPlayer, preyChar, preyDist = findFootPrey(rootPart.Position)
+		if preyChar and preyDist <= FOOT_CHASE and preyDist < (if vehicle then distance else math.huge) then
+			local preyRoot = preyChar:FindFirstChild("HumanoidRootPart") :: BasePart?
+			if preyRoot then
+				idleSince = os.clock()
+				if preyDist <= FOOT_GRAB then
+					humanoid.WalkSpeed = 0
+					if preyPlayer then
+						grabOnFoot(preyPlayer, rootPart.Position)
+					end
+				else
+					humanoid.WalkSpeed = GameConfig.Zombie.WalkSpeed
+					humanoid:MoveTo(preyRoot.Position)
+				end
+				task.wait(0.15)
+				continue
+			end
+		end
 
 		if not vehicle or distance > CHASE_RADIUS then
 			-- цели нет: постояли — и обратно под землю
