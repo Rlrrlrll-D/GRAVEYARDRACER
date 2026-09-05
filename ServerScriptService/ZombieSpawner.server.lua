@@ -55,6 +55,10 @@ Players.PlayerAdded:Connect(setupLeaderstats)
 
 local RISE_DURATION = 1.2   -- seconds to climb out of the ground
 local BURY_DEPTH = 4        -- studs below the final resting position to start from
+-- Ближе этого к УЖЕ ВЫЛЕЗШЕМУ телу из могилы не поднимаются: два зомби в одной
+-- точке — это «спавнятся друг на друге». Ширина тела ~2 studs, берём с запасом на
+-- крупных (рост случайный, см. pickScale).
+local GRAVE_CLEARANCE = 7
 
 -- // Порода мертвеца: окрас и рост -------------------------------------------
 -- ОДИН ШАБЛОН, РАЗНЫЕ ПОКОЙНИКИ. Толпа одинаковых клонов читается как клонов, а не
@@ -207,9 +211,31 @@ local function pickGrave(): BasePart?
 		return false
 	end
 
+	-- МОГИЛА, ГДЕ УЖЕ КТО-ТО ЕСТЬ, НЕ ГОДИТСЯ. Жалоба: «спавнятся друг на друге».
+	-- Так и было: могила выбиралась случайно из подходящих, и ничто не мешало двум
+	-- зомби подряд выбрать одну и ту же — второй вырастал прямо в первом. Считаем и
+	-- тех, кто ещё поднимается (тег вешается сразу), поэтому проверка по телам, а не
+	-- по списку занятых могил.
+	local risen: { Vector3 } = {}
+	for _, z in CollectionService:GetTagged("Zombie") do
+		local root = z:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") then
+			table.insert(risen, (root :: BasePart).Position)
+		end
+	end
+	local function taken(grave: BasePart): boolean
+		for _, p in risen do
+			local d = grave.Position - p
+			if Vector2.new(d.X, d.Z).Magnitude < GRAVE_CLEARANCE then
+				return true
+			end
+		end
+		return false
+	end
+
 	local nearGraves: {BasePart} = {}
 	for _, grave in graves do
-		if not tooClose(grave) then
+		if not tooClose(grave) and not taken(grave) then
 			for _, seat in occupiedSeats do
 				if (grave.Position - seat.Position).Magnitude <= GameConfig.Zombie.SpawnRadius then
 					table.insert(nearGraves, grave)

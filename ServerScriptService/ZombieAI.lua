@@ -24,6 +24,14 @@ local HIT_SOUND_ID = "rbxassetid://9116771817"        -- Metal Pops Denting Car 
 
 local IDLE_DESPAWN_SECONDS = 20 -- без цели дольше этого — зомби уходит под землю
 
+-- РАДИУС ПОГОНИ НЕ МОЖЕТ БЫТЬ МЕНЬШЕ РАДИУСА СПАВНА. Жалоба: «спавнятся заранее и
+-- замирают, подойдёшь — оживают». Причина ровно арифметическая: спавнер поднимает
+-- тела в радиусе SpawnRadius (80) от машины, а погоня включалась внутри ChaseRadius
+-- (60). Всё, что вылезло в кольце 60-80, честно стояло столбом, пока машина не
+-- подъедет ближе, — и уходило под землю через IDLE_DESPAWN_SECONDS, так и не сделав
+-- ни шагу. Поднялся ради этой машины — значит и идёшь к ней, а не ждёшь приглашения.
+local CHASE_RADIUS = math.max(GameConfig.Zombie.ChaseRadius, GameConfig.Zombie.SpawnRadius + 15)
+
 -- // Замах (wind-up): зомби заносит руки над головой, затем резко бьёт вниз.
 -- Урон наносится в НИЖНЕЙ точке маха, так что у игрока есть окно уехать.
 local WINDUP_TIME = 0.45   -- сек: занос рук вверх/над головой
@@ -605,7 +613,6 @@ end
 -- они не помещаются, а без второго ряда опоздавшие снова сбились бы в затылок.
 local RING_SLOTS = 12 -- мест в одном кольце
 local RING_OUTER_PAD = 3.4 -- насколько внешний ряд дальше внутреннего
-local RING_CHOICE = 5 -- из скольких ближайших свободных мест выбираем наугад
 -- «Я на месте» меряется ПО ГОРИЗОНТАЛИ. С обычным расстоянием в зачёт шла и
 -- разница высот (точка кольца лежит на уровне центра кузова, зомби стоит на
 -- земле), зомби до места «не доходил» никогда — стоял у борта и не бил.
@@ -700,28 +707,46 @@ local function claimRingSlot(vehicle: Model, zombie: Model, fp: Footprint, pad: 
 		return mine
 	end
 
-	-- Выбор — СЛУЧАЙНЫЙ ИЗ БЛИЖАЙШИХ, а не строго ближайший. Строго ближайший
-	-- собирал всю толпу на том борту, с которого она прибежала (замер: семеро в
-	-- четырёх секторах из двенадцати, все сзади-слева). Чисто случайный из всех
-	-- гнал бы зомби через всю машину на пустое место — тоже неправда. Компромисс:
-	-- сортируем свободные места по расстоянию и берём наугад одно из RING_CHOICE
-	-- ближайших — обход получается коротким, но сторона каждый раз своя.
+	-- ВЫБОР РАЗВОДИТ ТОЛПУ, А НЕ СОБИРАЕТ ЕЁ. Первые версии брали ближайшее свободное
+	-- место (или случайное из нескольких ближайших) — и вся толпа оставалась на том
+	-- борту, с которого прибежала: свободных мест рядом всегда хватало, за машину
+	-- заходить было незачем. Замер это и показывал: семеро в четырёх секторах из
+	-- двенадцати.
+	--
+	-- Теперь для каждого свободного места считается ЗАЗОР — насколько оно далеко по
+	-- кольцу от уже занятых, — и берётся место с самым большим зазором. Ходьба
+	-- учитывается лишь небольшим штрафом (40 studs обхода стоят примерно как 0.1
+	-- доли кольца), иначе штраф опять пересилил бы и всех сползло бы в кучу.
+	-- Внутреннему ряду небольшая надбавка: сперва заполняется первая линия.
 	local here = zombie:GetPivot().Position
-	local free: { { slot: number, dist: number } } = {}
+	local occupied: { number } = {}
+	for slot in owners do
+		table.insert(occupied, slot)
+	end
+
+	local best, bestScore = nil, -math.huge
 	for slot = 1, RING_SLOTS * 2 do
 		if not owners[slot] then
-			table.insert(free, { slot = slot, dist = (ringPoint(fp, slot, jitter, pad) - here).Magnitude })
+			local t, outer = ringParamOf(slot, 0.5)
+			local gap = 0.5 -- максимум по кольцу: полокружности
+			for _, o in occupied do
+				local ot = ringParamOf(o, 0.5)
+				local d = math.abs((t - ot + 0.5) % 1 - 0.5)
+				if d < gap then
+					gap = d
+				end
+			end
+			local walk = (ringPoint(fp, slot, jitter, pad) - here).Magnitude
+			local score = gap - walk / 400 + (if outer then 0 else 0.03)
+			if score > bestScore then
+				best, bestScore = slot, score
+			end
 		end
 	end
-	if #free == 0 then
-		return nil
+	if best then
+		owners[best] = zombie
 	end
-	table.sort(free, function(a, b)
-		return a.dist < b.dist
-	end)
-	local pick = free[math.random(1, math.min(RING_CHOICE, #free))].slot
-	owners[pick] = zombie
-	return pick
+	return best
 end
 
 local function findNearestVehicle(position: Vector3): (Model?, number)
@@ -836,6 +861,9 @@ function ZombieAI.Run(zombie: Model)
 	local standoff = (zombie:GetAttribute("Standoff") :: number?) or GameConfig.Zombie.Standoff
 	-- Своя доля внутри слота: с общим нулём места легли бы ровной разметкой.
 	local ringJitter = 0.15 + math.random() * 0.7
+	-- Своя перезарядка замаха у каждого: с общей толпа махала бы синхронно, как
+	-- шеренга. Урон это не меняет — его по-прежнему считает очередь claimAttackSlot.
+	local swingCooldown = GameConfig.Zombie.AttackCooldown * (0.85 + math.random() * 0.45)
 	local slotSince = os.clock() -- с какого момента идём к своему месту (см. SLOT_PATIENCE)
 	local lastRingGap = 1 -- прошлый разрыв по кольцу: по нему видно, идём мы или буксуем
 	local lastAttackAt = 0
@@ -888,7 +916,7 @@ function ZombieAI.Run(zombie: Model)
 
 		local vehicle, distance = findNearestVehicle(rootPart.Position)
 
-		if not vehicle or distance > GameConfig.Zombie.ChaseRadius then
+		if not vehicle or distance > CHASE_RADIUS then
 			-- цели нет: постояли — и обратно под землю
 			if os.clock() - idleSince >= IDLE_DESPAWN_SECONDS then
 				despawn(zombie)
@@ -900,7 +928,7 @@ function ZombieAI.Run(zombie: Model)
 
 		local bodyDistance = math.huge -- до КУЗОВА, а не до сиденья (см. vehicleFootprint)
 
-		if vehicle and distance <= GameConfig.Zombie.ChaseRadius then
+		if vehicle and distance <= CHASE_RADIUS then
 			local driveSeat = vehicle:FindFirstChild("DriveSeat") :: VehicleSeat
 			local fp = vehicleFootprint(vehicle)
 			local stand = driveSeat and driveSeat.Position or rootPart.Position
@@ -1003,21 +1031,29 @@ function ZombieAI.Run(zombie: Model)
 					end
 				end
 
-				-- Порядок условий важен: за слотом идём, только когда своя перезарядка
-				-- уже вышла, иначе очередь дёргали бы десять раз в секунду впустую.
-				-- Не досталось — просто стоим и напираем, попробуем на следующем такте.
+				-- МАШУТ ВСЕ, УРОН — ТРОИМ. Жалоба «атакуют, но не все» ровно об этом:
+				-- очередь claimAttackSlot держит ПОТОЛОК УРОНА (MaxAttackers × урон ÷
+				-- перезарядка = 10 в секунду, см. GameConfig), но раньше она же решала,
+				-- махать ли руками. Со стороны это читалось как поломка: десять тел
+				-- стоят вплотную и ничего не делают.
+				--
+				-- Теперь замах отыгрывает каждый, кто дотянулся, а слот решает только,
+				-- проходит ли урон. Толпа выглядит толпой, а машина живёт ровно столько
+				-- же, сколько и раньше.
 				local now = os.clock()
-				if now - lastAttackAt >= GameConfig.Zombie.AttackCooldown
-					and claimAttackSlot(vehicle, zombie)
-				then
+				if now - lastAttackAt >= swingCooldown then
 					lastAttackAt = now
+					local dealsDamage = claimAttackSlot(vehicle, zombie)
 
 					if attackTrack then
 						attackTrack:Play()
 					end
 
-					-- рык-телеграф в начале замаха (позиционный, слышат все рядом)
-					playSoundAt(GROWL_SOUND_ID, rootPart.Position, 0.7, 0.9, 1.12)
+					-- Рык только у того, чей замах засчитан: рявкни все разом — вместо
+					-- телеграфа выйдет стена звука, и понять, откуда прилетит, нельзя.
+					if dealsDamage then
+						playSoundAt(GROWL_SOUND_ID, rootPart.Position, 0.7, 0.9, 1.12)
+					end
 
 					-- ЗАМАХ: руки вверх → резкий мах вниз. Урон — только в нижней
 					-- точке удара и только если машина ещё в радиусе (уехал — промах).
@@ -1033,7 +1069,7 @@ function ZombieAI.Run(zombie: Model)
 					-- ProtectedUntil — тот же авторитет неуязвимости, что и в onPartTouched:
 					-- на отсчёт+грейс (и после респавна) укус зомби не проходит.
 					local protected = os.clock() < ((vehicle:GetAttribute("ProtectedUntil") :: number?) or 0)
-					if stillClose and not vehicle:GetAttribute("Destroyed") and not vehicle:GetAttribute("Invulnerable") and not protected then
+					if dealsDamage and stillClose and not vehicle:GetAttribute("Destroyed") and not vehicle:GetAttribute("Invulnerable") and not protected then
 						local health = (vehicle:GetAttribute("Health") :: number?) or GameConfig.Vehicle.MaxHealth
 						health = math.max(0, health - GameConfig.Zombie.AttackDamage)
 						vehicle:SetAttribute("Health", health)
