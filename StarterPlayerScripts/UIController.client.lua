@@ -71,6 +71,11 @@ screenGui.Parent = playerGui
 local HUD_REF_WIDTH = 1400
 local HUD_REF_HEIGHT = 790
 local HUD_MIN_SCALE = 0.3
+-- ПОТОЛОК ВЫШЕ ЕДИНИЦЫ — ЭТО «КРУПНЕЕ НА ПК» (просьба юзера). Единица означала
+-- «плашка ровно 250×46 точек», и на мониторе 1920×1080 это 13% ширины — мелко.
+-- 1.35 даёт 337×62, то есть примерно пятую часть ширины на плашку.
+-- На телефоне ничего не меняется: там множитель 0.34, до потолка ему далеко.
+local HUD_MAX_SCALE = 1.35
 
 -- Корневая рамка во весь экран: UIScale множит и её саму, поэтому fitToScreen
 -- тут же задаёт ей обратный размер. Всё, что раньше висело прямо на ScreenGui,
@@ -84,6 +89,7 @@ UITheme.fitToScreen(hudRoot, {
 	refWidth = HUD_REF_WIDTH,
 	refHeight = HUD_REF_HEIGHT,
 	minScale = HUD_MIN_SCALE,
+	maxScale = HUD_MAX_SCALE,
 })
 
 -- // ПЛАШКИ HUD — ТЕ ЖЕ МАЗКИ, ЧТО В МЕНЮ (PlateArt) --------------------------
@@ -1179,6 +1185,13 @@ updateStats.OnClientEvent:Connect(function(stats: StatsPayload)
 	local ratio = math.clamp(stats.Health / math.max(stats.MaxHealth, 1), 0, 1)
 	TweenService:Create(healthMask, TweenInfo.new(0.2), { Size = UDim2.new(ratio, 0, 1, 0) }):Play()
 	healthLabel.Text = string.format("Health: %d / %d", stats.Health, stats.MaxHealth)
+
+	-- ПУСТАЯ ШКАЛА НЕ ДОЛЖНА ЧИТАТЬСЯ КАК БЕЛАЯ ПЛАШКА. Подложка тут костяная
+	-- намеренно (с тёмной убыль не читалась на светлом небе, см. блок вёрстки
+	-- выше), но на нуле красного не остаётся вовсе — и от машины остаётся ровный
+	-- светлый мазок, будто здоровье полное. На нуле красим подложку в тёмный мох:
+	-- шкала гаснет, а не белеет.
+	PlateArt.tint(healthPlate, if ratio <= 0 then UITheme.PanelBg else UITheme.cycleColor(3))
 	speedLabel.Text = string.format("%d mph", math.floor(stats.Speed))
 	zombieLabel.Text = string.format("Zombies Defeated: %d", stats.ZombiesDefeated)
 	bonesLabel.Text = string.format("Bones: %d", stats.Bones or 0)
