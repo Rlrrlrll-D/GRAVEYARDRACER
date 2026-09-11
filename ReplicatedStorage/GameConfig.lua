@@ -75,7 +75,9 @@ export type GameConfigType = {
 	-- хранятся и не продаются. Пороги — по возрастанию, первый ранг с нуля.
 	Ranks: {
 		WinPoints: number, -- сколько очков даёт одна победа (зомби — по одному)
-		Tiers: { { name: string, points: number } },
+		Tiers: { { name: string, points: number, skull: { zones: { string }, color: string }? } },
+		SkullMode: string, -- режим наложения черепа на текстуру кузова (см. RankSkull.Modes)
+		SkullOpacity: number,
 	},
 }
 
@@ -190,13 +192,21 @@ local GameConfig: GameConfigType = {
 		-- со стрельбой ≈ 15 зомби + 25 = 40 очков: PALLBEARER — за 3 победных заезда
 		-- или за сотню сбитых, BONE KING — за десятки вечеров.
 		WinPoints = 25,
+		-- Череп на кузове (RankSkull): какие места и каким цветом на каждой ступени.
+		-- Места: top (капот / крышка гроба), left, right (борта), rear (корма). Цвета —
+		-- из RankSkull.Colors: bone / gold. Раскладка предложена 2026-09-11: с рангом
+		-- мест становится больше, на вершине всё жёлтым. На нулевой ступени черепа нет.
 		Tiers = {
 			{ name = "GRAVEDIGGER", points = 0 },
-			{ name = "PALLBEARER", points = 100 },
-			{ name = "GRAVE ROBBER", points = 400 },
-			{ name = "REAPER", points = 1200 },
-			{ name = "BONE KING", points = 3000 },
+			{ name = "PALLBEARER", points = 100, skull = { zones = { "top" }, color = "bone" } },
+			{ name = "GRAVE ROBBER", points = 400, skull = { zones = { "top", "left", "right" }, color = "bone" } },
+			{ name = "REAPER", points = 1200, skull = { zones = { "top", "left", "right", "rear" }, color = "bone" } },
+			{ name = "BONE KING", points = 3000, skull = { zones = { "top", "left", "right", "rear" }, color = "gold" } },
 		},
+		-- Режим наложения черепа на текстуру кузова (multiply / overlay / screen /
+		-- softlight / normal) и плотность. Multiply — выбор юзера по макетам 2026-09-11.
+		SkullMode = "multiply",
+		SkullOpacity = 1.0,
 	},
 }
 

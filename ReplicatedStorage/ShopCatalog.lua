@@ -69,7 +69,9 @@ ShopCatalog.Items = {
 	-- // Скины кузова -------------------------------------------------------
 	{
 		id = "rust", name = "RUST", blurb = "the one you started with",
-		kind = "skin", color = Color3.fromRGB(163, 162, 165), material = Enum.Material.Plastic,
+		-- Цвет домножает текстуру ржавчины. 2026-09-11 притемнён (было 163,162,165):
+		-- под черепами Multiply юзер попросил «притемни немного текстуру багги».
+		kind = "skin", color = Color3.fromRGB(140, 139, 142), material = Enum.Material.Plastic,
 	},
 	{
 		id = "bone", name = "BONE WHITE", blurb = "scrubbed clean, mostly",
