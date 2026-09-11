@@ -189,6 +189,11 @@ nt.nodes.remove(uvnode)
 nt.nodes.remove(tgt)
 me.uv_layers.remove(me.uv_layers["UVOld"])
 me.uv_layers[0].name = "UVMap"
+# ПОВОРОТ УЗЛА ПРИМЕНИТЬ В ДАННЫЕ МЕША (2026-09-11). Импортированный FBX несёт на объекте
+# поворот 90° по X; bake_space_transform при экспорте складывает его с осями сцены, и
+# Roblox (он берёт данные меша, а не трансформ узла) получал кузов, поставленный на нос.
+# После transform_apply объект без поворота — как в исходной сцене моделирования.
+bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
 bpy.ops.export_scene.fbx(filepath=OUT_FBX, use_selection=True, apply_scale_options='FBX_SCALE_ALL',
                          bake_space_transform=True, path_mode='COPY', embed_textures=True,
                          use_tspace=True, object_types={'MESH'})
