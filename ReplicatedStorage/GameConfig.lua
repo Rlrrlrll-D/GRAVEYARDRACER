@@ -78,6 +78,7 @@ export type GameConfigType = {
 		Tiers: { { name: string, points: number, skull: { zones: { string }, color: string }? } },
 		SkullMode: string, -- режим наложения черепа на текстуру кузова (см. RankSkull.Modes)
 		SkullOpacity: number,
+		SkullLift: number, -- подъём яркости черепа сверх режима (доля цвета), см. RankSkull
 	},
 }
 
@@ -211,6 +212,9 @@ local GameConfig: GameConfigType = {
 		-- Add выбеливают). Overlay: череп светлее кузова, зерно ржавчины внутри видно.
 		SkullMode = "overlay",
 		SkullOpacity = 0.8, -- «сделай черепа чуть прозрачными» (юзер, 2026-09-11)
+		-- «Текстура багги тёмная, черепа должны быть светлее»: Overlay на тёмной базе не
+		-- поднимается выше ~0.55, подъём прибавляет долю цвета, зерно текстуры остаётся.
+		SkullLift = 0.35,
 	},
 }
 

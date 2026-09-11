@@ -229,7 +229,11 @@ end
 
 -- // Композит ------------------------------------------------------------------
 -- Рисует череп в одну зону прямо в buf (RGBA8, сторона size).
-local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, mode: string, opacity: number)
+-- lift — подъём яркости сверх режима: к результату наложения прибавляется lift × цвет.
+-- Нужен, потому что кузов тёмный (rust ×0.78): Overlay на базе ~0.3 не даёт светлее
+-- ~0.55 даже белым, а юзер хочет «черепа светлее» при сохранении зерна текстуры
+-- (наклон Overlay остаётся, подъём лишь сдвигает).
+local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, mode: string, opacity: number, lift: number)
 	local blend = BLEND[mode] or BLEND.normal
 	-- плотность px/stud одинакова по обеим осям зоны (так собран атлас)
 	local pxPerStud = if zone.rotated then ((zone.u1 - zone.u0) * size) / zone.studsH else ((zone.u1 - zone.u0) * size) / zone.studsW
@@ -263,9 +267,9 @@ local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, m
 				if x >= 0 and y >= 0 and x < size and y < size then
 					local o = (y * size + x) * 4
 					local br, bg, bb = buffer.readu8(buf, o) / 255, buffer.readu8(buf, o + 1) / 255, buffer.readu8(buf, o + 2) / 255
-					local rr = br + (blend(br, cr) - br) * a
-					local rg = bg + (blend(bg, cg) - bg) * a
-					local rb = bb + (blend(bb, cb) - bb) * a
+					local rr = br + (math.min(1, blend(br, cr) + lift * cr) - br) * a
+					local rg = bg + (math.min(1, blend(bg, cg) + lift * cg) - bg) * a
+					local rb = bb + (math.min(1, blend(bb, cb) + lift * cb) - bb) * a
 					buffer.writeu8(buf, o, math.clamp(math.floor(rr * 255 + 0.5), 0, 255))
 					buffer.writeu8(buf, o + 1, math.clamp(math.floor(rg * 255 + 0.5), 0, 255))
 					buffer.writeu8(buf, o + 2, math.clamp(math.floor(rb * 255 + 0.5), 0, 255))
@@ -289,7 +293,7 @@ local imageCache: { [string]: EditableImage } = {}
 -- сами: текстура × краска у багги, ровный холст цвета краски у гроба. Из этого же
 -- следует, что композит нужен ВСЕГДА, даже без черепов — иначе на нулевом ранге
 -- багги был бы некрашеным, а с первым черепом вдруг перекрашивался.
-function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: string?, mode: string, opacity: number, tint: Color3?): EditableImage?
+function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: string?, mode: string, opacity: number, tint: Color3?, lift: number?): EditableImage?
 	local spec = RankSkull.Bodies[bodyId]
 	if not spec then
 		return nil
@@ -298,7 +302,8 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	local names = if color then table.clone(zoneNames) else {}
 	table.sort(names)
 	local paint = tint or Color3.new(1, 1, 1)
-	local key = ("%s|%s|%s|%s|%.2f|%s"):format(bodyId, table.concat(names, ","), colorName or "-", mode, opacity, paint:ToHex())
+	local up = lift or 0
+	local key = ("%s|%s|%s|%s|%.2f|%.2f|%s"):format(bodyId, table.concat(names, ","), colorName or "-", mode, opacity, up, paint:ToHex())
 	local ready = imageCache[key]
 	if ready then
 		return ready
@@ -324,7 +329,7 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 		for _, name in names do
 			local zone = spec.zones[name]
 			if zone then
-				paintZone(buf, size, zone, color, mode, opacity)
+				paintZone(buf, size, zone, color, mode, opacity, up)
 			end
 		end
 	end

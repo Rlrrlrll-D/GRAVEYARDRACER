@@ -24,6 +24,7 @@ local RankSkull = require(ReplicatedStorage:WaitForChild("RankSkull"))
 
 local MODE = GameConfig.Ranks.SkullMode
 local OPACITY = GameConfig.Ranks.SkullOpacity
+local LIFT = GameConfig.Ranks.SkullLift or 0
 
 -- Что рисовать на ступени: nil — ничего (нулевой ранг или ступень без черепа).
 local function skullFor(standing: Ranks.Standing): { zones: { string }, color: string }?
@@ -49,7 +50,7 @@ local function dress(body: BasePart, driver: Player)
 	local spec = skullFor(Ranks.forPlayer(driver))
 	-- Композит всегда: он же несёт краску (текстура на MeshPart отключает Color3, см.
 	-- RankSkull.compose). Без черепов — просто крашеный кузов.
-	local img = RankSkull.compose(bodyId, spec and spec.zones or {}, spec and spec.color or nil, MODE, OPACITY, body.Color)
+	local img = RankSkull.compose(bodyId, spec and spec.zones or {}, spec and spec.color or nil, MODE, OPACITY, body.Color, LIFT)
 	if not body.Parent then
 		return -- кузов успели заменить, пока читали текстуру
 	end
