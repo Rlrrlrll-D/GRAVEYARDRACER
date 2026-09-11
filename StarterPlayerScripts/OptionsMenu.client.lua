@@ -61,7 +61,9 @@ root.Name = "Root"
 root.Size = UDim2.fromScale(1, 1)
 root.BackgroundTransparency = 1
 root.Parent = gui
-UITheme.fitToScreen(root)
+-- Зажим ниже общего (0.5 -> 0.42): панель 580 высотой при 0.5 требует 290 точек
+-- вьюпорта, а телефон отдаёт около 265 — низ панели с кнопкой BACK уезжал за экран.
+UITheme.fitToScreen(root, { minScale = 0.42 })
 
 local function corner(inst: Instance, r: number)
 	local c = Instance.new("UICorner")
@@ -91,7 +93,7 @@ end
 -- а глаз всё равно читал их как прижатые к краю.
 local PANEL_W = 620
 local PANEL_H = 580
-local PAD = 110
+local PAD = 132 -- поле по бокам шире (просьба юзера): на 110 строки лезли на рваный край
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
 panel.Active = true -- перехватывает клики
@@ -126,9 +128,11 @@ title.Parent = panel
 -- а BACK начинается с 496 — двенадцать пикселей зазора. Ради них BACK стал ниже
 -- (66 вместо 76): иначе последний ползунок упирался в него.
 local activeDrag: ((x: number) -> ())? = nil
-local ROW_H = 56
+-- Шаг ужат с 56 до 52, а старт поднят со 116 до 110: так семь строк кончаются на
+-- 462 и освобождают место кнопке BACK, которую подняли с края подложки.
+local ROW_H = 52
 local function rowY(index: number): number
-	return 116 + (index - 1) * ROW_H
+	return 110 + (index - 1) * ROW_H
 end
 
 -- обновление строки извне (PushSettings: сохранённые опции пришли с сервера)
@@ -291,7 +295,9 @@ local backBtn = Instance.new("TextButton")
 backBtn.Name = "BackPlate"
 backBtn.AnchorPoint = Vector2.new(0.5, 1)
 backBtn.Size = UDim2.fromOffset(340, 52)
-backBtn.Position = UDim2.new(0.5, 0, 1, -14)
+-- BACK поднят с -14 (просьба юзера 2026-09-07): на -14 надпись сидела прямо на
+-- рваном нижнем крае подложки.
+backBtn.Position = UDim2.new(0.5, 0, 1, -48)
 backBtn.BackgroundTransparency = 1
 backBtn.AutoButtonColor = false
 backBtn.Text = "BACK"

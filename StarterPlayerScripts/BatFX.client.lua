@@ -268,8 +268,27 @@ task.spawn(function()
 		task.wait() -- растягиваем создание по кадрам: сам прогрев не должен дёргать
 	end
 	pcall(function()
-		ContentProvider:PreloadAsync({ template, wings, squeal })
+		-- КРИК ТОЖЕ ГРЕЕМ. Его тут не было, и это ловилось в игре: первый скример
+		-- проходил гладко (в "flyby" звуков нет вовсе), а на первом же "swarm" крик
+		-- тянулся по сети посреди заезда. Жалоба юзера 2026-09-07: «первый скример
+		-- прошёл, перед вторым была пауза, возможно звук подгружает».
+		ContentProvider:PreloadAsync({ template, wings, squeal, scream })
 	end)
+	-- ХОЛОСТОЕ ВОСПРОИЗВЕДЕНИЕ, А НЕ ТОЛЬКО ЗАГРУЗКА. PreloadAsync тянет файл, но
+	-- первое Play всё равно стоит дороже последующих: движок готовит поток. Проигрываем
+	-- каждый звук на нулевой громкости под заставкой, где рывок никому не мешает.
+	for _, snd in { wings, squeal, scream } do
+		if snd.SoundId ~= "" then
+			local vol = snd.Volume
+			snd.Volume = 0
+			pcall(function()
+				snd:Play()
+				task.wait(0.15)
+				snd:Stop()
+			end)
+			snd.Volume = vol
+		end
+	end
 	warmSwarm()
 end)
 

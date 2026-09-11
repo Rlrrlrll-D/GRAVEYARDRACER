@@ -55,7 +55,12 @@ root.BackgroundColor3 = UITheme.Shadow
 root.BackgroundTransparency = 0.35
 root.Visible = true
 root.Parent = gui
-UITheme.fitToScreen(root) -- вся вёрстка ниже — в пикселях, здесь она ужимается под окно
+-- Вся вёрстка ниже — в пикселях, здесь она ужимается под окно.
+-- ЗАЖИМ 0.35, А НЕ ОБЩИЙ 0.5. Столбик меню кончается на 674 (низ кнопки SHOP), и при
+-- 0.5 ему нужно 337 точек вьюпорта — телефон отдаёт около 265, то есть SHOP и часть
+-- RACERS уезжали за нижний край. При 0.35 зажим не срабатывает вовсе: множитель
+-- считается как «вьюпорт ÷ опора» (265/700 = 0.38) и меню влезает целиком.
+UITheme.fitToScreen(root, { minScale = 0.35 })
 
 -- виньетка сверху/снизу под тайтл и плашки
 local function shade(top: boolean)
@@ -242,7 +247,7 @@ end)
 -- а глаз всё равно читал их как прижатые к краю.
 local PANEL_W = 620
 local PANEL_H = 580
-local PAD = 110
+local PAD = 132 -- поле по бокам шире (просьба юзера), как в магазине и опциях
 
 local rosterPanel = Instance.new("Frame")
 rosterPanel.Name = "Roster"

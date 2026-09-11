@@ -48,6 +48,7 @@ local state = {
 	bones = 0,
 	owned = {} :: { [string]: boolean },
 	equipped = ShopCatalog.DefaultSkin,
+	equippedBody = ShopCatalog.DefaultBody,
 }
 
 local gui = Instance.new("ScreenGui")
@@ -65,7 +66,11 @@ root.Name = "Root"
 root.Size = UDim2.fromScale(1, 1)
 root.BackgroundTransparency = 1
 root.Parent = gui
-UITheme.fitToScreen(root)
+-- МОБИЛЬНЫЙ ЗАЖИМ НИЖЕ ОБЩЕГО (0.5 -> 0.42). Панель высотой 580 при зажиме 0.5
+-- требует 290 точек вьюпорта, а телефон отдаёт около 265 — низ панели вместе с
+-- кнопкой BACK уезжал за край экрана. 0.42 даёт 244 и вписывает панель целиком.
+-- На компьютере не меняется ничего: там множитель упирается в потолок 1.
+UITheme.fitToScreen(root, { minScale = 0.42 })
 
 local function engrave(text: string, size: number): TextLabel
 	local l = Instance.new("TextLabel")
@@ -81,7 +86,10 @@ end
 
 -- // Панель — те же размеры, что у опций и ростера ----------------------------
 local PANEL_W, PANEL_H = 620, 580
-local PAD = 110 -- поле: у подложки рваный край, сплошная краска только с ~140 px
+-- ПОЛЕ ПО БОКАМ 132, А НЕ 110 (просьба юзера 2026-09-07): у подложки рваный край,
+-- и на 110 строки подходили к самой щетине мазка. Ширины хватает: на контент
+-- остаётся 356, из них название 176 и кнопка 158.
+local PAD = 132
 
 local panel = Instance.new("Frame")
 panel.Name = "Panel"
@@ -136,7 +144,7 @@ notice.Parent = panel
 -- Высота — РОВНО пять шагов строки (62 + 4 просвета), а не круглое число: иначе
 -- нижняя строка обрезается посередине кнопки и читается как поломка вёрстки, а не
 -- как «дальше есть ещё». Прокрутку показывает полоса справа.
-local ROW_H = 58
+local ROW_H = 52 -- было 58: строка ужата на 6, чтобы BACK поднялся, а строк осталось пять
 local ROW_GAP = 4
 local LIST_TOP = TOP_PAD + 140
 local LIST_H = 5 * (ROW_H + ROW_GAP) - ROW_GAP
@@ -188,9 +196,13 @@ local function renderRow(row: Row)
 	local item = row.item
 	local owned = state.owned[item.id] == true
 	if owned then
-		if item.kind == "skin" then
-			local worn = state.equipped == item.id
-			row.caption.Text = worn and "WORN" or "WEAR"
+		if item.kind == "skin" or item.kind == "body" then
+			-- Кузов и краска — надеваемые слоты, и надет всегда ровно один из каждого.
+			-- Подписи USE / IN USE, а не WEAR / WORN (правка юзера 2026-09-07): пара
+			-- «надень / надето» читалась двусмысленно — WORN можно понять и как
+			-- «изношенный». USE — действие, IN USE — состояние, спутать нечем.
+			local worn = (item.kind == "body" and state.equippedBody or state.equipped) == item.id
+			row.caption.Text = worn and "IN USE" or "USE"
 			PlateArt.tint(row.button, worn and GREEN_LIGHT or MOSS)
 		else
 			row.caption.Text = "ACTIVE"
@@ -227,15 +239,15 @@ local function buildRow(item: ShopCatalog.Item, index: number)
 	holder.Parent = list
 
 	local name = engrave(item.name, 25)
-	name.Size = UDim2.new(1, -180, 0, 28)
-	name.Position = UDim2.fromOffset(0, 4)
+	name.Size = UDim2.new(1, -180, 0, 26)
+	name.Position = UDim2.fromOffset(0, 2)
 	name.TextXAlignment = Enum.TextXAlignment.Left
 	name.ZIndex = 3
 	name.Parent = holder
 
 	local blurb = engrave(item.blurb, 17)
-	blurb.Size = UDim2.new(1, -180, 0, 22)
-	blurb.Position = UDim2.fromOffset(0, 32)
+	blurb.Size = UDim2.new(1, -180, 0, 20)
+	blurb.Position = UDim2.fromOffset(0, 28)
 	blurb.TextXAlignment = Enum.TextXAlignment.Left
 	blurb.TextTransparency = 0.3 -- пояснение тише названия, но читается
 	blurb.ZIndex = 3
@@ -245,7 +257,7 @@ local function buildRow(item: ShopCatalog.Item, index: number)
 	-- поэтому две соседние кнопки не выглядят штампованными.
 	local button = PlateArt.button(index, MOSS)
 	button.AnchorPoint = Vector2.new(1, 0.5)
-	button.Size = UDim2.fromOffset(146, 46)
+	button.Size = UDim2.fromOffset(146, 42)
 	-- Отступ справа — под полосу прокрутки: без него она ложится прямо на кнопки.
 	button.Position = UDim2.new(1, -12, 0.5, 0)
 	button.ZIndex = 3
@@ -259,7 +271,8 @@ local function buildRow(item: ShopCatalog.Item, index: number)
 	button.Activated:Connect(function()
 		local owned = state.owned[item.id] == true
 		if owned then
-			if item.kind == "skin" and state.equipped ~= item.id then
+			local worn = (item.kind == "body" and state.equippedBody or state.equipped) == item.id
+			if (item.kind == "skin" or item.kind == "body") and not worn then
 				shopAction:FireServer("equip", item.id)
 			end
 			return -- надетое и постоянные улучшения нажимать незачем
@@ -272,7 +285,22 @@ local function buildRow(item: ShopCatalog.Item, index: number)
 	end)
 end
 
-for i, item in ShopCatalog.onSale() do
+-- Стартовый багги на витрину через onSale не попадает: он не продаётся. Но в списке
+-- он нужен — купив гроб, игрок должен уметь вернуться на багги. Ставим его первой
+-- строкой, надеть его можно всегда.
+local function showcase(): { ShopCatalog.Item }
+	local list: { ShopCatalog.Item } = {}
+	local base = ShopCatalog.get(ShopCatalog.DefaultBody)
+	if base then
+		table.insert(list, base)
+	end
+	for _, item in ShopCatalog.onSale() do
+		table.insert(list, item)
+	end
+	return list
+end
+
+for i, item in showcase() do
 	buildRow(item, i)
 end
 
@@ -308,7 +336,10 @@ local backBtn = Instance.new("TextButton")
 backBtn.Name = "BackPlate"
 backBtn.AnchorPoint = Vector2.new(0.5, 1)
 backBtn.Size = UDim2.fromOffset(340, 52)
-backBtn.Position = UDim2.new(0.5, 0, 1, -16)
+-- BACK ПОДНЯТ (просьба юзера 2026-09-07): на -16 кнопка сидела прямо на рваном
+-- нижнем крае подложки и читалась прижатой к обрезу. Высвободили место, ужав строку
+-- списка с 58 до 52 — пять строк на витрине сохранились.
+backBtn.Position = UDim2.new(0.5, 0, 1, -48)
 backBtn.BackgroundTransparency = 1
 backBtn.AutoButtonColor = false
 backBtn.Text = "BACK"
@@ -336,6 +367,7 @@ shopState.OnClientEvent:Connect(function(s)
 	state.bones = tonumber(s.bones) or 0
 	state.owned = type(s.owned) == "table" and s.owned or {}
 	state.equipped = tostring(s.equipped or ShopCatalog.DefaultSkin)
+	state.equippedBody = tostring(s.equippedBody or ShopCatalog.DefaultBody)
 	renderAll()
 end)
 

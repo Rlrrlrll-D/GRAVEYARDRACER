@@ -87,10 +87,36 @@ end
 -- что колонна повторяет изгиб дороги, а не уходит по прямой в траву.
 --
 -- Габариты багги в системе координат сиденья (замерено по VehicleTemplate):
--- длина 13.1 (нос 7.3 впереди сиденья, корма 5.8 позади), ширина 8.3, причём
--- сиденье смещено на 1.6 ВЛЕВО от геометрического центра кузова.
+-- длина 13.1 (нос 7.3 впереди сиденья, корма 5.8 позади), ширина 8.3.
+--
+-- СМЕЩЕНИЕ СИДЕНЬЯ СЧИТАЕТСЯ, А НЕ ВПИСАНО ЧИСЛОМ. По центру полосы должен идти
+-- КУЗОВ, а ставим мы машину по сиденью — значит нужна поправка на то, насколько
+-- сиденье в стороне от оси машины. Числом здесь стояло 1.6, и когда сиденье
+-- сдвинули к центру (2026-09-07, ради гроба: рука водителя пробивала борт), вся
+-- колонна уехала бы вбок на эти самые 1.6. Опора — центр колёсной базы: он у
+-- машины один, каким бы кузов ни был.
 local CAR_LEN = 13.1
-local CAR_SEAT_OFFSET_X = 1.6 -- центр кузова правее сиденья на столько
+local seatOffsetX: number? = nil
+local function carSeatOffsetX(): number
+	if seatOffsetX then
+		return seatOffsetX
+	end
+	local t = ServerStorage:FindFirstChild("VehicleTemplate")
+	local seat = t and t:FindFirstChild("DriveSeat")
+	local wheels = t and t:FindFirstChild("Wheels")
+	if not (seat and seat:IsA("BasePart") and wheels) then
+		return 0
+	end
+	local sum, n = 0, 0
+	for _, w in wheels:GetChildren() do
+		if w:IsA("BasePart") then
+			sum += seat.CFrame:ToObjectSpace(w.CFrame).Position.X
+			n += 1
+		end
+	end
+	seatOffsetX = n > 0 and (sum / n) or 0
+	return seatOffsetX :: number
+end
 local GRID_ROW_GAP = CAR_LEN + 5 -- 18.1: между рядами есть просвет (раньше 8 — машины ПЕРЕКРЫВАЛИСЬ)
 local GRID_LANE = 8 -- вбок от осевой (дорога 44.8 → полполотна 22.4, край кузова на 12.2)
 
@@ -200,7 +226,7 @@ local function buildGridSlots(y: number)
 			-- нечётные места слева от осевой, чётные справа; сиденье сдвигаем так,
 			-- чтобы по центру полосы оказался КУЗОВ, а не сиденье.
 			local lane = (side == 0) and -GRID_LANE or GRID_LANE
-			table.insert(slots, (base :: CFrame) * CFrame.new(lane - CAR_SEAT_OFFSET_X, 0, 0))
+			table.insert(slots, (base :: CFrame) * CFrame.new(lane - carSeatOffsetX(), 0, 0))
 		end
 	end
 	gridSlots = slots
@@ -219,7 +245,7 @@ function PlayerFlow.gridSlot(i: number): CFrame
 	end
 	local row = math.ceil(i / 2) - 1
 	local lane = (i % 2 == 1) and -GRID_LANE or GRID_LANE
-	return gridBaseSeatCF * CFrame.new(lane - CAR_SEAT_OFFSET_X, 0, row * GRID_ROW_GAP)
+	return gridBaseSeatCF * CFrame.new(lane - carSeatOffsetX(), 0, row * GRID_ROW_GAP)
 end
 
 -- // Выдача/уборка машины -----------------------------------------------------
@@ -373,6 +399,92 @@ local HEADLIGHT_PITCH = math.rad(-11) -- наклон луча вниз (мин�
 local HEADLIGHT_ANGLE = 56 -- ровно накрыть полотно, не расплёскивая свет по полю
 local HEADLIGHT_RANGE = 38 -- главный рычаг против воксельных ступенек
 local HEADLIGHT_BRIGHTNESS = 3.0 -- компенсация укороченной дальности
+
+-- // СЛОТ BODY: подмена кузова -----------------------------------------------
+-- Форму кузова скриптом не поменять: `MeshId` доступен только импортёру
+-- («lacking capability NotAccessible»). Поэтому каждый кузов лежит готовым MeshPart
+-- в `ServerStorage.BodyTemplates`, а магазин хранит лишь ИМЯ шаблона.
+--
+-- Деталь всегда называется `BuggyBody`, каким бы кузовом ни была: по этому имени её
+-- ищут `applySkin` и `tuneHeadlights`. Переименуй — и молча отвалятся и краска, и фары.
+--
+-- ОПОРА ПОСАДКИ — ЦЕНТР КОЛЁСНОЙ БАЗЫ НА УРОВНЕ ЗЕМЛИ, а не центр модели и не сиденье.
+-- Центр модели уезжает вместе с формой (гроб длиннее багги на 1.6), а сиденье в
+-- A-Chassis вообще стоит не по оси машины. База же у всех кузовов одна и та же.
+local BODY_FOLDER = "BodyTemplates"
+
+local function baseGround(car: Model): (CFrame?, Vector3?)
+	local seat = car:FindFirstChild("DriveSeat")
+	local wheels = car:FindFirstChild("Wheels")
+	if not (seat and seat:IsA("BasePart") and wheels) then
+		return nil, nil
+	end
+	local sum, n, radius = Vector3.zero, 0, 0
+	for _, w in wheels:GetChildren() do
+		if w:IsA("BasePart") then
+			sum += seat.CFrame:ToObjectSpace(w.CFrame).Position
+			n += 1
+			radius = math.max(radius, w.Size.Y / 2)
+		end
+	end
+	if n == 0 then
+		return nil, nil
+	end
+	local base = sum / n
+	return seat.CFrame, Vector3.new(base.X, base.Y - radius, base.Z)
+end
+
+function PlayerFlow.applyBody(car: Model, player: Player)
+	local item = ShopCatalog.get(player:GetAttribute("EquippedBody"))
+	if not (item and item.kind == "body") then
+		item = ShopCatalog.get(ShopCatalog.DefaultBody)
+	end
+	if not (item and item.bodyTemplate) then
+		return
+	end
+	local current = car:FindFirstChild("BuggyBody")
+	if current and current:GetAttribute("BodyId") == item.id then
+		return -- нужный кузов уже стоит: не пересобираем зря
+	end
+	local folder = ServerStorage:FindFirstChild(BODY_FOLDER)
+	local template = folder and folder:FindFirstChild(item.bodyTemplate)
+	if not (template and template:IsA("BasePart")) then
+		warn("[PlayerFlow] Нет шаблона кузова " .. tostring(item.bodyTemplate))
+		return
+	end
+	local seatCF, ground = baseGround(car)
+	if not (seatCF and ground) then
+		return
+	end
+	-- Каждый кузов сидит на базе по-своему: у гроба пивот в основании, у багги — в
+	-- середине. Разницу держит атрибут ШАБЛОНА, а не эта функция: добавляя кузов,
+	-- правишь только его, кода не касаешься.
+	local fit = template:GetAttribute("FitPivot")
+	local offset = typeof(fit) == "Vector3" and fit or Vector3.zero
+
+	local body = (template :: BasePart):Clone()
+	body.Name = "BuggyBody"
+	body.Anchored = false
+	body.CanCollide = false
+	body.CanQuery = false
+	body.CanTouch = false
+	body.Massless = true
+	body:SetAttribute("BodyId", item.id)
+	for _, c in body:GetChildren() do
+		if c:IsA("WeldConstraint") or c:IsA("Weld") then
+			c:Destroy() -- вельды шаблона ведут в пустоту, свой поставим ниже
+		end
+	end
+	if current then
+		current:Destroy()
+	end
+	body.Parent = car
+	body:PivotTo(seatCF * CFrame.new(ground + offset))
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = body
+	weld.Part1 = car:FindFirstChild("DriveSeat") :: BasePart
+	weld.Parent = body
+end
 
 -- Скин кузова из магазина. Меш кузова один (BuggyBody) и он текстурирован — цвет
 -- текстуру домножает, поэтому «покрасить» здесь значит именно перекрасить, а не
@@ -559,8 +671,9 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 	if seat and seat:IsA("VehicleSeat") then
 		seat.HeadsUpDisplay = false -- нативный Roblox-спидометр (CoreGui.VehicleHudFrame) не нужен: свой HUD
 	end
+	PlayerFlow.applyBody(car, player) -- ПЕРВЫМ: фары и краска работают по готовой детали
 	tuneHeadlights(car) -- до Parent: свет приедет клиенту уже наведённым
-		applySkin(car, player) -- тоже ДО Parent: игрок не должен видеть смену цвета
+	applySkin(car, player) -- тоже ДО Parent: игрок не должен видеть смену цвета
 	car:PivotTo(seatCFrame * pivotFromSeat) -- ДО Parent: VehicleController запомнит «дом»
 	-- A-Chassis + StreamingEnabled: под ModelStreamingMode.Default машину клиенту
 	-- реплицирует ПО ЧАСТЯМ, и скопированный в PlayerGui Drive рвётся на

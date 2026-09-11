@@ -26,12 +26,13 @@ export type Item = {
 	id: string, -- внутренний ключ; он же ключ владения в записи игрока
 	name: string, -- подпись на витрине (английская: шрифт Creepster без кириллицы)
 	blurb: string, -- строка пояснения под названием
-	kind: "skin" | "perk" | "consumable",
+	kind: "skin" | "body" | "perk" | "consumable",
 	bones: number?, -- цена в костях; nil = за кости не продаётся
 	gamePass: number?, -- id game pass; 0 = ещё не заведён на Dashboard
 	product: number?, -- id developer product; 0 = ещё не заведён
 	color: Color3?, -- скин: цвет кузова
 	material: Enum.Material?, -- скин: материал кузова
+	bodyTemplate: string?, -- кузов: имя шаблона в ServerStorage.BodyTemplates
 	grantBones: number?, -- расходник: сколько костей выдать
 	lives: number?, -- расходник: сколько жизней добавить в заезде
 }
@@ -40,7 +41,26 @@ export type Item = {
 -- же откатывается витрина, если игрок продал/потерял остальное.
 ShopCatalog.DefaultSkin = "rust"
 
+-- Кузов по умолчанию — тот самый старый багги, с которого игра начинается. Он не
+-- продаётся и есть у всех: слот BODY обязан быть чем-то занят всегда, иначе машина
+-- соберётся без кузова. Остальные кузова покупаются и надеваются поверх него.
+ShopCatalog.DefaultBody = "buggy"
+
 ShopCatalog.Items = {
+	-- // Кузова -------------------------------------------------------------
+	-- ФОРМУ КУЗОВА СКРИПТОМ НЕ ПОМЕНЯТЬ: `MeshId` доступен только импортёру
+	-- («lacking capability NotAccessible»). Поэтому каждый кузов — отдельный
+	-- MeshPart-шаблон в ServerStorage.BodyTemplates, а здесь лежит только ссылка
+	-- на его имя. Добавляешь кузов — сперва импортируешь меш руками, потом строку.
+	{
+		id = "buggy", name = "OLD BUGGY", blurb = "rusted, loud, and yours",
+		kind = "body", bodyTemplate = "Buggy",
+	},
+	{
+		id = "coffin", name = "COFFIN", blurb = "you will not need it later",
+		kind = "body", bones = 3500, bodyTemplate = "Coffin",
+	},
+
 	-- // Скины кузова -------------------------------------------------------
 	{
 		id = "rust", name = "RUST", blurb = "the one you started with",
@@ -96,7 +116,7 @@ end
 -- Настроен ли товар: за кости — есть цена; за робуксы — вписан ненулевой id.
 -- Скин по умолчанию настроен всегда: он бесплатный и выдаётся сам.
 function ShopCatalog.isConfigured(item: Item): boolean
-	if item.id == ShopCatalog.DefaultSkin then
+	if item.id == ShopCatalog.DefaultSkin or item.id == ShopCatalog.DefaultBody then
 		return true
 	end
 	return (item.bones ~= nil and item.bones > 0)
@@ -109,7 +129,8 @@ end
 function ShopCatalog.onSale(): { Item }
 	local list: { Item } = {}
 	for _, item in ShopCatalog.Items do
-		if ShopCatalog.isConfigured(item) and item.id ~= ShopCatalog.DefaultSkin then
+		local isDefault = item.id == ShopCatalog.DefaultSkin or item.id == ShopCatalog.DefaultBody
+		if ShopCatalog.isConfigured(item) and not isDefault then
 			table.insert(list, item)
 		end
 	end
@@ -121,6 +142,17 @@ function ShopCatalog.skins(): { Item }
 	local list: { Item } = {}
 	for _, item in ShopCatalog.Items do
 		if item.kind == "skin" then
+			table.insert(list, item)
+		end
+	end
+	return list
+end
+
+-- Кузова, доступные для примерки: базовый багги + всё купленное.
+function ShopCatalog.bodies(): { Item }
+	local list: { Item } = {}
+	for _, item in ShopCatalog.Items do
+		if item.kind == "body" then
 			table.insert(list, item)
 		end
 	end

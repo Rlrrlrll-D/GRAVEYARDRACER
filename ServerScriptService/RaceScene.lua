@@ -180,7 +180,7 @@ end
 -- за горизонт, либо отстаёт на круг, а призрак нужен рядом, для борьбы.
 --
 -- Вид: не примитив ModelFactory.Buggy, а ВИДИМЫЕ детали настоящего багги
--- (VehicleTemplate) в материале ForceField. Видимых деталей всего 7 из 106 —
+-- (VehicleTemplate), полупрозрачным пластиком. Видимых деталей всего 7 из 106 —
 -- остальное у A-Chassis невидимая механика (клинья кузова, интерфейсы, звуки),
 -- поэтому призрака дёшево двигать целиком каждый кадр.
 type Ghost = {
@@ -202,7 +202,29 @@ type Ghost = {
 -- и тащить сюда весь модуль ради двух констант незачем.
 local GRID_LANE = 8
 local GRID_ROW_GAP = 18.1
-local CAR_SEAT_OFFSET_X = 1.6
+-- Поправка «сиденье не на оси машины» считается по шаблону, а не вписана числом:
+-- сиденье двигали (2026-09-07), и константа 1.6 увела бы призраков вбок от полосы.
+local seatOffsetX: number? = nil
+local function carSeatOffsetX(): number
+	if seatOffsetX then
+		return seatOffsetX
+	end
+	local t = ServerStorage:FindFirstChild("VehicleTemplate")
+	local seat = t and t:FindFirstChild("DriveSeat")
+	local wheels = t and t:FindFirstChild("Wheels")
+	if not (seat and seat:IsA("BasePart") and wheels) then
+		return 0
+	end
+	local sum, n = 0, 0
+	for _, w in wheels:GetChildren() do
+		if w:IsA("BasePart") then
+			sum += seat.CFrame:ToObjectSpace(w.CFrame).Position.X
+			n += 1
+		end
+	end
+	seatOffsetX = n > 0 and (sum / n) or 0
+	return seatOffsetX :: number
+end
 local STUMBLE_SPEED = 0.35 -- «спотыкание» = резкий сброс хода, а НЕ стоп колом (полная остановка читается как поломка)
 local WEAVE_AMPLITUDE = 1.6 -- покачивание в полосе: живой водитель, а не рельса
 local WEAVE_RATE = 0.6
@@ -291,7 +313,14 @@ local function buildGhostModel(spec: { Name: string, Speed: number, Offset: numb
 		part.CanQuery = false -- и пули с прицелом турели проходят насквозь
 		part.CanTouch = false
 		part.CastShadow = false
-		part.Material = Enum.Material.ForceField
+		-- ВИД ПРИЗРАКА: полупрозрачный пластик, а НЕ ForceField (замена 2026-09-07).
+		-- ForceField рисует только оболочку: на цилиндрах-колёсах она заметна, а на
+		-- плоских панелях кузова почти прозрачна — со стороны ехали «одни колёса»,
+		-- юзер это и увидел. SmoothPlastic с прозрачностью держит весь силуэт: дугу,
+		-- кузов, ствол, — и сквозь него всё равно видно трассу. Плотность 0.72
+		-- (была 0.55, правка юзера): при 0.55 «дух» читался почти как живая машина.
+		part.Material = Enum.Material.SmoothPlastic
+		part.Transparency = 0.72
 		part.Color = spec.Color
 		part.CFrame = sourceSeatCF:Inverse() * src.CFrame -- собираем в системе координат СИДЕНЬЯ
 		part.Parent = model
@@ -324,7 +353,7 @@ local function placeGhost(ghost: Ghost, now: number)
 	local at = Vector3.new(pos.X, ghostBaseY, pos.Z)
 	local base = CFrame.lookAt(at, at + Vector3.new(dir.X, 0, dir.Z))
 	local weave = math.sin(now * WEAVE_RATE + ghost.weave) * WEAVE_AMPLITUDE
-	ghost.model:PivotTo(base * CFrame.new(ghost.lane + weave - CAR_SEAT_OFFSET_X, 0, 0) * ghost.pivotFromSeat)
+	ghost.model:PivotTo(base * CFrame.new(ghost.lane + weave - carSeatOffsetX(), 0, 0) * ghost.pivotFromSeat)
 end
 
 -- Снять всех призраков (конец заезда).

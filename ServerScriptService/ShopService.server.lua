@@ -32,6 +32,7 @@ local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local ShopCatalog = require(ReplicatedStorage:WaitForChild("ShopCatalog"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
 local Economy = require(script.Parent:WaitForChild("Economy"))
+local PlayerFlow = require(script.Parent:WaitForChild("PlayerFlow"))
 local VehicleRegistry = require(ReplicatedStorage:WaitForChild("VehicleRegistry"))
 
 local shopAction = Net.get(Net.Events.ShopAction)
@@ -80,7 +81,9 @@ end
 
 -- Владеет ли игрок товаром: либо куплено за кости (запись), либо есть пропуск.
 local function ownsItem(player: Player, item: ShopCatalog.Item): boolean
-	if item.id == ShopCatalog.DefaultSkin then
+	-- Базовые краска и кузов есть у всех и в записи не хранятся. Без этой строки
+	-- «надеть обратно старый багги» отвечало бы «not owned»: в owned его нет.
+	if item.id == ShopCatalog.DefaultSkin or item.id == ShopCatalog.DefaultBody then
 		return true
 	end
 	if PlayerData.owns(player, item.id) then
@@ -120,6 +123,16 @@ local function paintVehicle(player: Player)
 	end
 end
 
+-- Кузов из слота BODY. Меш подставляет PlayerFlow — здесь только повод его позвать:
+-- если машина уже выдана, надетый кузов должен появиться сразу, а не со следующего
+-- заезда. Машины нет (игрок в лобби) — и не надо: при выдаче он подставится сам.
+local function reshapeVehicle(player: Player)
+	local car = VehicleRegistry.GetVehicleForPlayer(player)
+	if car then
+		PlayerFlow.applyBody(car, player)
+	end
+end
+
 -- // Пакет состояния ----------------------------------------------------------
 local function pushState(player: Player)
 	if not player.Parent then
@@ -133,10 +146,12 @@ local function pushState(player: Player)
 		end
 	end
 	owned[ShopCatalog.DefaultSkin] = true
+	owned[ShopCatalog.DefaultBody] = true -- стартовый багги есть у всех и не продаётся
 	shopState:FireClient(player, {
 		bones = Economy.balance(player),
 		owned = owned,
 		equipped = player:GetAttribute("EquippedSkin") or ShopCatalog.DefaultSkin,
+		equippedBody = player:GetAttribute("EquippedBody") or ShopCatalog.DefaultBody,
 	})
 end
 
@@ -164,16 +179,24 @@ local function doBuy(player: Player, item: ShopCatalog.Item)
 end
 
 local function doEquip(player: Player, item: ShopCatalog.Item)
-	if item.kind ~= "skin" then
-		reply(player, false, item.id, "not a skin")
+	if item.kind ~= "skin" and item.kind ~= "body" then
+		reply(player, false, item.id, "not wearable")
 		return
 	end
 	if not ownsItem(player, item) then
 		reply(player, false, item.id, "not owned")
 		return
 	end
-	player:SetAttribute("EquippedSkin", item.id)
-	paintVehicle(player)
+	if item.kind == "body" then
+		player:SetAttribute("EquippedBody", item.id)
+		reshapeVehicle(player)
+		-- Кузов сменился — краску наносим заново: новая деталь приехала из шаблона
+		-- со своим цветом, а надет у игрока может быть любой скин.
+		paintVehicle(player)
+	else
+		player:SetAttribute("EquippedSkin", item.id)
+		paintVehicle(player)
+	end
 	reply(player, true, item.id, "equipped " .. item.name)
 end
 
