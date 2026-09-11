@@ -108,19 +108,9 @@ local function paintVehicle(player: Player)
 	if not car then
 		return
 	end
-	local skin = ShopCatalog.get(player:GetAttribute("EquippedSkin"))
-	if not (skin and skin.kind == "skin") then
-		skin = ShopCatalog.get(ShopCatalog.DefaultSkin)
-	end
-	local body = car:FindFirstChild("BuggyBody")
-	if body and body:IsA("BasePart") and skin then
-		if skin.color then
-			body.Color = skin.color
-		end
-		if skin.material then
-			body.Material = skin.material
-		end
-	end
+	-- Та же функция, что красит кузов при выдаче: одна логика, включая детали-дети
+	-- кузова (крест на крышке гроба).
+	PlayerFlow.applySkin(car, player)
 end
 
 -- Кузов из слота BODY. Меш подставляет PlayerFlow — здесь только повод его позвать:

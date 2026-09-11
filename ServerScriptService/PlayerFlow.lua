@@ -470,9 +470,27 @@ function PlayerFlow.applyBody(car: Model, player: Player)
 	body.CanTouch = false
 	body.Massless = true
 	body:SetAttribute("BodyId", item.id)
-	for _, c in body:GetChildren() do
-		if c:IsA("WeldConstraint") or c:IsA("Weld") then
-			c:Destroy() -- вельды шаблона ведут в пустоту, свой поставим ниже
+	-- Вельды шаблона, ведущие наружу, — в пустоту, их долой; свой к сиденью поставим
+	-- ниже. Но вельды ВНУТРИ кузова оставляем: у гроба крест на крышке — отдельные
+	-- детали-дети (LidCross*, 2026-09-11), они держатся на кузове своими WeldConstraint
+	-- и обязаны ехать с ним. Заодно приводим детали-дети к тому же «косметическому»
+	-- виду, что и сам кузов: без массы, коллизий и запросов.
+	local function insideBody(p: BasePart?): boolean
+		return p ~= nil and (p == body or p:IsDescendantOf(body))
+	end
+	for _, c in body:GetDescendants() do
+		if c:IsA("WeldConstraint") then
+			if not (insideBody(c.Part0) and insideBody(c.Part1)) then
+				c:Destroy()
+			end
+		elseif c:IsA("Weld") or c:IsA("Motor6D") then
+			c:Destroy()
+		elseif c:IsA("BasePart") then
+			c.Anchored = false
+			c.CanCollide = false
+			c.CanQuery = false
+			c.CanTouch = false
+			c.Massless = true
 		end
 	end
 	if current then
@@ -490,7 +508,9 @@ end
 -- текстуру домножает, поэтому «покрасить» здесь значит именно перекрасить, а не
 -- залить плашкой. Что надето, лежит в атрибуте EquippedSkin (ставит ShopService,
 -- сохраняет PlayerData); незнакомый или отсутствующий скин откатывается к базовому.
-local function applySkin(car: Model, player: Player)
+-- Публичная: ShopService красит ЖИВУЮ машину той же функцией — одна логика на выдачу и на
+-- смену краски в магазине (раньше в ShopService жила копия, и крест гроба она бы пропустила).
+function PlayerFlow.applySkin(car: Model, player: Player)
 	local skin = ShopCatalog.get(player:GetAttribute("EquippedSkin"))
 	if not (skin and skin.kind == "skin") then
 		skin = ShopCatalog.get(ShopCatalog.DefaultSkin)
@@ -499,11 +519,21 @@ local function applySkin(car: Model, player: Player)
 	if not (skin and body and body:IsA("BasePart")) then
 		return
 	end
-	if skin.color then
-		(body :: BasePart).Color = skin.color
+	-- Красим кузов и его детали-дети (крест на крышке гроба): в меше крест был одним
+	-- целым с кузовом и красился вместе с ним — так и остаётся.
+	local parts = { body :: BasePart }
+	for _, d in body:GetDescendants() do
+		if d:IsA("BasePart") then
+			table.insert(parts, d)
+		end
 	end
-	if skin.material then
-		(body :: BasePart).Material = skin.material
+	for _, p in parts do
+		if skin.color then
+			p.Color = skin.color
+		end
+		if skin.material then
+			p.Material = skin.material
+		end
 	end
 end
 
@@ -673,7 +703,7 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 	end
 	PlayerFlow.applyBody(car, player) -- ПЕРВЫМ: фары и краска работают по готовой детали
 	tuneHeadlights(car) -- до Parent: свет приедет клиенту уже наведённым
-	applySkin(car, player) -- тоже ДО Parent: игрок не должен видеть смену цвета
+	PlayerFlow.applySkin(car, player) -- тоже ДО Parent: игрок не должен видеть смену цвета
 	car:PivotTo(seatCFrame * pivotFromSeat) -- ДО Parent: VehicleController запомнит «дом»
 	-- A-Chassis + StreamingEnabled: под ModelStreamingMode.Default машину клиенту
 	-- реплицирует ПО ЧАСТЯМ, и скопированный в PlayerGui Drive рвётся на
