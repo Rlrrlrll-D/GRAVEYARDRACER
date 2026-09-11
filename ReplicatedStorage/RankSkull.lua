@@ -303,7 +303,8 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	table.sort(names)
 	local paint = tint or Color3.new(1, 1, 1)
 	local up = lift or 0
-	local key = ("%s|%s|%s|%s|%.2f|%.2f|%s"):format(bodyId, table.concat(names, ","), colorName or "-", mode, opacity, up, paint:ToHex())
+	-- в ключе сам цвет, а не имя: SkullTune крутит RankSkull.Colors[name] на живую
+	local key = ("%s|%s|%s|%s|%.2f|%.2f|%s"):format(bodyId, table.concat(names, ","), color and color:ToHex() or "-", mode, opacity, up, paint:ToHex())
 	local ready = imageCache[key]
 	if ready then
 		return ready
@@ -355,5 +356,12 @@ function RankSkull.apply(body: MeshPart, img: EditableImage?)
 		body.TextureContent = if spec and spec.texture then Content.fromAssetId(tonumber(spec.texture:match("%d+")) :: number) else Content.none
 	end
 end
+
+-- // Дев-подкрутка (SkullTune) ------------------------------------------------
+-- Пока Overrides не nil, сторож (RankSkull.client) берёт режим/плотность/подъём/краску
+-- отсюда вместо GameConfig и цвета кузова; OverridesChanged — пересобрать всем машинам.
+export type Overrides = { mode: string?, opacity: number?, lift: number?, tint: Color3?, colorName: string? }
+RankSkull.Overrides = nil :: Overrides?
+RankSkull.OverridesChanged = Instance.new("BindableEvent")
 
 return RankSkull

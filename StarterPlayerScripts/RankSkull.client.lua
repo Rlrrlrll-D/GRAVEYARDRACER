@@ -50,7 +50,18 @@ local function dress(body: BasePart, driver: Player)
 	local spec = skullFor(Ranks.forPlayer(driver))
 	-- Композит всегда: он же несёт краску (текстура на MeshPart отключает Color3, см.
 	-- RankSkull.compose). Без черепов — просто крашеный кузов.
-	local img = RankSkull.compose(bodyId, spec and spec.zones or {}, spec and spec.color or nil, MODE, OPACITY, body.Color, LIFT)
+	-- Дев-подкрутка (SkullTune) подменяет режим/плотность/подъём/краску и цвет ступени.
+	local o = RankSkull.Overrides
+	local zones = spec and spec.zones or {}
+	local colorName = spec and spec.color or nil
+	if o and o.colorName then
+		colorName = o.colorName
+		if #zones == 0 then
+			zones = { "top", "left", "right", "rear" } -- крутить можно и на нулевом ранге
+		end
+	end
+	local img = RankSkull.compose(bodyId, zones, colorName,
+		(o and o.mode) or MODE, (o and o.opacity) or OPACITY, (o and o.tint) or body.Color, (o and o.lift) or LIFT)
 	if not body.Parent then
 		return -- кузов успели заменить, пока читали текстуру
 	end
@@ -58,14 +69,13 @@ local function dress(body: BasePart, driver: Player)
 	setCrossHidden(body, img ~= nil and spec ~= nil and table.find(spec.zones, "top") ~= nil)
 end
 
-local watched: { [Model]: { RBXScriptConnection } } = {}
+local watched: { [Model]: { conns: { RBXScriptConnection }, redress: () -> () } } = {}
 
 local function watchCar(car: Model)
 	if watched[car] then
 		return
 	end
 	local conns: { RBXScriptConnection } = {}
-	watched[car] = conns
 
 	local function driver(): Player?
 		local id = car:GetAttribute("OwnerUserId")
@@ -131,9 +141,17 @@ local function watchCar(car: Model)
 		end
 	end))
 
+	watched[car] = { conns = conns, redress = redress }
 	rewireDriver()
 	redress()
 end
+
+-- Дев-подкрутка: пересобрать всем машинам, что на виду.
+RankSkull.OverridesChanged.Event:Connect(function()
+	for _, w in watched do
+		w.redress()
+	end
+end)
 
 for _, car in CollectionService:GetTagged("PlayerVehicle") do
 	if car:IsA("Model") then
