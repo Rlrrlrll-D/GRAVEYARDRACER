@@ -47,10 +47,9 @@ local function dress(body: BasePart, driver: Player)
 		return
 	end
 	local spec = skullFor(Ranks.forPlayer(driver))
-	local img = nil
-	if spec then
-		img = RankSkull.compose(bodyId, spec.zones, spec.color, MODE, OPACITY, body.Color)
-	end
+	-- Композит всегда: он же несёт краску (текстура на MeshPart отключает Color3, см.
+	-- RankSkull.compose). Без черепов — просто крашеный кузов.
+	local img = RankSkull.compose(bodyId, spec and spec.zones or {}, spec and spec.color or nil, MODE, OPACITY, body.Color)
 	if not body.Parent then
 		return -- кузов успели заменить, пока читали текстуру
 	end

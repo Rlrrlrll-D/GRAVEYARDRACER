@@ -193,13 +193,14 @@ local GameConfig: GameConfigType = {
 		-- или за сотню сбитых, BONE KING — за десятки вечеров.
 		WinPoints = 25,
 		-- Череп на кузове (RankSkull): какие места и каким цветом на каждой ступени.
-		-- Места: top (капот / крышка гроба), left, right (борта), rear (корма). Цвета —
-		-- из RankSkull.Colors: bone / gold. Раскладка предложена 2026-09-11: с рангом
-		-- мест становится больше, на вершине всё жёлтым. На нулевой ступени черепа нет.
+		-- Места: top (капот / крышка гроба), left, right (борта), rear (корма) — все
+		-- четыре, что юзер отметил на листах ракурсов, на КАЖДОЙ ступени с черепом
+		-- (2026-09-11: «я не увидел черепов сзади и сбоку — пофикси»). Ранг различает
+		-- цвет из RankSkull.Colors: bone у младших, gold у BONE KING. Нулевая — без черепа.
 		Tiers = {
 			{ name = "GRAVEDIGGER", points = 0 },
-			{ name = "PALLBEARER", points = 100, skull = { zones = { "top" }, color = "bone" } },
-			{ name = "GRAVE ROBBER", points = 400, skull = { zones = { "top", "left", "right" }, color = "bone" } },
+			{ name = "PALLBEARER", points = 100, skull = { zones = { "top", "left", "right", "rear" }, color = "bone" } },
+			{ name = "GRAVE ROBBER", points = 400, skull = { zones = { "top", "left", "right", "rear" }, color = "bone" } },
 			{ name = "REAPER", points = 1200, skull = { zones = { "top", "left", "right", "rear" }, color = "bone" } },
 			{ name = "BONE KING", points = 3000, skull = { zones = { "top", "left", "right", "rear" }, color = "gold" } },
 		},

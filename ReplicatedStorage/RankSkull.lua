@@ -19,9 +19,10 @@
 -- у бортов зона повёрнута: длина борта вдоль V, высота вдоль U — там череп рисуется
 -- лёжа, макушкой в +U. Череп симметричен, поэтому зеркальность U не важна.
 --
--- ЦВЕТ КУЗОВА. Скин красит деталь Color3, шейдер домножает на него текстуру ПОСЛЕ
--- нашего композита — как и раньше. У гроба текстуры нет: рисуем на белом холсте
--- 512², и любой режим наложения там вырождается в обычный (белый × цвет = цвет).
+-- ЦВЕТ КУЗОВА. Текстура на MeshPart ОТКЛЮЧАЕТ Color3 (проверено 2026-09-11), поэтому
+-- краску скина домножаем на холст сами, до черепов — см. compose. У гроба текстуры
+-- нет: холст 512² белый × краска = ровный цвет, и Multiply черепа на нём — просто
+-- цвет черепа, притемнённый краской.
 
 local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -267,26 +268,28 @@ end
 
 local imageCache: { [string]: EditableImage } = {}
 
--- Собрать текстуру кузова bodyId с черепами в зонах zoneNames. Кэш по ключу: одна
--- картинка на комбинацию, общая для всех машин. Йилдит на первом обращении к кузову
--- (чтение текстуры). nil — если кузов неизвестен или EditableImage недоступен.
+-- Собрать текстуру кузова bodyId: холст × краска, сверху черепа в зонах zoneNames
+-- (список может быть пустым — на нулевом ранге нужна одна краска). Кэш по ключу:
+-- одна картинка на комбинацию, общая для всех машин. Йилдит на первом обращении к
+-- кузову (чтение текстуры). nil — если кузов неизвестен или EditableImage недоступен.
 --
 -- tint — цвет краски (Color3 детали). ЛЮБАЯ текстура на MeshPart ОТКЛЮЧАЕТ Color3
 -- (проверено 2026-09-11: красный Color на текстурированном багги и на гробе с белым
--- EditableImage — без следа краски). Поэтому у кузова БЕЗ текстуры (гроб) холст
--- заливаем цветом краски сами, иначе гроб с черепом становился белым. У
--- текстурированного багги краска и раньше цвет не давала (только материал), это
--- поведение не трогаем — холст без тонировки.
-function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: string, mode: string, opacity: number, tint: Color3?): EditableImage?
+-- EditableImage — без следа краски). До этого краски магазина на багги цвет не давали
+-- вовсе, только материал. Юзер: «пусть краски красят и багги» — значит домножаем
+-- сами: текстура × краска у багги, ровный холст цвета краски у гроба. Из этого же
+-- следует, что композит нужен ВСЕГДА, даже без черепов — иначе на нулевом ранге
+-- багги был бы некрашеным, а с первым черепом вдруг перекрашивался.
+function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: string?, mode: string, opacity: number, tint: Color3?): EditableImage?
 	local spec = RankSkull.Bodies[bodyId]
-	local color = RankSkull.Colors[colorName]
-	if not (spec and color) or #zoneNames == 0 then
+	if not spec then
 		return nil
 	end
-	local names = table.clone(zoneNames)
+	local color = colorName and RankSkull.Colors[colorName] or nil
+	local names = if color then table.clone(zoneNames) else {}
 	table.sort(names)
-	local canvas = if spec.texture then nil else (tint or Color3.new(1, 1, 1))
-	local key = ("%s|%s|%s|%s|%.2f|%s"):format(bodyId, table.concat(names, ","), colorName, mode, opacity, canvas and canvas:ToHex() or "-")
+	local paint = tint or Color3.new(1, 1, 1)
+	local key = ("%s|%s|%s|%s|%.2f|%s"):format(bodyId, table.concat(names, ","), colorName or "-", mode, opacity, paint:ToHex())
 	local ready = imageCache[key]
 	if ready then
 		return ready
@@ -297,23 +300,23 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	end
 	local size = base.size
 	local buf = buffer.create(size * size * 4)
-	if canvas then
-		-- холст в цвет краски (см. выше про Color3 и текстуры)
-		local r, g, b = math.floor(canvas.R * 255 + 0.5), math.floor(canvas.G * 255 + 0.5), math.floor(canvas.B * 255 + 0.5)
+	buffer.copy(buf, 0, base.buf)
+	-- краска: домножить каждый пиксель (у гроба база белая — выйдет ровный цвет)
+	local pr, pg, pb = paint.R, paint.G, paint.B
+	if pr < 0.999 or pg < 0.999 or pb < 0.999 then
 		for i = 0, size * size - 1 do
 			local o = i * 4
-			buffer.writeu8(buf, o, r)
-			buffer.writeu8(buf, o + 1, g)
-			buffer.writeu8(buf, o + 2, b)
-			buffer.writeu8(buf, o + 3, 255)
+			buffer.writeu8(buf, o, math.floor(buffer.readu8(buf, o) * pr + 0.5))
+			buffer.writeu8(buf, o + 1, math.floor(buffer.readu8(buf, o + 1) * pg + 0.5))
+			buffer.writeu8(buf, o + 2, math.floor(buffer.readu8(buf, o + 2) * pb + 0.5))
 		end
-	else
-		buffer.copy(buf, 0, base.buf)
 	end
-	for _, name in names do
-		local zone = spec.zones[name]
-		if zone then
-			paintZone(buf, size, zone, color, mode, opacity)
+	if color then
+		for _, name in names do
+			local zone = spec.zones[name]
+			if zone then
+				paintZone(buf, size, zone, color, mode, opacity)
+			end
 		end
 	end
 	local ok, img = pcall(function()
