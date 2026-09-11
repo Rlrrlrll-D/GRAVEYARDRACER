@@ -13,6 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local UITheme = require(ReplicatedStorage:WaitForChild("UITheme"))
+local Ranks = require(ReplicatedStorage:WaitForChild("Ranks"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -138,7 +139,9 @@ local TITLE_FILL = 0.62 -- какую долю ширины занимают е�
 local TITLE_MAX_H = 0.30 -- и не выше этой доли высоты
 local SUB_H = 44 -- высота коробки подписи (она же кегль: TextScaled)
 local BONES_H = 40
+local RANK_H = 40 -- строка ранга под костями, тем же кеглем (макет одобрен 2026-09-11)
 local LINE_GAP = 16 -- отбивка строк от букв тайтла и друг от друга
+local LINES_REF_H = 560 -- высота окна, на которой подобраны кегли строк (замер 2026-08-28)
 
 local title = Instance.new("TextLabel")
 title.Name = "ResultTitle"
@@ -183,6 +186,22 @@ earnedLabel.TextStrokeTransparency = 0.35
 earnedLabel.Text = ""
 earnedLabel.Parent = backdrop
 
+-- Ранг под костями. Повысился — золотом «NEW RANK: …», иначе та же строка
+-- прогресса, что в лобби: цель видна после каждого заезда, а не только в меню.
+local rankLabel = Instance.new("TextLabel")
+rankLabel.Name = "ResultRank"
+rankLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+rankLabel.Size = UDim2.new(0.7, 0, 0, RANK_H)
+rankLabel.Position = UDim2.new(0.5, 0, 0.72, 0)
+rankLabel.BackgroundTransparency = 1
+rankLabel.Font = UITheme.Font
+rankLabel.TextScaled = true
+rankLabel.TextColor3 = UITheme.Palette.Bone
+rankLabel.TextStrokeColor3 = UITheme.Shadow
+rankLabel.TextStrokeTransparency = 0.35
+rankLabel.Text = ""
+rankLabel.Parent = backdrop
+
 -- Итоговый множитель тайтла: его же цель у твина появления, иначе буквы
 -- «выпрыгивали» бы к единице и схлопывались обратно к посчитанному размеру.
 local titleRest = 1
@@ -201,17 +220,28 @@ local function fitResult()
 	-- длинным, что строка при кегле 100 не влезает в экран, её надо УМЕНЬШИТЬ.
 	titleRest = math.clamp(math.min(vp.X * TITLE_FILL / tw, vp.Y * TITLE_MAX_H / th), 0.5, 4)
 
+	-- ВЫСОТЫ СТРОК — ДОЛЕЙ ОТ ОПОРЫ, А НЕ ПИКСЕЛЯМИ (2026-09-11, третья строка).
+	-- Кегли 44/40/40 подобраны на окне высотой 560. Телефон отдаёт около 265
+	-- логических точек: при голых пикселях строка костей уже садилась на нижний
+	-- край, а ранг уходил за экран целиком. Тот же приём, что у fitToScreen: сжимаем
+	-- строки и отбивки пропорционально высоте, TextScaled уменьшает буквы сам.
+	local k = math.clamp(vp.Y / LINES_REF_H, 0.4, 1)
+	local subH, bonesH, rankH, gap = SUB_H * k, BONES_H * k, RANK_H * k, LINE_GAP * k
+
 	local lineW = math.max(160, math.floor(tw * titleRest))
-	sub.Size = UDim2.new(0, lineW, 0, SUB_H)
-	earnedLabel.Size = UDim2.new(0, lineW, 0, BONES_H)
+	sub.Size = UDim2.new(0, lineW, 0, subH)
+	earnedLabel.Size = UDim2.new(0, lineW, 0, bonesH)
+	rankLabel.Size = UDim2.new(0, lineW, 0, rankH)
 
 	-- Под САМИ БУКВЫ, а не под коробку: коробка тайтла 150 при буквах 100, и от
 	-- центра до низа букв меньше, чем до низа коробки. Иначе между тайтлом и
 	-- подписью зияла бы дыра, а на крупном множителе буквы наезжали бы на строку.
 	local lettersBottom = vp.Y * TITLE_Y + th * titleRest / 2
-	sub.Position = UDim2.new(0.5, 0, 0, math.floor(lettersBottom + LINE_GAP + SUB_H / 2))
+	sub.Position = UDim2.new(0.5, 0, 0, math.floor(lettersBottom + gap + subH / 2))
 	earnedLabel.Position =
-		UDim2.new(0.5, 0, 0, math.floor(lettersBottom + LINE_GAP * 2 + SUB_H + BONES_H / 2))
+		UDim2.new(0.5, 0, 0, math.floor(lettersBottom + gap * 2 + subH + bonesH / 2))
+	rankLabel.Position =
+		UDim2.new(0.5, 0, 0, math.floor(lettersBottom + gap * 3 + subH + bonesH + rankH / 2))
 end
 
 -- Смена разрешения (поворот планшета, окно Studio) на живом экране итога.
@@ -327,7 +357,9 @@ local function hideResult()
 	backdrop.BackgroundTransparency = 1
 end
 
-local function showResult(outcome: string, winner: string?, zombies: number, earned: number)
+type RankInfo = { name: string, up: boolean, nextName: string?, remaining: number? }
+
+local function showResult(outcome: string, winner: string?, zombies: number, earned: number, rank: RankInfo?)
 	stopSpectating()
 	takeScreen() -- экран итога — единственное, что на экране
 
@@ -347,6 +379,19 @@ local function showResult(outcome: string, winner: string?, zombies: number, ear
 	-- Заработок за заезд — отдельной строкой под итогом: игрок должен видеть, что
 	-- проигранный заезд тоже что-то принёс, иначе копить на скины кажется бессмысленным.
 	earnedLabel.Text = earned > 0 and string.format("+%d BONES", earned) or ""
+	-- Ранг приходит в пейлоаде (сервер считает его сам — см. MatchManager): без него
+	-- строка пустая, а не «GRAVEDIGGER» из воздуха.
+	if rank then
+		if rank.up then
+			rankLabel.Text = "NEW RANK: " .. rank.name
+			rankLabel.TextColor3 = GOLD
+		else
+			rankLabel.Text = Ranks.progressLine(rank.name, rank.nextName, rank.remaining)
+			rankLabel.TextColor3 = UITheme.Palette.Bone
+		end
+	else
+		rankLabel.Text = ""
+	end
 
 	backdrop.Visible = true
 	backdrop.BackgroundTransparency = 1
@@ -360,6 +405,7 @@ local function showResult(outcome: string, winner: string?, zombies: number, ear
 	title.TextTransparency = 1
 	sub.TextTransparency = 1
 	earnedLabel.TextTransparency = 1
+	rankLabel.TextTransparency = 1
 	titleScale.Scale = 1
 	task.wait()
 	if not backdrop.Visible then
@@ -369,6 +415,7 @@ local function showResult(outcome: string, winner: string?, zombies: number, ear
 	title.TextTransparency = 0
 	sub.TextTransparency = 0
 	earnedLabel.TextTransparency = 0
+	rankLabel.TextTransparency = 0
 
 	titleScale.Scale = 0.35 * titleRest
 	TweenService:Create(titleScale, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = titleRest }):Play()
@@ -379,8 +426,17 @@ matchResult.OnClientEvent:Connect(function(payload)
 	if type(payload) ~= "table" then
 		return
 	end
+	local rank: RankInfo? = nil
+	if type(payload.Rank) == "string" then
+		rank = {
+			name = payload.Rank,
+			up = payload.RankUp == true,
+			nextName = if type(payload.RankNext) == "string" then payload.RankNext else nil,
+			remaining = tonumber(payload.RankRemaining),
+		}
+	end
 	showResult(tostring(payload.Outcome), payload.Winner, tonumber(payload.Zombies) or 0,
-		tonumber(payload.BonesEarned) or 0)
+		tonumber(payload.BonesEarned) or 0, rank)
 end)
 
 -- сброс при старте СЛЕДУЮЩЕГО заезда: ТОЛЬКО на Countdown (новый заезд стартует).

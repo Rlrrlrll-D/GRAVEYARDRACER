@@ -69,6 +69,15 @@ function Ranks.forPlayer(player: Player): Standing
 	return Ranks.standing(Ranks.points(zombies, wins))
 end
 
+-- Строка прогресса для лобби и экрана итогов: «PALLBEARER  ·  45 TO GRAVE ROBBER»,
+-- на верхнем ранге — одно имя. Формат один на оба экрана, чтобы не разъехались.
+function Ranks.progressLine(name: string, nextName: string?, remaining: number?): string
+	if nextName and remaining then
+		return string.format("%s  ·  %d TO %s", name, math.max(0, remaining), nextName)
+	end
+	return name
+end
+
 -- Номер ранга по имени (для гейтов в каталоге: «не ниже PALLBEARER»).
 function Ranks.indexOf(name: string): number?
 	for i, tier in tiers do

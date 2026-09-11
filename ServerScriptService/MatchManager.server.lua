@@ -35,6 +35,7 @@ local RaceScene = require(script.Parent:WaitForChild("RaceScene"))
 local PlayerFlow = require(script.Parent:WaitForChild("PlayerFlow"))
 local Economy = require(script.Parent:WaitForChild("Economy"))
 local Badges = require(script.Parent:WaitForChild("Badges"))
+local Ranks = require(ReplicatedStorage:WaitForChild("Ranks"))
 
 local cfg = GameConfig.Race
 local econ = GameConfig.Economy
@@ -531,15 +532,28 @@ local function runResults(winner: Player?, winnerName: string?, session: RaceCor
 		-- что про жизни, срабатывает как раз на потере первой). PlayerData подберёт
 		-- атрибут при сохранении, и на другом устройстве подсказки не вернутся.
 		plr:SetAttribute("Onboarded", true)
+		local raceZombies = (plr:GetAttribute("RaceZombies") :: number?) or 0
+		-- РАНГ — В ПЕЙЛОАДЕ, А НЕ ПО АТРИБУТАМ НА КЛИЕНТЕ. Wins только что вырос, и
+		-- порядок «атрибут доехал раньше ремоута» движок не обещает: клиент, считая
+		-- сам, мог бы показать ещё старый ранг. Ранг ДО заезда восстанавливаем из
+		-- нынешних очков: ZombiesDefeated за заезд вырос ровно на RaceZombies, Wins —
+		-- на одну победу; отдельного снимка на старте не нужно.
+		local rankNow = Ranks.forPlayer(plr)
+		local rankBefore = Ranks.standing(rankNow.points - raceZombies
+			- (outcome == "won" and GameConfig.Ranks.WinPoints or 0))
 		matchResult:FireClient(plr, {
 			Outcome = outcome,
 			Winner = winnerName,
 			-- ЗА ЗАЕЗД, а не за всё время: это экран итогов ГОНКИ. Раньше сюда уходил
 			-- накопительный ZombiesDefeated, и после заезда с пятью сбитыми игрок видел
 			-- общий счёт за все сессии, поданный как результат гонки.
-			Zombies = (plr:GetAttribute("RaceZombies") :: number?) or 0,
+			Zombies = raceZombies,
 			BonesEarned = Economy.balance(plr) - before,
 			Bones = Economy.balance(plr),
+			Rank = rankNow.name,
+			RankUp = rankNow.index > rankBefore.index,
+			RankNext = rankNow.nextName, -- nil на верхнем ранге
+			RankRemaining = rankNow.remaining,
 		})
 	end
 	-- 2) держим экран итогов, затем ВСЕХ участников разом в лобби

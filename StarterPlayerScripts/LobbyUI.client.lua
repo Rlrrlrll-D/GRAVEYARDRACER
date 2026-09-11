@@ -22,6 +22,7 @@ local Net = require(ReplicatedStorage:WaitForChild("Net"))
 local UITheme = require(ReplicatedStorage:WaitForChild("UITheme"))
 local GameState = require(ReplicatedStorage:WaitForChild("GameState"))
 local PlateArt = require(ReplicatedStorage:WaitForChild("PlateArt"))
+local Ranks = require(ReplicatedStorage:WaitForChild("Ranks"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -111,6 +112,8 @@ local TITLE_SIZE = 100 -- потолок TextSize; крупнее делает �
 local TITLE_H = 300 -- полоса под тайтл, единиц вёрстки
 local TITLE_FILL = 0.63 -- какую долю ширины занимают буквы (2026-08-28: было 0.55, юзер — «увеличь немного»)
 local STATUS_GAP = 20 -- отбивка строки статуса от букв тайтла
+local RANK_H = 38 -- строка ранга под статусом: на кегль меньше его 52 (макет одобрен 2026-09-11)
+local RANK_GAP = 2 -- почти вплотную: коробка статуса 52 при буквах ~40, просвет даёт сама коробка
 
 local titleBox = Instance.new("Frame") -- полоса фиксированной высоты: вёрстка ниже от неё не зависит
 titleBox.Name = "TitleBox"
@@ -136,6 +139,7 @@ title.Parent = titleBox
 -- Строку статуса ставит тот же расчёт: её место зависит от того, насколько крупным
 -- вышел тайтл. Объявлена заранее, создаётся ниже.
 local statusLabel: TextLabel? = nil
+local rankLabel: TextLabel? = nil
 
 -- Ширину букв при TextSize = 100 движок сообщает только после кадра отрисовки,
 -- поэтому меряем на множителе 1 и на этот кадр прячем надпись — иначе она мигнёт
@@ -163,6 +167,10 @@ local function fitTitle()
 		local lineH = TITLE_SIZE * titleZoom.Scale
 		local lettersBottom = (TITLE_H + lineH) / 2 - lineH * 0.1 + STATUS_GAP
 		s.Position = UDim2.new(0.22, 0, 0, math.floor(lettersBottom))
+		local r = rankLabel
+		if r then
+			r.Position = s.Position + UDim2.fromOffset(0, s.Size.Y.Offset + RANK_GAP)
+		end
 	end
 end
 
@@ -179,6 +187,35 @@ status.TextScaled = true
 UITheme.applyText(status, { color = UITheme.Palette.Bone })
 status.Parent = menuBlock
 statusLabel = status
+
+-- Ранг под статусом (PLAN_SHOP §4): «PALLBEARER  ·  45 TO GRAVE ROBBER». Считается
+-- из атрибутов ZombiesDefeated/Wins — они реплицируются сами, и после заезда строка
+-- обновляется без ремоута. До загрузки записи атрибутов нет — тогда строка пустая,
+-- а не «GRAVEDIGGER» на секунду у ветерана.
+local rank = Instance.new("TextLabel")
+rank.Name = "Rank"
+rank.Size = UDim2.new(0.56, 0, 0, RANK_H)
+rank.Position = status.Position + UDim2.fromOffset(0, status.Size.Y.Offset + RANK_GAP)
+rank.BackgroundTransparency = 1
+rank.Text = ""
+rank.TextScaled = true
+UITheme.applyText(rank, { color = UITheme.Palette.Bone })
+rank.TextTransparency = 0.25 -- тише статуса: это справка, а не призыв
+rank.Parent = menuBlock
+rankLabel = rank
+
+local function renderRank()
+	if player:GetAttribute("Wins") == nil and player:GetAttribute("ZombiesDefeated") == nil then
+		rank.Text = ""
+		return
+	end
+	local s = Ranks.forPlayer(player)
+	rank.Text = Ranks.progressLine(s.name, s.nextName, s.remaining)
+end
+for _, attr in { "ZombiesDefeated", "Wins" } do
+	player:GetAttributeChangedSignal(attr):Connect(renderRank)
+end
+renderRank()
 
 -- Тайтл померить можно только после того, как он попал в отрисовку; заодно расчёт
 -- поставит на место строку статуса.
