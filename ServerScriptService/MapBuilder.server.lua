@@ -57,30 +57,90 @@ end
 
 local templates = ServerStorage:FindFirstChild("MapTemplates")
 
--- ЧИСТКА ШАБЛОНОВ ОТ СКРИПТОВ, ПРИЕХАВШИХ ИЗ СТОРА.
--- Модели из Creator Store таскают внутри загрузчики текстур (`Package` у пучка травы,
--- `qTexture` у DeadTree_C). Первым же делом они делают `require(<asset id>)`, а это в
--- нашем месте запрещено — «lacking capability LoadUnownedAsset». Скрипт умирает на
--- этой строке, НИЧЕГО применить не успевает (вид держится на MeshId + Color + Material),
--- зато каждый клон пишет ошибку в консоль: травы под 700 кустов — под 700 ошибок за
--- сессию, и столько же живых Script с четырёхсекундным WaitForChild.
--- Чистим шаблоны один раз при старте, чтобы это не вернулось при переимпорте ассета.
-local function stripStoreScripts(root: Instance): number
-	local killed = 0
-	for _, d in root:GetDescendants() do
-		if d:IsA("LuaSourceContainer") then
-			d:Destroy()
-			killed += 1
+-- ЧИСТКА ШАБЛОНОВ ОТ МУСОРА, ПРИЕХАВШЕГО ИЗ СТОРА.
+-- 1) Скрипты. Модели из Creator Store таскают внутри загрузчики текстур (`Package` у
+-- пучка травы, `qTexture` у DeadTree_C). Первым же делом они делают `require(<asset id>)`,
+-- а это в нашем месте запрещено — «lacking capability LoadUnownedAsset». Скрипт умирает
+-- на этой строке, НИЧЕГО применить не успевает (вид держится на MeshId + Color +
+-- Material), зато каждый клон пишет ошибку в консоль: травы под 700 кустов — под 700
+-- ошибок за сессию, и столько же живых Script с четырёхсекундным WaitForChild.
+--
+-- 2) Пустые инстансы (2026-09-11, паузы «Gameplay paused» на телефоне). Под стримингом
+-- клиент платит за КАЖДЫЙ инстанс, а не только за деталь: замер по трассе дал 6861
+-- инстансов в декоре, из них ~27% — ничего не рисующий и ничего не держащий балласт:
+--   • Weld между заякоренными деталями (Tombstone_C: 7 деталей + 8 сварок, ×122 клона
+--     = 976 сварок на карте) — заякоренная деталь стоит и без сварки;
+--   • ThumbnailCamera и FluidForceSensor (Tombstone_F, ×90) — превью для стора и датчик,
+--     который на якоре никогда ничего не измерит; у сенсора детали лежат ВНУТРИ, их
+--     поднимаем к его родителю;
+--   • обёртки-Model без своего PrimaryPart/атрибутов/тегов (Model → Model → детали у
+--     камней C/F/G/H/J и у ограды): лишний инстанс на каждый из ~690 клонов; детали
+--     поднимаем на уровень выше.
+-- Всё это множится на число клонов, поэтому чистим ШАБЛОН один раз при старте, а не
+-- каждый клон. Мировые CFrame деталей при переподвесе не меняются, пивот корня
+-- модели — свойство самой модели, от детей не зависит; dropToGround меряет низ по
+-- деталям, а не по обёрткам. Сварки снимаем только там, где ВСЕ детали шаблона на
+-- якоре: незаякоренную сборку сварка держит по-настоящему.
+local function stripStoreJunk(root: Instance): { [string]: number }
+	local n = { scripts = 0, joints = 0, cameras = 0, sensors = 0, wrappers = 0 }
+	for _, tmpl in root:GetChildren() do
+		local allAnchored = true
+		for _, d in tmpl:GetDescendants() do
+			if d:IsA("BasePart") and not d.Anchored then
+				allAnchored = false
+				break
+			end
+		end
+		-- Датчики и камеры — до обёрток: у сенсора детали внутри, их сначала спасаем.
+		for _, d in tmpl:GetDescendants() do
+			if d:IsA("LuaSourceContainer") then
+				d:Destroy()
+				n.scripts += 1
+			elseif d:IsA("Camera") then
+				d:Destroy()
+				n.cameras += 1
+			elseif d:IsA("FluidForceSensor") then
+				for _, child in d:GetChildren() do
+					child.Parent = d.Parent
+				end
+				d:Destroy()
+				n.sensors += 1
+			elseif allAnchored and d:IsA("JointInstance") then
+				d:Destroy()
+				n.joints += 1
+			end
+		end
+		-- Обёртки: Model внутри шаблона (сам шаблон — корень, его не трогаем), у которой
+		-- нет ничего своего — ни PrimaryPart, ни атрибутов, ни тегов; имя бывает любое
+		-- («Model», «Cross», «Wrought Iron Fence (Black)»). Раскрываем, пока есть.
+		local function isWrapper(inst: Instance): boolean
+			if not inst:IsA("Model") or inst == tmpl or inst.PrimaryPart then
+				return false
+			end
+			if next(inst:GetAttributes()) ~= nil or #CollectionService:GetTags(inst) > 0 then
+				return false
+			end
+			return true
+		end
+		-- GetDescendants идёт сверху вниз: внешняя обёртка раскрывается раньше вложенной,
+		-- и та к своему ходу уже висит прямо на шаблоне.
+		for _, d in tmpl:GetDescendants() do
+			if isWrapper(d) then
+				for _, child in d:GetChildren() do
+					child.Parent = d.Parent
+				end
+				d:Destroy()
+				n.wrappers += 1
+			end
 		end
 	end
-	return killed
+	return n
 end
 
 if templates then
-	local killed = stripStoreScripts(templates)
-	if killed > 0 then
-		print(`[MapBuilder] Из шаблонов убрано скриптов-загрузчиков: {killed}.`)
-	end
+	local n = stripStoreJunk(templates)
+	print(("[MapBuilder] Шаблоны почищены: скриптов %d, сварок %d, камер %d, датчиков %d, обёрток %d."):format(
+		n.scripts, n.joints, n.cameras, n.sensors, n.wrappers))
 end
 
 local raycastParams = RaycastParams.new()
