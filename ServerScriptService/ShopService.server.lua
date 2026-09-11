@@ -170,6 +170,12 @@ local function doBuy(player: Player, item: ShopCatalog.Item)
 		reply(player, false, item.id, "already owned")
 		return
 	end
+	-- Гейт по рангу — ДО списания: витрина такой товар прячет, но клиенту верить
+	-- нельзя, «buy» может прилететь и мимо неё.
+	if ShopCatalog.lockedByRank(item, player) then
+		reply(player, false, item.id, "reach " .. tostring(item.minRank) .. " first")
+		return
+	end
 	if not Economy.spend(player, item.bones, "магазин: " .. item.id) then
 		reply(player, false, item.id, "not enough bones")
 		return

@@ -170,6 +170,7 @@ layout.Parent = list
 
 type Row = {
 	item: ShopCatalog.Item,
+	holder: Frame, -- вся строка: прячется целиком, когда товар закрыт рангом
 	button: TextButton,
 	caption: TextLabel,
 }
@@ -195,6 +196,9 @@ end
 local function renderRow(row: Row)
 	local item = row.item
 	local owned = state.owned[item.id] == true
+	-- Закрытое рангом — не на витрине вовсе (PLAN_SHOP §4): строка схлопывается,
+	-- UIListLayout невидимые не считает. Купленное показываем при любом ранге.
+	row.holder.Visible = owned or not ShopCatalog.lockedByRank(item, player)
 	if owned then
 		if item.kind == "skin" or item.kind == "body" then
 			-- Кузов и краска — надеваемые слоты, и надет всегда ровно один из каждого.
@@ -265,7 +269,7 @@ local function buildRow(item: ShopCatalog.Item, index: number)
 	caption.ZIndex = 4
 	button.Parent = holder
 
-	local row: Row = { item = item, button = button, caption = caption }
+	local row: Row = { item = item, holder = holder, button = button, caption = caption }
 	table.insert(rows, row)
 
 	button.Activated:Connect(function()
@@ -386,6 +390,13 @@ purchaseResult.OnClientEvent:Connect(function(r)
 		end
 	end)
 end)
+
+-- Ранг считается из атрибутов ZombiesDefeated/Wins (Ranks.forPlayer) — они
+-- реплицируются сами, и когда после заезда ранг вырос, закрытые строки открываются
+-- без запроса к серверу.
+for _, attr in { "ZombiesDefeated", "Wins" } do
+	player:GetAttributeChangedSignal(attr):Connect(renderAll)
+end
 
 -- Панель видна ровно тогда, когда меню просит именно её. При открытии просим
 -- свежее состояние: кости могли вырасти в заезде, пока витрина была закрыта.

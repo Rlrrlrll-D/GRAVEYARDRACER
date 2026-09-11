@@ -20,6 +20,10 @@
 -- приносит около 220 костей, проигранный, но доеханный — около 145. То есть скин за
 -- 1500 — это примерно десяток заездов.
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Ranks = require(ReplicatedStorage:WaitForChild("Ranks"))
+
 local ShopCatalog = {}
 
 export type Item = {
@@ -35,6 +39,7 @@ export type Item = {
 	bodyTemplate: string?, -- кузов: имя шаблона в ServerStorage.BodyTemplates
 	grantBones: number?, -- расходник: сколько костей выдать
 	lives: number?, -- расходник: сколько жизней добавить в заезде
+	minRank: string?, -- ранг (имя из GameConfig.Ranks), ниже которого товар скрыт и не продаётся
 }
 
 -- Скин по умолчанию есть у всех и не продаётся: с него игра начинается, и на него
@@ -58,7 +63,7 @@ ShopCatalog.Items = {
 	},
 	{
 		id = "coffin", name = "COFFIN", blurb = "you will not need it later",
-		kind = "body", bones = 3500, bodyTemplate = "Coffin",
+		kind = "body", bones = 3500, bodyTemplate = "Coffin", minRank = "PALLBEARER",
 	},
 
 	-- // Скины кузова -------------------------------------------------------
@@ -122,6 +127,18 @@ function ShopCatalog.isConfigured(item: Item): boolean
 	return (item.bones ~= nil and item.bones > 0)
 		or (item.gamePass ~= nil and item.gamePass > 0)
 		or (item.product ~= nil and item.product > 0)
+end
+
+-- ГЕЙТ ПО РАНГУ (PLAN_SHOP §4): товар с `minRank` до этого ранга не показывается и
+-- не продаётся — первая крупная покупка не должна случиться в первые десять минут,
+-- иначе цель кончится, не начавшись. Уже купленное гейт не трогает: владение
+-- решает само. Проверяют и витрина, и сервер — по одному и тому же Ranks.
+function ShopCatalog.lockedByRank(item: Item, player: Player): boolean
+	local need = item.minRank and Ranks.indexOf(item.minRank)
+	if not need then
+		return false
+	end
+	return Ranks.forPlayer(player).index < need
 end
 
 -- Что показывать на витрине. Ненастроенные товары скрыты: пустая плашка «скоро»

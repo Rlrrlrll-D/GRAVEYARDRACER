@@ -71,6 +71,12 @@ export type GameConfigType = {
 		BonesPerWin: number, -- за победу, СВЕРХ BonesPerFinish
 		BonesPerCheckpoint: number, -- за пройденный чекпоинт: капает и тому, кто не выиграл
 	},
+	-- Ранги: считаются из накопительных статов (ZombiesDefeated, Wins), отдельно не
+	-- хранятся и не продаются. Пороги — по возрастанию, первый ранг с нуля.
+	Ranks: {
+		WinPoints: number, -- сколько очков даёт одна победа (зомби — по одному)
+		Tiers: { { name: string, points: number } },
+	},
 }
 
 local GameConfig: GameConfigType = {
@@ -178,6 +184,19 @@ local GameConfig: GameConfigType = {
 		BonesPerFinish = 25,
 		BonesPerWin = 75,
 		BonesPerCheckpoint = 2,
+	},
+	Ranks = {
+		-- очки = ZombiesDefeated + WinPoints × Wins (PLAN_SHOP §4). Победный заезд
+		-- со стрельбой ≈ 15 зомби + 25 = 40 очков: PALLBEARER — за 3 победных заезда
+		-- или за сотню сбитых, BONE KING — за десятки вечеров.
+		WinPoints = 25,
+		Tiers = {
+			{ name = "GRAVEDIGGER", points = 0 },
+			{ name = "PALLBEARER", points = 100 },
+			{ name = "GRAVE ROBBER", points = 400 },
+			{ name = "REAPER", points = 1200 },
+			{ name = "BONE KING", points = 3000 },
+		},
 	},
 }
 
