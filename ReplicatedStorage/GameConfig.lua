@@ -196,18 +196,21 @@ local GameConfig: GameConfigType = {
 		-- Места: top (капот / крышка гроба), left, right (борта), rear (корма) — все
 		-- четыре, что юзер отметил на листах ракурсов, на КАЖДОЙ ступени с черепом
 		-- (2026-09-11: «я не увидел черепов сзади и сбоку — пофикси»). Ранг различает
-		-- цвет из RankSkull.Colors: bone у младших, gold у BONE KING. Нулевая — без черепа.
+		-- цвет — лестница RankSkull.Colors от кости к золоту. Нулевая — без черепа.
 		Tiers = {
 			{ name = "GRAVEDIGGER", points = 0 },
 			{ name = "PALLBEARER", points = 100, skull = { zones = { "top", "left", "right", "rear" }, color = "bone" } },
-			{ name = "GRAVE ROBBER", points = 400, skull = { zones = { "top", "left", "right", "rear" }, color = "bone" } },
-			{ name = "REAPER", points = 1200, skull = { zones = { "top", "left", "right", "rear" }, color = "bone" } },
+			{ name = "GRAVE ROBBER", points = 400, skull = { zones = { "top", "left", "right", "rear" }, color = "ivory" } },
+			{ name = "REAPER", points = 1200, skull = { zones = { "top", "left", "right", "rear" }, color = "amber" } },
 			{ name = "BONE KING", points = 3000, skull = { zones = { "top", "left", "right", "rear" }, color = "gold" } },
 		},
 		-- Режим наложения черепа на текстуру кузова (multiply / overlay / screen /
-		-- softlight / normal) и плотность. Multiply — выбор юзера по макетам 2026-09-11.
-		SkullMode = "multiply",
-		SkullOpacity = 1.0,
+		-- softlight / lineardodge / normal) и плотность. Путь выбора 2026-09-11: Multiply
+		-- (нравилось взаимодействие с текстурой) → «нужен светлый череп на тёмном фоне»
+		-- (Multiply только темнит) → «и чтобы текстура пробивала через цвет» (Screen и
+		-- Add выбеливают). Overlay: череп светлее кузова, зерно ржавчины внутри видно.
+		SkullMode = "overlay",
+		SkullOpacity = 0.8, -- «сделай черепа чуть прозрачными» (юзер, 2026-09-11)
 	},
 }
 
