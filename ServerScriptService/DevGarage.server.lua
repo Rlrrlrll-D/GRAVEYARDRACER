@@ -101,7 +101,7 @@ local function build(player: Player)
 	floor.Color = Color3.fromRGB(38, 36, 40)
 	floor.Parent = model
 
-	-- свет как у дорожных фонарей: без него на высоте одна луна, кузова чёрные
+	-- два мягких фонаря площадки: без них на высоте одна луна, кузова ночью чёрные
 	for _, dx in { -w / 3, w / 3 } do
 		local lampPart = Instance.new("Part")
 		lampPart.Name = "Lamp"
@@ -112,10 +112,10 @@ local function build(player: Player)
 		lampPart.CFrame = CFrame.new(origin + Vector3.new(dx, 14, 0))
 		lampPart.Parent = model
 		local light = Instance.new("PointLight")
-		light.Brightness = 1.6
+		light.Brightness = 0.8
 		light.Range = 60
 		light.Color = Color3.fromRGB(255, 214, 160)
-		light.Shadows = true
+		light.Shadows = false
 		light.Parent = lampPart
 	end
 
@@ -135,7 +135,11 @@ local function build(player: Player)
 			body.Name = "BuggyBody"
 			body:SetAttribute("BodyId", bodyItem.id)
 			for _, c in body:GetDescendants() do
-				if c:IsA("BasePart") then
+				-- фары шаблона (SpotLight в HeadlightL/R): десять кузовов светили друг на
+				-- друга, «модели светятся» (юзер 2026-09-12) — в гараже свет только сцены
+				if c:IsA("Light") then
+					c:Destroy()
+				elseif c:IsA("BasePart") then
 					c.Anchored = true
 					c.CanCollide = false
 					if skin.color then
