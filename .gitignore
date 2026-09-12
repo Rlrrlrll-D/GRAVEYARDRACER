@@ -10,3 +10,7 @@ Desktop.ini
 *.tmp
 *.bak
 *~
+
+# Blender: выход генераторов (FBX для импорта в Studio)
+tools/blender/_out/
+__pycache__/

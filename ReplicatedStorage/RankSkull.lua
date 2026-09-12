@@ -49,6 +49,10 @@ export type Zone = {
 
 export type BodySpec = {
 	atlas: number, -- сторона квадратного атласа, px
+	-- сила краски: 1 = краска домножает холст целиком, меньше — холст просвечивает
+	-- (гроб 0.65: BLOOD на досках уходил в чистый тёмно-красный, юзер 2026-09-12 —
+	-- «прижать к тёмно-коричневому»)
+	paintStrength: number?,
 	texture: string?, -- текстура кузова (nil = белый холст)
 	zones: { [string]: Zone },
 }
@@ -63,7 +67,7 @@ RankSkull.Bodies = {
 		atlas = 1024,
 		texture = "rbxassetid://135253107984920",
 		zones = {
-			top   = { u0 = 0.015, v0 = 0.635, u1 = 0.376, v1 = 0.914, rotated = false, studsW = 4.63, studsH = 3.57, ta = 0.5,  tb = 0.5,  height = 3.4, flip = true, mirror = true },
+			top   = { u0 = 0.015, v0 = 0.635, u1 = 0.376, v1 = 0.914, rotated = false, studsW = 4.63, studsH = 3.57, ta = 0.5,  tb = 0.5,  height = 3.1, flip = true, mirror = true },
 			rear  = { u0 = 0.406, v0 = 0.635, u1 = 0.802, v1 = 0.846, rotated = false, studsW = 5.07, studsH = 2.70, ta = 0.5,  tb = 0.27, height = 1.25 },
 			left  = { u0 = 0.635, v0 = 0.015, u1 = 0.794, v1 = 0.588, rotated = true,  studsW = 9.77, studsH = 2.71, ta = 0.50, tb = 0.26, height = 1.2 },
 			right = { u0 = 0.824, v0 = 0.015, u1 = 0.982, v1 = 0.586, rotated = true,  studsW = 9.74, studsH = 2.70, ta = 0.50, tb = 0.26, height = 1.2 },
@@ -73,10 +77,11 @@ RankSkull.Bodies = {
 	-- V к носу (череп у носа, tb ≈ 0.68, там же стоял крест); борта: «left» ta = 0 у
 	-- кормы, «right» — у носа; заднее колесо на ta ≈ 0.34 от кормы.
 	coffin = {
-		atlas = 512,
-		texture = nil,
+		atlas = 1024,
+		texture = nil, -- доски (tools/blender/coffin_texture.py): ID после импорта FBX юзером
+		paintStrength = 0.65,
 		zones = {
-			top   = { u0 = 0.015, v0 = 0.585, u1 = 0.366, v1 = 0.942, rotated = false, studsW = 6.00, studsH = 6.10, ta = 0.5,  tb = 0.68, height = 2.8, flip = true, mirror = true },
+			top   = { u0 = 0.015, v0 = 0.585, u1 = 0.366, v1 = 0.942, rotated = false, studsW = 6.00, studsH = 6.10, ta = 0.5,  tb = 0.47, height = 2.8, flip = true, mirror = true },
 			rear  = { u0 = 0.396, v0 = 0.585, u1 = 0.659, v1 = 0.784, rotated = false, studsW = 4.48, studsH = 3.40, ta = 0.5,  tb = 0.42, height = 2.2 },
 			left  = { u0 = 0.585, v0 = 0.015, u1 = 0.758, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.30, tb = 0.45, height = 1.9 },
 			right = { u0 = 0.788, v0 = 0.015, u1 = 0.960, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.70, tb = 0.45, height = 1.9 },
@@ -453,8 +458,9 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	local size = base.size
 	local buf = buffer.create(size * size * 4)
 	buffer.copy(buf, 0, base.buf)
-	-- краска: домножить каждый пиксель (у гроба база белая — выйдет ровный цвет)
-	local pr, pg, pb = paint.R, paint.G, paint.B
+	-- краска: домножить каждый пиксель; paintStrength < 1 подмешивает белый — холст просвечивает
+	local ps = spec.paintStrength or 1
+	local pr, pg, pb = 1 - (1 - paint.R) * ps, 1 - (1 - paint.G) * ps, 1 - (1 - paint.B) * ps
 	if pr < 0.999 or pg < 0.999 or pb < 0.999 then
 		for i = 0, size * size - 1 do
 			local o = i * 4
@@ -571,6 +577,25 @@ function RankSkull.apply(body: MeshPart, img: EditableImage?)
 	else
 		local spec = RankSkull.Bodies[body:GetAttribute("BodyId") :: any]
 		body.TextureContent = if spec and spec.texture then Content.fromAssetId(tonumber(spec.texture:match("%d+")) :: number) else Content.none
+	end
+end
+
+-- Дев: подсунуть базу кузова сырыми пикселями (RGBA8, строки сверху) — предпросмотр
+-- текстуры в Studio до загрузки ассета (тестура гроба, 2026-09-12). Композиты этого
+-- кузова забываются: ненадетые — уничтожаются, надетые доживут до переодевания.
+function RankSkull.setBase(bodyId: string, size: number, buf: buffer)
+	baseCache[bodyId] = { size = size, buf = buf }
+	baseTried[bodyId] = true
+	local prefix = bodyId .. "|"
+	for key, img in imageCache do
+		if key:sub(1, #prefix) == prefix then
+			if userCount(img) == 0 then
+				forget(img)
+			else
+				imageCache[key] = nil
+				keyOf[img] = nil
+			end
+		end
 	end
 end
 

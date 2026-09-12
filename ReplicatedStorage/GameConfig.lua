@@ -214,7 +214,7 @@ local GameConfig: GameConfigType = {
 		-- ЧИСЛА ПОДОБРАНЫ ЮЗЕРОМ НА ЭКРАНЕ (SkullTune, 2026-09-12) и зашиты как есть;
 		-- крутить снова — F3 в Studio, P печатает строку для переноса сюда.
 		SkullMode = "softlight",
-		SkullOpacity = 0.64,
+		SkullOpacity = 0.72,
 		SkullLift = 0.11,
 	},
 }
