@@ -666,12 +666,17 @@ local function orbitStep()
 	camera.CFrame = CFrame.new(orbit.target) * rot * CFrame.new(0, 0, orbit.dist)
 end
 
+-- Сдвиг мыши считаем сами по Position: InputObject.Delta при незалоченном курсоре
+-- пуст — ПКМ/СКМ «не работали», колесо (Position.Z) работало (2026-09-12).
+local lastMouse: Vector3? = nil
 UserInputService.InputChanged:Connect(function(input)
 	if not garageOn then
 		return
 	end
 	if input.UserInputType == Enum.UserInputType.MouseMovement then
-		local d = input.Delta
+		local pos = input.Position
+		local d = if lastMouse then pos - lastMouse else Vector3.zero
+		lastMouse = pos
 		if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
 			orbit.yaw -= d.X * 0.006
 			orbit.pitch = math.clamp(orbit.pitch - d.Y * 0.006, -1.45, 0.4)
@@ -681,6 +686,11 @@ UserInputService.InputChanged:Connect(function(input)
 		end
 	elseif input.UserInputType == Enum.UserInputType.MouseWheel then
 		orbit.dist = math.clamp(orbit.dist - input.Position.Z * 6, 8, 250)
+	end
+end)
+UserInputService.InputBegan:Connect(function(input)
+	if garageOn and (input.UserInputType == Enum.UserInputType.MouseButton2 or input.UserInputType == Enum.UserInputType.MouseButton3) then
+		lastMouse = input.Position
 	end
 end)
 
