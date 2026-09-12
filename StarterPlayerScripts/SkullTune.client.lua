@@ -93,6 +93,17 @@ end
 
 local active = false
 
+-- Выключатель зомби — тот же ремоут, что у NeonTune (PhotoModeService, только Studio).
+local zombiesOff = false
+local zombiesRemote: RemoteEvent? = nil
+task.spawn(function()
+	local remotes = ReplicatedStorage:WaitForChild("Remotes", 20)
+	local r = remotes and remotes:WaitForChild("DevZombies", 20)
+	if r and r:IsA("RemoteEvent") then
+		zombiesRemote = r
+	end
+end)
+
 -- // Панель ------------------------------------------------------------------
 local gui = Instance.new("ScreenGui")
 gui.Name = "SkullTune"
@@ -253,7 +264,7 @@ local function makeSlider(order: number, name: string, max: number, get: () -> n
 	end)
 end
 
-makeLabel(1, "SKULL TUNE   (F3, \\ сброс, P печать)", 15)
+makeLabel(1, "SKULL TUNE   (F3, \\ сброс, P печать, Z зомби)", 15)
 makeButton(2, function()
 	return "MODE: " .. MODES[state.modeIndex]
 end, function()
@@ -458,6 +469,15 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		reset()
 	elseif input.KeyCode == Enum.KeyCode.P then
 		print("[SkullTune] " .. summary())
+	elseif input.KeyCode == Enum.KeyCode.Z then
+		local r = zombiesRemote
+		if not r then
+			print("[SkullTune] ремоута DevZombies нет — он только в Studio")
+			return
+		end
+		zombiesOff = not zombiesOff
+		r:FireServer(zombiesOff)
+		print("[SkullTune] зомби: " .. (zombiesOff and "ВЫКЛЮЧЕНЫ" or "включены"))
 	end
 end)
 
