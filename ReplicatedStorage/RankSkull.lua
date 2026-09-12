@@ -346,7 +346,35 @@ end
 -- багги был бы некрашеным, а с первым черепом вдруг перекрашивался.
 -- reuse — картинка, которую кузов носит сейчас: если её больше никто не носит, новый
 -- композит пишется в неё на месте (см. пул выше).
-function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: string?, mode: string, opacity: number, tint: Color3?, lift: number?, reuse: EditableImage?): EditableImage?
+-- patch — пятнистая краска (ShopCatalog.Item.patchy): tint тогда — базовая ржавчина,
+-- а patch.color ложится локальными пятнами по шуму на долю coverage площади.
+export type Patch = { color: Color3, coverage: number, scale: number, seed: number }
+
+-- Порог шума под заданную долю площади: шум не равномерен, поэтому порог не считаем,
+-- а меряем — 4096 проб по всему атласу, берём квантиль. Один раз на набор параметров.
+local thrCache: { [string]: number } = {}
+local function patchNoise(u: number, v: number, scale: number, seed: number): number
+	-- две октавы: крупные пятна + рваный край
+	return math.noise(u * scale, v * scale, seed) + 0.5 * math.noise(u * scale * 2.1 + 3.7, v * scale * 2.1 + 1.3, seed + 11)
+end
+local function patchThreshold(p: Patch): number
+	local k = ("%.3f|%.2f|%d"):format(p.coverage, p.scale, p.seed)
+	local ready = thrCache[k]
+	if ready then
+		return ready
+	end
+	local samples = table.create(4096)
+	local rng = Random.new(p.seed)
+	for i = 1, 4096 do
+		samples[i] = patchNoise(rng:NextNumber(), rng:NextNumber(), p.scale, p.seed)
+	end
+	table.sort(samples)
+	local idx = math.clamp(math.floor(#samples * (1 - p.coverage) + 0.5), 1, #samples)
+	thrCache[k] = samples[idx]
+	return samples[idx]
+end
+
+function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: string?, mode: string, opacity: number, tint: Color3?, lift: number?, reuse: EditableImage?, patch: Patch?): EditableImage?
 	local spec = RankSkull.Bodies[bodyId]
 	if not spec then
 		return nil
@@ -357,7 +385,8 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	local paint = tint or Color3.new(1, 1, 1)
 	local up = lift or 0
 	-- в ключе сам цвет, а не имя: SkullTune крутит RankSkull.Colors[name] на живую
-	local key = ("%s|%s|%s|%s|%.2f|%.2f|%s"):format(bodyId, table.concat(names, ","), color and color:ToHex() or "-", mode, opacity, up, paint:ToHex())
+	local patchKey = if patch then ("%s|%.3f|%.2f|%d"):format(patch.color:ToHex(), patch.coverage, patch.scale, patch.seed) else "-"
+	local key = ("%s|%s|%s|%s|%.2f|%.2f|%s|%s"):format(bodyId, table.concat(names, ","), color and color:ToHex() or "-", mode, opacity, up, paint:ToHex(), patchKey)
 	local ready = imageCache[key]
 	if ready then
 		return ready
@@ -377,6 +406,30 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 			buffer.writeu8(buf, o, math.floor(buffer.readu8(buf, o) * pr + 0.5))
 			buffer.writeu8(buf, o + 1, math.floor(buffer.readu8(buf, o + 1) * pg + 0.5))
 			buffer.writeu8(buf, o + 2, math.floor(buffer.readu8(buf, o + 2) * pb + 0.5))
+		end
+	end
+	-- Пятна краски (мох): где шум выше порога — цвет краски по яркости базы, край
+	-- мягкий (полоса ±0.06 по шуму), чтобы пятно не резалось по пикселям.
+	if patch then
+		local thr = patchThreshold(patch)
+		local cr, cg, cb = patch.color.R, patch.color.G, patch.color.B
+		local inv = 1 / size
+		for y = 0, size - 1 do
+			local v = (y + 0.5) * inv
+			for x = 0, size - 1 do
+				local n = patchNoise((x + 0.5) * inv, v, patch.scale, patch.seed)
+				local a = math.clamp((n - thr + 0.06) / 0.12, 0, 1)
+				if a > 0 then
+					local o = (y * size + x) * 4
+					local br, bg, bb = buffer.readu8(buf, o) / 255, buffer.readu8(buf, o + 1) / 255, buffer.readu8(buf, o + 2) / 255
+					-- цвет мха × яркость базы: зерно ржавчины остаётся и внутри пятна
+					local lum = 0.6 + (0.3 * br + 0.59 * bg + 0.11 * bb)
+					local mr, mg, mb = math.min(1, cr * lum), math.min(1, cg * lum), math.min(1, cb * lum)
+					buffer.writeu8(buf, o, math.floor((br + (mr - br) * a) * 255 + 0.5))
+					buffer.writeu8(buf, o + 1, math.floor((bg + (mg - bg) * a) * 255 + 0.5))
+					buffer.writeu8(buf, o + 2, math.floor((bb + (mb - bb) * a) * 255 + 0.5))
+				end
+			end
 		end
 	end
 	if color then

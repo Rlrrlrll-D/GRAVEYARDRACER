@@ -21,6 +21,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local Ranks = require(ReplicatedStorage:WaitForChild("Ranks"))
 local RankSkull = require(ReplicatedStorage:WaitForChild("RankSkull"))
+local ShopCatalog = require(ReplicatedStorage:WaitForChild("ShopCatalog"))
 
 local MODE = GameConfig.Ranks.SkullMode
 local OPACITY = GameConfig.Ranks.SkullOpacity
@@ -60,9 +61,21 @@ local function dress(body: BasePart, driver: Player)
 			zones = { "top", "left", "right", "rear" } -- крутить можно и на нулевом ранге
 		end
 	end
+	-- Краска: сплошная — цвет детали; пятнистая (ShopCatalog.Item.patchy, мох) — база
+	-- ржавчины RUST, а цвет скина ложится пятнами. Подкрутка SkullTune красит сплошь.
+	local tint = (o and o.tint) or body.Color
+	local patch: RankSkull.Patch? = nil
+	if not (o and o.tint) then
+		local skin = ShopCatalog.get(driver:GetAttribute("EquippedSkin"))
+		if skin and skin.patchy and skin.color then
+			local baseSkin = ShopCatalog.get(ShopCatalog.DefaultSkin)
+			tint = (baseSkin and baseSkin.color) or Color3.new(1, 1, 1)
+			patch = { color = skin.color, coverage = skin.patchy.coverage, scale = skin.patchy.scale, seed = skin.patchy.seed }
+		end
+	end
 	local img = RankSkull.compose(bodyId, zones, colorName,
-		(o and o.mode) or MODE, (o and o.opacity) or OPACITY, (o and o.tint) or body.Color, (o and o.lift) or LIFT,
-		RankSkull.worn(body)) -- свою картинку переписываем на месте, а не плодим новые
+		(o and o.mode) or MODE, (o and o.opacity) or OPACITY, tint, (o and o.lift) or LIFT,
+		RankSkull.worn(body), patch) -- свою картинку переписываем на месте, а не плодим новые
 	if not body.Parent then
 		return -- кузов успели заменить, пока читали текстуру
 	end
