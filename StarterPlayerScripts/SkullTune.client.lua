@@ -267,7 +267,7 @@ for i, ch in { "R", "G", "B" } do
 end
 local info = makeLabel(14, "", 11)
 info.TextWrapped = true
-info.Size = UDim2.new(1, 0, 0, 64)
+info.Size = UDim2.new(1, 0, 0, 92)
 
 -- // Применение ----------------------------------------------------------------
 local function tierColor(n: string): Color3
@@ -311,7 +311,15 @@ applyAll = function()
 	for _, f in refreshers do
 		f()
 	end
-	info.Text = summary()
+	-- ПАНЕЛЬ КРАСИТ КАК RUST, а без панели кузов носит НАДЕТУЮ краску. Юзер 2026-09-12:
+	-- «со старта багги зелёное, не то, что настраивал» — на нём была надета GRAVE MOSS.
+	-- Пишем это прямо в панели, чтобы не искать.
+	local worn = tostring(player:GetAttribute("EquippedSkin") or "?")
+	local note = ""
+	if worn ~= ShopCatalog.DefaultSkin then
+		note = "\n!! НАДЕТА КРАСКА " .. string.upper(worn) .. " — без панели кузов такой. Панель красит как RUST: SHOP → RUST → USE"
+	end
+	info.Text = summary() .. note
 end
 
 local function reset()
