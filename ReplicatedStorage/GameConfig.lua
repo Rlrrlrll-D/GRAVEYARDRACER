@@ -75,7 +75,7 @@ export type GameConfigType = {
 	-- хранятся и не продаются. Пороги — по возрастанию, первый ранг с нуля.
 	Ranks: {
 		WinPoints: number, -- сколько очков даёт одна победа (зомби — по одному)
-		Tiers: { { name: string, points: number, skull: { zones: { string }, color: string }? } },
+		Tiers: { { name: string, points: number, skull: { zones: { string }, color: string, shape: string? }? } },
 		SkullMode: string, -- режим наложения черепа на текстуру кузова (см. RankSkull.Modes)
 		SkullOpacity: number,
 		SkullLift: number, -- подъём яркости черепа сверх режима (доля цвета), см. RankSkull
@@ -193,17 +193,20 @@ local GameConfig: GameConfigType = {
 		-- со стрельбой ≈ 15 зомби + 25 = 40 очков: PALLBEARER — за 3 победных заезда
 		-- или за сотню сбитых, BONE KING — за десятки вечеров.
 		WinPoints = 25,
-		-- Череп на кузове (RankSkull): какие места и каким цветом на каждой ступени.
+		-- Череп на кузове (RankSkull): места, цвет и ФОРМА на каждой ступени.
 		-- Места: top (капот / крышка гроба), left, right (борта), rear (корма) — все
-		-- четыре, что юзер отметил на листах ракурсов, на КАЖДОЙ ступени с черепом
-		-- (2026-09-11: «я не увидел черепов сзади и сбоку — пофикси»). Ранг различает
-		-- цвет — лестница RankSkull.Colors от кости к золоту. Нулевая — без черепа.
+		-- четыре, что юзер отметил на листах ракурсов, на КАЖДОЙ ступени
+		-- (2026-09-11: «я не увидел черепов сзади и сбоку — пофикси»).
+		-- РАНГ РАЗЛИЧАЕТ ФОРМА, А НЕ ЦВЕТ (юзер 2026-09-12: «уходим от концепции разных
+		-- цветов в пользу разных черепов»): shape — имя силуэта из SkullShapes
+		-- (skull_range.ai — череп с лентой и именем ранга), цвет у всех один — bone,
+		-- как подобрано в SkullTune. Нулевая ступень тоже с черепом: в векторе он есть.
 		Tiers = {
-			{ name = "GRAVEDIGGER", points = 0 },
-			{ name = "PALLBEARER", points = 100, skull = { zones = { "top", "left", "right", "rear" }, color = "bone" } },
-			{ name = "GRAVE ROBBER", points = 400, skull = { zones = { "top", "left", "right", "rear" }, color = "ivory" } },
-			{ name = "REAPER", points = 1200, skull = { zones = { "top", "left", "right", "rear" }, color = "amber" } },
-			{ name = "BONE KING", points = 3000, skull = { zones = { "top", "left", "right", "rear" }, color = "gold" } },
+			{ name = "GRAVEDIGGER", points = 0, skull = { zones = { "top", "left", "right", "rear" }, color = "bone", shape = "GRAVEDIGGER" } },
+			{ name = "PALLBEARER", points = 100, skull = { zones = { "top", "left", "right", "rear" }, color = "bone", shape = "PALLBEARER" } },
+			{ name = "GRAVE ROBBER", points = 400, skull = { zones = { "top", "left", "right", "rear" }, color = "bone", shape = "GRAVE ROBBER" } },
+			{ name = "REAPER", points = 1200, skull = { zones = { "top", "left", "right", "rear" }, color = "bone", shape = "REAPER" } },
+			{ name = "BONE KING", points = 3000, skull = { zones = { "top", "left", "right", "rear" }, color = "bone", shape = "BONE KING" } },
 		},
 		-- Режим наложения черепа на текстуру кузова (multiply / overlay / screen /
 		-- softlight / lineardodge / normal), плотность и подъём яркости (доля цвета сверх

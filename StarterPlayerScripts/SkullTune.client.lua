@@ -48,6 +48,12 @@ local TOGGLE_KEY = Enum.KeyCode.F3
 local FONT = Enum.Font.Code
 local MODES = { "overlay", "multiply", "screen", "softlight", "lineardodge", "normal" }
 local TIERS = { "bone", "ivory", "amber", "gold" }
+-- Ступени рангов: кнопка TIER перебирает их, на машину идёт ФОРМА ступени (SkullShapes)
+-- и её цвет из конфига (сейчас у всех bone).
+local RANKS = {}
+for _, t in GameConfig.Ranks.Tiers do
+	table.insert(RANKS, t)
+end
 local PATCH_MODES = { "tint", "multiply", "overlay", "screen", "softlight", "lineardodge", "normal" }
 
 -- Исходные значения — чтобы «\» возвращал к конфигу.
@@ -148,6 +154,7 @@ local column: Frame = panel
 
 local refreshers: { () -> () } = {}
 local applyAll -- ниже
+local tierColorName: () -> string -- ниже: ползунки цвета зовут её по имени ступени
 
 local function makeLabel(order: number, text: string, size: number): TextLabel
 	local l = Instance.new("TextLabel")
@@ -271,9 +278,10 @@ end, function()
 	state.modeIndex = state.modeIndex % #MODES + 1
 end)
 makeButton(3, function()
-	return "TIER: " .. TIERS[state.tierIndex]
+	local t = RANKS[state.tierIndex]
+	return "RANK: " .. t.name .. "   цвет " .. tostring(t.skull and t.skull.color or "-")
 end, function()
-	state.tierIndex = state.tierIndex % #TIERS + 1
+	state.tierIndex = state.tierIndex % #RANKS + 1
 end)
 makeSlider(4, "OPACITY", 1, function()
 	return state.opacity
@@ -293,9 +301,9 @@ swatch.Parent = panel
 Instance.new("UICorner", swatch).CornerRadius = UDim.new(0, 4)
 for i, ch in { "R", "G", "B" } do
 	makeSlider(6 + i, "SKULL " .. ch, 255, function()
-		return colors[TIERS[state.tierIndex]][i]
+		return colors[tierColorName()][i]
 	end, function(v)
-		colors[TIERS[state.tierIndex]][i] = v
+		colors[tierColorName()][i] = v
 	end)
 end
 local paintSwatch = Instance.new("Frame")
@@ -367,6 +375,12 @@ info.TextWrapped = true
 info.Size = UDim2.new(1, 0, 0, 92)
 
 -- // Применение ----------------------------------------------------------------
+-- цвет выбранной ступени (имя из RankSkull.Colors; у ступени без черепа — bone)
+tierColorName = function(): string
+	local t = RANKS[state.tierIndex]
+	local n = t and t.skull and t.skull.color or "bone"
+	return if colors[n] then n else "bone"
+end
 local function tierColor(n: string): Color3
 	local c = colors[n]
 	return Color3.fromRGB(math.floor(c[1] + 0.5), math.floor(c[2] + 0.5), math.floor(c[3] + 0.5))
@@ -401,7 +415,8 @@ applyAll = function()
 		opacity = state.opacity,
 		lift = state.lift,
 		tint = paintColor(),
-		colorName = TIERS[state.tierIndex],
+		colorName = tierColorName(),
+		shape = (RANKS[state.tierIndex].skull and RANKS[state.tierIndex].skull.shape) or RANKS[state.tierIndex].name,
 		patch = if state.mossOn then {
 			color = mossColor(), coverage = state.mossCoverage, scale = state.mossScale, seed = state.mossSeed,
 			mode = PATCH_MODES[state.mossModeIndex], opacity = state.mossOpacity,
@@ -414,7 +429,7 @@ applyAll = function()
 		end
 	end
 	RankSkull.OverridesChanged:Fire()
-	swatch.BackgroundColor3 = tierColor(TIERS[state.tierIndex])
+	swatch.BackgroundColor3 = tierColor(tierColorName())
 	paintSwatch.BackgroundColor3 = paintColor()
 	mossSwatch.BackgroundColor3 = mossColor()
 	for _, f in refreshers do

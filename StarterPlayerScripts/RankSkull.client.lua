@@ -28,7 +28,7 @@ local OPACITY = GameConfig.Ranks.SkullOpacity
 local LIFT = GameConfig.Ranks.SkullLift or 0
 
 -- Что рисовать на ступени: nil — ничего (нулевой ранг или ступень без черепа).
-local function skullFor(standing: Ranks.Standing): { zones: { string }, color: string }?
+local function skullFor(standing: Ranks.Standing): { zones: { string }, color: string, shape: string? }?
 	local tier = GameConfig.Ranks.Tiers[standing.index]
 	return tier and tier.skull or nil
 end
@@ -55,8 +55,10 @@ local function dress(body: BasePart, driver: Player)
 	local o = RankSkull.Overrides
 	local zones = spec and spec.zones or {}
 	local colorName = spec and spec.color or nil
-	if o and o.colorName then
-		colorName = o.colorName
+	local shape = spec and spec.shape or nil
+	if o and (o.colorName or o.shape) then
+		colorName = o.colorName or colorName
+		shape = o.shape or shape
 		if #zones == 0 then
 			zones = { "top", "left", "right", "rear" } -- крутить можно и на нулевом ранге
 		end
@@ -78,7 +80,7 @@ local function dress(body: BasePart, driver: Player)
 	end
 	local img = RankSkull.compose(bodyId, zones, colorName,
 		(o and o.mode) or MODE, (o and o.opacity) or OPACITY, tint, (o and o.lift) or LIFT,
-		RankSkull.worn(body), patch) -- свою картинку переписываем на месте, а не плодим новые
+		RankSkull.worn(body), patch, shape) -- свою картинку переписываем на месте, а не плодим новые
 	if not body.Parent then
 		return -- кузов успели заменить, пока читали текстуру
 	end

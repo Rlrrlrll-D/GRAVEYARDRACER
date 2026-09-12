@@ -28,6 +28,7 @@ local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SkullOutline = require(ReplicatedStorage:WaitForChild("SkullOutline"))
+local SkullShapes = require(ReplicatedStorage:WaitForChild("SkullShapes"))
 
 local RankSkull = {}
 
@@ -39,6 +40,11 @@ export type Zone = {
 	-- черепа в studs. Из отметок юзера на листе ракурсов (2026-09-11).
 	ta: number, tb: number, height: number,
 	flip: boolean?, -- развернуть на 180°: зубами «вперёд» (к носу) — просьба юзера для капота/крышки
+	-- Отзеркалить по ширине. Roblox при импорте разворачивает меш на 180° вокруг Y (x → −x),
+	-- и ось U капота/крышки на машине идёт справа налево: симметричный череп этого не
+	-- выдавал, лента с именем ранга читалась зеркально (2026-09-12). Корма и борта в
+	-- развёртке уже перевёрнуты (flipU в Blender) и не мирятся.
+	mirror: boolean?,
 }
 
 export type BodySpec = {
@@ -57,7 +63,7 @@ RankSkull.Bodies = {
 		atlas = 1024,
 		texture = "rbxassetid://135253107984920",
 		zones = {
-			top   = { u0 = 0.015, v0 = 0.635, u1 = 0.376, v1 = 0.914, rotated = false, studsW = 4.63, studsH = 3.57, ta = 0.5,  tb = 0.5,  height = 3.0, flip = true },
+			top   = { u0 = 0.015, v0 = 0.635, u1 = 0.376, v1 = 0.914, rotated = false, studsW = 4.63, studsH = 3.57, ta = 0.5,  tb = 0.5,  height = 3.4, flip = true, mirror = true },
 			rear  = { u0 = 0.406, v0 = 0.635, u1 = 0.802, v1 = 0.846, rotated = false, studsW = 5.07, studsH = 2.70, ta = 0.5,  tb = 0.27, height = 1.25 },
 			left  = { u0 = 0.635, v0 = 0.015, u1 = 0.794, v1 = 0.588, rotated = true,  studsW = 9.77, studsH = 2.71, ta = 0.50, tb = 0.26, height = 1.2 },
 			right = { u0 = 0.824, v0 = 0.015, u1 = 0.982, v1 = 0.586, rotated = true,  studsW = 9.74, studsH = 2.70, ta = 0.50, tb = 0.26, height = 1.2 },
@@ -70,7 +76,7 @@ RankSkull.Bodies = {
 		atlas = 512,
 		texture = nil,
 		zones = {
-			top   = { u0 = 0.015, v0 = 0.585, u1 = 0.366, v1 = 0.942, rotated = false, studsW = 6.00, studsH = 6.10, ta = 0.5,  tb = 0.68, height = 2.8, flip = true },
+			top   = { u0 = 0.015, v0 = 0.585, u1 = 0.366, v1 = 0.942, rotated = false, studsW = 6.00, studsH = 6.10, ta = 0.5,  tb = 0.68, height = 2.8, flip = true, mirror = true },
 			rear  = { u0 = 0.396, v0 = 0.585, u1 = 0.659, v1 = 0.784, rotated = false, studsW = 4.48, studsH = 3.40, ta = 0.5,  tb = 0.42, height = 2.2 },
 			left  = { u0 = 0.585, v0 = 0.015, u1 = 0.758, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.30, tb = 0.45, height = 1.9 },
 			right = { u0 = 0.788, v0 = 0.015, u1 = 0.960, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.70, tb = 0.45, height = 1.9 },
@@ -88,19 +94,36 @@ RankSkull.Colors = {
 } :: { [string]: Color3 }
 
 -- // Растр черепа --------------------------------------------------------------
-local MIN_Y, MAX_Y = math.huge, -math.huge
-for _, loop in SkullOutline.Loops do
-	for _, p in loop do
-		MIN_Y = math.min(MIN_Y, p[2])
-		MAX_Y = math.max(MAX_Y, p[2])
+-- ФОРМЫ ПО РАНГАМ (2026-09-12): юзер ушёл от «один череп, разные цвета» к «разные
+-- черепа с лентой и именем ранга» (SkullShapes из skull_range.ai); цвет у всех один.
+-- Форма по имени ранга; без имени — классический череп чекпоинтов (SkullOutline).
+type Shape = { loops: { { { number } } }, minY: number, maxY: number, aspect: number }
+local shapeCache: { [string]: Shape } = {}
+
+local function shapeFor(name: string?): Shape
+	local key = name or "@outline"
+	local ready = shapeCache[key]
+	if ready then
+		return ready
 	end
+	local loops = (name and SkullShapes.Shapes[name]) or SkullOutline.Loops
+	local minY, maxY = math.huge, -math.huge
+	for _, loop in loops do
+		for _, p in loop do
+			minY = math.min(minY, p[2])
+			maxY = math.max(maxY, p[2])
+		end
+	end
+	local shape = { loops = loops, minY = minY, maxY = maxY, aspect = maxY - minY }
+	shapeCache[key] = shape
+	return shape
 end
-local ASPECT = MAX_Y - MIN_Y -- высота на единицу ширины (~1.139)
+
 local SUBROWS = 4 -- подстрок на пиксель: край гладкий, но без «свечения» — покрытие честное
 
-local function spansAt(ny: number): { number }
+local function spansAt(shape: Shape, ny: number): { number }
 	local xs = {}
-	for _, loop in SkullOutline.Loops do
+	for _, loop in shape.loops do
 		local n = #loop
 		for i = 1, n do
 			local a, b = loop[i], loop[(i % n) + 1]
@@ -115,20 +138,22 @@ local function spansAt(ny: number): { number }
 	return xs
 end
 
--- Покрытие черепа шириной w px (высота от пропорции): cov[j*w + i + 1], j = 0 — макушка.
-local covCache: { [number]: { w: number, h: number, cov: { number } } } = {}
-local function coverage(w: number): (number, number, { number })
-	local ready = covCache[w]
+-- Покрытие черепа шириной w px (высота от пропорции формы): cov[j*w + i + 1], j = 0 — макушка.
+local covCache: { [string]: { w: number, h: number, cov: { number } } } = {}
+local function coverage(shapeName: string?, w: number): (number, number, { number })
+	local ck = (shapeName or "@outline") .. "|" .. w
+	local ready = covCache[ck]
 	if ready then
 		return ready.w, ready.h, ready.cov
 	end
-	local h = math.max(1, math.floor(w * ASPECT + 0.5))
+	local shape = shapeFor(shapeName)
+	local h = math.max(1, math.floor(w * shape.aspect + 0.5))
 	local cov = table.create(w * h, 0)
 	local weight = 1 / SUBROWS
 	for py = 0, h - 1 do
 		for s = 0, SUBROWS - 1 do
-			local ny = MAX_Y - ((py + (s + 0.5) / SUBROWS) / h) * ASPECT
-			local xs = spansAt(ny)
+			local ny = shape.maxY - ((py + (s + 0.5) / SUBROWS) / h) * shape.aspect
+			local xs = spansAt(shape, ny)
 			for i = 1, #xs - 1, 2 do
 				local a = (xs[i] + 0.5) * w
 				local b = (xs[i + 1] + 0.5) * w
@@ -147,7 +172,7 @@ local function coverage(w: number): (number, number, { number })
 			end
 		end
 	end
-	covCache[w] = { w = w, h = h, cov = cov }
+	covCache[ck] = { w = w, h = h, cov = cov }
 	return w, h, cov
 end
 
@@ -233,13 +258,14 @@ end
 -- Нужен, потому что кузов тёмный (rust ×0.78): Overlay на базе ~0.3 не даёт светлее
 -- ~0.55 даже белым, а юзер хочет «черепа светлее» при сохранении зерна текстуры
 -- (наклон Overlay остаётся, подъём лишь сдвигает).
-local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, mode: string, opacity: number, lift: number)
+local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, mode: string, opacity: number, lift: number, shapeName: string?)
 	local blend = BLEND[mode] or BLEND.normal
 	-- плотность px/stud одинакова по обеим осям зоны (так собран атлас)
 	local pxPerStud = if zone.rotated then ((zone.u1 - zone.u0) * size) / zone.studsH else ((zone.u1 - zone.u0) * size) / zone.studsW
+	local aspect = shapeFor(shapeName).aspect
 	local sh = math.max(4, math.floor(zone.height * pxPerStud + 0.5)) -- высота черепа, px
-	local sw = math.max(4, math.floor(sh / ASPECT + 0.5))
-	local w, h, cov = coverage(sw)
+	local sw = math.max(4, math.floor(sh / aspect + 0.5))
+	local w, h, cov = coverage(shapeName, sw)
 	-- центр черепа в пикселях атласа
 	local cx, cy
 	if zone.rotated then
@@ -256,12 +282,13 @@ local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, m
 			if a > 0.002 then
 				local x, y
 				local jj = if zone.flip then h - 1 - j else j -- flip: макушка к водителю, зубы к носу
+				local ii = if zone.mirror then w - 1 - i else i
 				if zone.rotated then
 					-- макушка (j = 0) смотрит в +U = +x
 					x = math.floor(cx + (h / 2 - 1 - jj) + 0.5)
-					y = math.floor(cy - w / 2 + i + 0.5)
+					y = math.floor(cy - w / 2 + ii + 0.5)
 				else
-					x = math.floor(cx - w / 2 + i + 0.5)
+					x = math.floor(cx - w / 2 + ii + 0.5)
 					y = math.floor(cy - h / 2 + jj + 0.5)
 				end
 				if x >= 0 and y >= 0 and x < size and y < size then
@@ -399,7 +426,8 @@ local function patchThreshold(p: Patch): number
 	return samples[idx]
 end
 
-function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: string?, mode: string, opacity: number, tint: Color3?, lift: number?, reuse: EditableImage?, patch: Patch?): EditableImage?
+-- shapeName — форма черепа из SkullShapes (имя ранга); nil — классический SkullOutline.
+function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: string?, mode: string, opacity: number, tint: Color3?, lift: number?, reuse: EditableImage?, patch: Patch?, shapeName: string?): EditableImage?
 	local spec = RankSkull.Bodies[bodyId]
 	if not spec then
 		return nil
@@ -411,7 +439,7 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	local up = lift or 0
 	-- в ключе сам цвет, а не имя: SkullTune крутит RankSkull.Colors[name] на живую
 	local patchKey = if patch then ("%s|%.3f|%.2f|%d|%s|%.2f"):format(patch.color:ToHex(), patch.coverage, patch.scale, patch.seed, patch.mode or "tint", patch.opacity or 1) else "-"
-	local key = ("%s|%s|%s|%s|%.2f|%.2f|%s|%s"):format(bodyId, table.concat(names, ","), color and color:ToHex() or "-", mode, opacity, up, paint:ToHex(), patchKey)
+	local key = ("%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s"):format(bodyId, table.concat(names, ","), shapeName or "-", color and color:ToHex() or "-", mode, opacity, up, paint:ToHex(), patchKey)
 	local ready = imageCache[key]
 	if ready then
 		return ready
@@ -469,7 +497,7 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 		for _, name in names do
 			local zone = spec.zones[name]
 			if zone then
-				paintZone(buf, size, zone, color, mode, opacity, up)
+				paintZone(buf, size, zone, color, mode, opacity, up, shapeName)
 			end
 		end
 	end
@@ -547,7 +575,7 @@ end
 -- // Дев-подкрутка (SkullTune) ------------------------------------------------
 -- Пока Overrides не nil, сторож (RankSkull.client) берёт режим/плотность/подъём/краску
 -- отсюда вместо GameConfig и цвета кузова; OverridesChanged — пересобрать всем машинам.
-export type Overrides = { mode: string?, opacity: number?, lift: number?, tint: Color3?, colorName: string?, patch: Patch?, patchOff: boolean? }
+export type Overrides = { mode: string?, opacity: number?, lift: number?, tint: Color3?, colorName: string?, shape: string?, patch: Patch?, patchOff: boolean? }
 RankSkull.Overrides = nil :: Overrides?
 RankSkull.OverridesChanged = Instance.new("BindableEvent")
 
