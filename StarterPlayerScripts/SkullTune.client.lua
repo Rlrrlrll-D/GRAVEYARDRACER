@@ -8,7 +8,9 @@
 -- код» — здесь крутит он, P печатает числа в Output, я переношу их в GameConfig /
 -- RankSkull.Colors / ShopCatalog.
 --
---   F8            вкл / выкл панели
+--   F3            вкл / выкл панели. НЕ F8: в Studio это «Run» (сервер без игрока) —
+--                 нажатие в Play роняло сессию в серверный режим, «меню пропало»
+--                 (2026-09-12). F7 — тоже Studio, F6 — NeonTune, F4 — PhotoMode.
 --   MODE          кнопка: перебор режимов наложения
 --   TIER          кнопка: какой цвет лестницы крутим (и показываем на своей машине,
 --                 даже если ранг ниже — все четыре места)
@@ -37,7 +39,7 @@ local ShopCatalog = require(ReplicatedStorage:WaitForChild("ShopCatalog"))
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local TOGGLE_KEY = Enum.KeyCode.F8
+local TOGGLE_KEY = Enum.KeyCode.F3
 local FONT = Enum.Font.Code
 local MODES = { "overlay", "multiply", "screen", "softlight", "lineardodge", "normal" }
 local TIERS = { "bone", "ivory", "amber", "gold" }
@@ -216,7 +218,7 @@ local function makeSlider(order: number, name: string, max: number, get: () -> n
 	end)
 end
 
-makeLabel(1, "SKULL TUNE   (F8, \\ сброс, P печать)", 15)
+makeLabel(1, "SKULL TUNE   (F3, \\ сброс, P печать)", 15)
 makeButton(2, function()
 	return "MODE: " .. MODES[state.modeIndex]
 end, function()
@@ -348,4 +350,4 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 
 applyAll()
-print("[SkullTune] подкрутка черепов и краски готова: F8")
+print("[SkullTune] подкрутка черепов и краски готова: F3")
