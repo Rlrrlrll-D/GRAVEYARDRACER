@@ -298,6 +298,13 @@ local function showcase(): { ShopCatalog.Item }
 	if base then
 		table.insert(list, base)
 	end
+	-- И базовая краска тоже: без неё, надев GRAVE MOSS, вернуться на RUST было негде
+	-- (юзер 2026-09-12: «где переключать краску с мха на раст»). Сервер считает её
+	-- купленной всегда, кнопка — USE / IN USE, как у багги.
+	local baseSkin = ShopCatalog.get(ShopCatalog.DefaultSkin)
+	if baseSkin then
+		table.insert(list, baseSkin)
+	end
 	for _, item in ShopCatalog.onSale() do
 		table.insert(list, item)
 	end

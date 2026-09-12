@@ -328,6 +328,12 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == TOGGLE_KEY then
 		active = not active
 		gui.Enabled = active
+		-- В заезде турель прячет системный курсор и перехватывает мышь под прицел —
+		-- ползунки не поймать. Тот же договор, что у NeonTune: пока панель открыта,
+		-- стоит атрибут DevPanelOpen, и TurretAimClient мышь не трогает.
+		player:SetAttribute("DevPanelOpen", active or nil)
+		UserInputService.MouseIconEnabled = true
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		applyAll()
 		return
 	end
