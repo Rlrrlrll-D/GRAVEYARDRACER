@@ -127,7 +127,9 @@ layout.Parent = panel
 local panelR = panel:Clone()
 panelR:ClearAllChildren()
 Instance.new("UICorner", panelR).CornerRadius = UDim.new(0, 8)
-panelR.Position = UDim2.new(0, 16 + 330 + 10, 1, -16)
+-- Правый нижний угол, зеркально левой: посередине колонка закрывала машину.
+panelR.AnchorPoint = Vector2.new(1, 1)
+panelR.Position = UDim2.new(1, -16, 1, -16)
 panelR.Parent = gui
 local padR = pad:Clone(); padR.Parent = panelR
 local layoutR = layout:Clone(); layoutR.Parent = panelR
