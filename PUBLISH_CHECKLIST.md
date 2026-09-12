@@ -100,6 +100,15 @@ eligible, ИЛИ через 90 дней после оплаты, если так
 `Fear (Repeated/Mild)` и `Violence (Repeated/Mild)`. Non-Compliant Regions — нет,
 Age Restriction — нет. То есть аудитория не режется ни по регионам, ни по возрасту.
 
+**2026-09-12, после гроба и черепов-рангов: ярлык НЕ пересматривать.** Ярлык ставится
+по анкете, а не по сканированию; анкету обновляют, когда меняется ОТВЕТ. Гроб-кузов,
+череп ранга на капоте, деревянная текстура, названия рангов (Gravedigger … Bone King) —
+нереалистичный хоррор-реквизит, тот же `Fear (Repeated/Mild)`; в анкете нет вопросов, на
+которые это меняет ответ. Крови в игре не рисуем: BLOOD RED — имя цвета, а не кровь.
+Единственное место, где кровь ПОДРАЗУМЕВАЕТСЯ, — подпись краски «don't ask whose»;
+Mild терпит нереалистичную кровь, но если хочется нулевого риска — заменить подпись
+(ShopCatalog.lua, id blood) на что-нибудь без намёка на «чью».
+
 ### 1.1c ОПУБЛИКОВАНО 2026-08-11 — Access: Public
 
 Игра выложена: `Access: Public`, Overview показывает «Updated 11.08.2026, 12:59:42», то
@@ -190,7 +199,8 @@ ONE MORE LIFE 25, SACK OF BONES 49. Ненастроенный товар на �
 
 **Название:** Graveyard Racer
 
-**Описание (английское — интерфейс игры английский):**
+**Описание (английское — интерфейс игры английский):** — редакция 2026-09-12: ранги,
+черепа на кузове, гроб и краски из магазина.
 
 > Three laps. Three lives. A graveyard that doesn't keep its dead.
 >
@@ -199,21 +209,26 @@ ONE MORE LIFE 25, SACK OF BONES 49. Ненастроенный товар на �
 > trigger and let the turret do the talking. Lose all three lives and you're out —
 > the race goes on without you.
 >
-> Empty grid? The dead take the free slots. Ghost racers line up beside you, hold
-> your pace lap for lap, and take the win if you drop it.
+> Empty grid? The dead take the free slots. Ghost racers line up beside you and take
+> the win if you drop it.
 >
 > • Races for up to 8 drivers, three laps, last one breathing takes it
-> • Ghost racers fill an empty grid — you never roll out alone
 > • Turret on the roll cage: aim with the mouse, hold to fire
-> • Every zombie you put down is bones
-> • Spend bones in the shop — skins, an extra life, a sack of bones
+> • Every zombie you put down is bones — spend them on paint, an extra life, a sack of bones
+> • Climb the ranks: Gravedigger → Pallbearer → Grave Robber → Reaper → Bone King.
+>   Your rank skull is painted right on the hood
+> • Earn a coffin and race in it. Yes, a coffin.
 > • Fog, bats, and things moving just past the headlights
 >
 > 🏆 Can you collect all 4 secret skull badges? 💀
 
-872 символа из 1000 — влезает. Абзац про призраков добавлен 2026-08-26 вместе с
-добором состава (`Race.GhostFillTo`): страница обещает ровно то, что видит первый
-зашедший — грид не пустует.
+943 символа из 1000 — влезает. Что изменилось против редакции 2026-08-26: абзац про
+призраков ужат до двух фраз, вместо «skins» в магазине — краски, добавлены ранги (череп
+ранга на капоте — то, что видит другой игрок) и гроб как кузов. Ярлык Mild это не
+трогает: гроб и черепа — нереалистичный «страшный» реквизит, тот же дескриптор
+`Fear (Repeated/Mild)`, крови и расчленёнки нет (см. 1.1b).
+
+Прежняя редакция (2026-08-26) — в git до этого коммита.
 
 **Теги:** racing, zombie, horror, survival, cars, spooky, halloween, shooter
 
