@@ -68,7 +68,7 @@ export type BodySpec = {
 RankSkull.Bodies = {
 	buggy = {
 		atlas = 1024,
-		texture = "rbxassetid://108257958365417", -- ржавчина (tools/blender/buggy_texture.py), импорт юзера 2026-09-12
+		texture = "rbxassetid://136412214898926", -- ржавчина без полос, дуга металл (tools/blender/buggy_texture.py), импорт юзера 2026-09-12
 		-- ЧИСЛА ЮЗЕРА ИЗ ГАРАЖА (SkullTune, 2026-09-12): сила краски, тон, место и высота
 		-- черепа на капоте — зашиты как есть.
 		paintStrength = 0.41, -- BLOOD «сильно отдаёт красным» — в тёмно-коричневый, доски/ржавчина просвечивают
