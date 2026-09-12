@@ -53,11 +53,13 @@ local function dress(body: BasePart, driver: Player)
 	-- RankSkull.compose). Без черепов — просто крашеный кузов.
 	-- Дев-подкрутка (SkullTune) подменяет режим/плотность/подъём/краску и цвет ступени.
 	local o = RankSkull.Overrides
+	local ob = o and o.byBody and o.byBody[bodyId] or nil -- подкрутка этого кузова
+	local cb = GameConfig.Ranks.SkullBody and GameConfig.Ranks.SkullBody[bodyId] or nil -- конфиг этого кузова
 	local zones = spec and spec.zones or {}
 	local colorName = spec and spec.color or nil
 	local shape = spec and spec.shape or nil
-	if o and (o.colorName or o.shape) then
-		colorName = o.colorName or colorName
+	if o and (o.colorName or o.shape or (ob and ob.colorName)) then
+		colorName = (ob and ob.colorName) or o.colorName or colorName
 		shape = o.shape or shape
 		if #zones == 0 then
 			zones = { "top", "left", "right", "rear" } -- крутить можно и на нулевом ранге
@@ -79,7 +81,10 @@ local function dress(body: BasePart, driver: Player)
 		end
 	end
 	local img = RankSkull.compose(bodyId, zones, colorName,
-		(o and o.mode) or MODE, (o and o.opacity) or OPACITY, tint, (o and o.lift) or LIFT,
+		(ob and ob.mode) or (o and o.mode) or (cb and cb.mode) or MODE,
+		(ob and ob.opacity) or (o and o.opacity) or (cb and cb.opacity) or OPACITY,
+		tint,
+		(ob and ob.lift) or (o and o.lift) or (cb and cb.lift) or LIFT,
 		RankSkull.worn(body), patch, shape) -- свою картинку переписываем на месте, а не плодим новые
 	if not body.Parent then
 		return -- кузов успели заменить, пока читали текстуру

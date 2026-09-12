@@ -2,35 +2,38 @@
 -- LocalScript: StarterPlayerScripts.SkullTune
 -- ДЕВ-ПОДКРУТКА ЧЕРЕПОВ-РАНГОВ И КРАСКИ КУЗОВА. Только Studio (как NeonTune/PhotoMode).
 --
--- ЗАЧЕМ. Режим наложения, плотность, подъём яркости, четыре цвета лестницы и краска
--- кузова подбираются глазами, а в Edit-свете затенённые поверхности синеют от неба —
+-- ЗАЧЕМ. Режим наложения, плотность, подъём яркости, цвет черепа и краска кузова
+-- подбираются глазами, а в Edit-свете затенённые поверхности синеют от неба —
 -- судить можно только в Play. Юзер: «на экран я сделаю как надо, а ты потом зашьёшь в
 -- код» — здесь крутит он, P печатает числа в Output, я переношу их в GameConfig /
--- RankSkull.Colors / ShopCatalog.
+-- RankSkull / ShopCatalog.
 --
+-- ЛЕВАЯ КОЛОНКА — ПО КУЗОВАМ (2026-09-12: багги и гроб просят разного — «на багги
+-- сильнее», «череп цвета ржавчины с наложением», «придави тон на багги»):
+--   BODY          кнопка: чьи ручки крутим — buggy / coffin (стартует с той машины,
+--                 в которой сидишь; вторую можно настроить вслепую и посмотреть потом)
+--   MODE          режим наложения черепа на этом кузове
+--   RANK          какую форму (ленту с именем) показывать на своей машине
+--   OPACITY/LIFT  плотность и подъём черепа на этом кузове
+--   SKULL R G B   цвет черепа на этом кузове
+--   TONE          тон холста: домножение текстуры до краски (темнее — контрастнее череп)
+--   PAINT STR     сила краски: 1 — краска домножает целиком, меньше — текстура
+--                 просвечивает (BLOOD уходит из красного в тёмно-коричневый)
+--   TOP POS/SIZE  место (0 — у кабины, 1 — у носа) и высота черепа на капоте/крышке
+--   PAINT R G B   краска кузова (общая, как RUST)
+-- ПРАВАЯ КОЛОНКА — мох: MOSS (вкл + перебор режима), MOSS OFF, M OPAC/COVER/SCALE/SEED,
+-- MOSS R G B. \ — сброс к конфигу, P — напечатать всё, Z — зомби выкл/вкл.
 --   F3            вкл / выкл панели. НЕ F8: в Studio это «Run» (сервер без игрока) —
 --                 нажатие в Play роняло сессию в серверный режим, «меню пропало»
 --                 (2026-09-12). F7 — тоже Studio, F6 — NeonTune, F4 — PhotoMode.
---   MODE          кнопка: перебор режимов наложения
---   TIER          кнопка: какой цвет лестницы крутим (и показываем на своей машине,
---                 даже если ранг ниже — все четыре места)
---   OPACITY/LIFT  0..1
---   R G B         цвет черепа выбранной ступени, 0..255
---   PAINT R G B   краска кузова (то, чем домножается текстура), 0..255
---   MOSS          кнопка: включить мох поверх RUST; повторные нажатия перебирают
---                 режим наложения пятна; MOSS OFF — убрать
---   M OPAC/COVER  плотность пятна и доля площади под мхом
---   M SCALE/SEED  размер пятен и раскладка — пересчёт шума ~1 с, применяются на отпускании
---   MOSS R G B    цвет мха
---   \             сброс к конфигу
---   P             напечатать всё в Output
 -- Пересборка текстуры ~0.05с на изменение; ползунок тянуть можно, пересобирается на
--- отпускании и раз в 0.15с по ходу.
+-- отпускании и раз в 0.15с по ходу (тяжёлые — мох — только на отпускании).
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
 
 if not RunService:IsStudio() then
 	return
@@ -47,24 +50,39 @@ local playerGui = player:WaitForChild("PlayerGui")
 local TOGGLE_KEY = Enum.KeyCode.F3
 local FONT = Enum.Font.Code
 local MODES = { "overlay", "multiply", "screen", "softlight", "lineardodge", "normal" }
-local TIERS = { "bone", "ivory", "amber", "gold" }
--- Ступени рангов: кнопка TIER перебирает их, на машину идёт ФОРМА ступени (SkullShapes)
--- и её цвет из конфига (сейчас у всех bone).
+local BODIES = { "buggy", "coffin" }
+-- Ступени рангов: кнопка RANK перебирает их, на машину идёт ФОРМА ступени (SkullShapes).
 local RANKS = {}
 for _, t in GameConfig.Ranks.Tiers do
 	table.insert(RANKS, t)
 end
 local PATCH_MODES = { "tint", "multiply", "overlay", "screen", "softlight", "lineardodge", "normal" }
 
--- Исходные значения — чтобы «\» возвращал к конфигу.
-local base = {
-	mode = GameConfig.Ranks.SkullMode,
-	opacity = GameConfig.Ranks.SkullOpacity,
-	lift = GameConfig.Ranks.SkullLift or 0,
-	colors = {} :: { [string]: Color3 },
+-- // Исходные значения — чтобы «\» возвращал к конфигу ---------------------------
+type BodyState = {
+	modeIndex: number, opacity: number, lift: number,
+	skull: { number }, -- цвет черепа 0..255
+	tone: number, paintStrength: number, topPos: number, topSize: number,
 }
-for _, n in TIERS do
-	base.colors[n] = RankSkull.Colors[n]
+local function bodyDefaults(bodyId: string): BodyState
+	local cb = GameConfig.Ranks.SkullBody and GameConfig.Ranks.SkullBody[bodyId] or nil
+	local spec = RankSkull.Bodies[bodyId]
+	local top = spec and spec.zones.top
+	local c = RankSkull.Colors[(RANKS[1].skull and RANKS[1].skull.color) or "bone"] or Color3.new(1, 1, 1)
+	return {
+		modeIndex = table.find(MODES, (cb and cb.mode) or GameConfig.Ranks.SkullMode) or 1,
+		opacity = (cb and cb.opacity) or GameConfig.Ranks.SkullOpacity,
+		lift = (cb and cb.lift) or GameConfig.Ranks.SkullLift or 0,
+		skull = { c.R * 255, c.G * 255, c.B * 255 },
+		tone = (spec and spec.baseTone) or 1,
+		paintStrength = (spec and spec.paintStrength) or 1,
+		topPos = top and top.tb or 0.5,
+		topSize = top and top.height or 3,
+	}
+end
+local base = { bodies = {} :: { [string]: BodyState } }
+for _, b in BODIES do
+	base.bodies[b] = bodyDefaults(b)
 end
 local rustItem = ShopCatalog.get(ShopCatalog.DefaultSkin)
 base.paint = (rustItem and rustItem.color) or Color3.new(1, 1, 1)
@@ -77,11 +95,17 @@ base.moss = {
 	mode = mossPatchy.mode or "tint", opacity = mossPatchy.opacity or 1,
 }
 
+local function cloneBody(s: BodyState): BodyState
+	local c = table.clone(s)
+	c.skull = table.clone(s.skull)
+	return c
+end
+
 local state = {
-	modeIndex = table.find(MODES, base.mode) or 1,
+	bodyIndex = 1,
+	bodyAuto = true, -- пока юзер не жал BODY — крутим ту машину, в которой сидит
+	bodies = {} :: { [string]: BodyState },
 	tierIndex = 1,
-	opacity = base.opacity,
-	lift = base.lift,
 	paint = { base.paint.R * 255, base.paint.G * 255, base.paint.B * 255 },
 	mossOn = false, -- показывать мох поверх RUST (что бы ни было надето)
 	mossModeIndex = table.find(PATCH_MODES, base.moss.mode) or 1,
@@ -91,10 +115,29 @@ local state = {
 	mossSeed = base.moss.seed,
 	moss = { base.moss.color.R * 255, base.moss.color.G * 255, base.moss.color.B * 255 },
 }
-local colors: { [string]: { number } } = {}
-for _, n in TIERS do
-	local c = base.colors[n]
-	colors[n] = { c.R * 255, c.G * 255, c.B * 255 }
+for _, b in BODIES do
+	state.bodies[b] = cloneBody(base.bodies[b])
+end
+
+local function bodyName(): string
+	return BODIES[state.bodyIndex]
+end
+local function cur(): BodyState
+	return state.bodies[bodyName()]
+end
+
+-- Кузов своей машины (тег PlayerVehicle + OwnerUserId), nil — машины нет.
+local function drivenBody(): string?
+	for _, car in CollectionService:GetTagged("PlayerVehicle") do
+		if car:GetAttribute("OwnerUserId") == player.UserId then
+			local body = car:FindFirstChild("BuggyBody")
+			local id = body and body:GetAttribute("BodyId")
+			if type(id) == "string" then
+				return id
+			end
+		end
+	end
+	return nil
 end
 
 local active = false
@@ -129,14 +172,14 @@ panel.BorderSizePixel = 0
 panel.Parent = gui
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 8)
 local pad = Instance.new("UIPadding")
-pad.PaddingTop = UDim.new(0, 12)
-pad.PaddingBottom = UDim.new(0, 12)
+pad.PaddingTop = UDim.new(0, 10)
+pad.PaddingBottom = UDim.new(0, 10)
 pad.PaddingLeft = UDim.new(0, 14)
 pad.PaddingRight = UDim.new(0, 14)
 pad.Parent = panel
 local layout = Instance.new("UIListLayout")
 layout.SortOrder = Enum.SortOrder.LayoutOrder
-layout.Padding = UDim.new(0, 3)
+layout.Padding = UDim.new(0, 2)
 layout.Parent = panel
 
 -- ВТОРАЯ КОЛОНКА: с секцией мха одна колонка перестала влезать по высоте (верх уезжал
@@ -154,7 +197,6 @@ local column: Frame = panel
 
 local refreshers: { () -> () } = {}
 local applyAll -- ниже
-local tierColorName: () -> string -- ниже: ползунки цвета зовут её по имени ступени
 
 local function makeLabel(order: number, text: string, size: number): TextLabel
 	local l = Instance.new("TextLabel")
@@ -192,10 +234,11 @@ local function makeButton(order: number, get: () -> string, onClick: () -> ()): 
 	return b
 end
 
+-- Ползунок 0..max; при max <= 5 подпись с двумя знаками, иначе целое.
 local function makeSlider(order: number, name: string, max: number, get: () -> number, set: (number) -> (), heavy: boolean?)
 	local row = Instance.new("Frame")
 	row.LayoutOrder = order
-	row.Size = UDim2.new(1, 0, 0, 24)
+	row.Size = UDim2.new(1, 0, 0, 23)
 	row.BackgroundTransparency = 1
 	row.Parent = column
 	local caption = Instance.new("TextLabel")
@@ -208,7 +251,7 @@ local function makeSlider(order: number, name: string, max: number, get: () -> n
 	caption.Parent = row
 	local track = Instance.new("Frame")
 	track.Size = UDim2.new(1, 0, 0, 6)
-	track.Position = UDim2.new(0, 0, 0, 16)
+	track.Position = UDim2.new(0, 0, 0, 15)
 	track.BackgroundColor3 = UITheme.Shadow
 	track.BorderSizePixel = 0
 	track.Parent = row
@@ -231,7 +274,7 @@ local function makeSlider(order: number, name: string, max: number, get: () -> n
 		local alpha = math.clamp(get() / max, 0, 1)
 		fill.Size = UDim2.fromScale(alpha, 1)
 		knob.Position = UDim2.new(alpha, 0, 0.5, 0)
-		caption.Text = if max == 1 then string.format("%-8s %.2f", name, get()) else string.format("%-8s %3d", name, math.floor(get() + 0.5))
+		caption.Text = if max <= 5 then string.format("%-9s %.2f", name, get()) else string.format("%-9s %3d", name, math.floor(get() + 0.5))
 	end
 	table.insert(refreshers, refresh)
 	local hit = Instance.new("TextButton")
@@ -271,49 +314,75 @@ local function makeSlider(order: number, name: string, max: number, get: () -> n
 	end)
 end
 
+local function makeSwatch(order: number): Frame
+	local sw = Instance.new("Frame")
+	sw.LayoutOrder = order
+	sw.Size = UDim2.new(1, 0, 0, 12)
+	sw.BorderSizePixel = 0
+	sw.Parent = column
+	Instance.new("UICorner", sw).CornerRadius = UDim.new(0, 4)
+	return sw
+end
+
 makeLabel(1, "SKULL TUNE   (F3, \\ сброс, P печать, Z зомби)", 15)
 makeButton(2, function()
-	return "MODE: " .. MODES[state.modeIndex]
+	local driven = drivenBody()
+	return "BODY: " .. bodyName() .. (if driven == bodyName() then "   (твоя машина)" elseif driven then "   (сидишь в " .. driven .. ")" else "")
 end, function()
-	state.modeIndex = state.modeIndex % #MODES + 1
+	state.bodyAuto = false
+	state.bodyIndex = state.bodyIndex % #BODIES + 1
 end)
 makeButton(3, function()
-	local t = RANKS[state.tierIndex]
-	return "RANK: " .. t.name .. "   цвет " .. tostring(t.skull and t.skull.color or "-")
+	return "MODE: " .. MODES[cur().modeIndex]
+end, function()
+	cur().modeIndex = cur().modeIndex % #MODES + 1
+end)
+makeButton(4, function()
+	return "RANK: " .. RANKS[state.tierIndex].name
 end, function()
 	state.tierIndex = state.tierIndex % #RANKS + 1
 end)
-makeSlider(4, "OPACITY", 1, function()
-	return state.opacity
+makeSlider(5, "OPACITY", 1, function()
+	return cur().opacity
 end, function(v)
-	state.opacity = v
+	cur().opacity = v
 end)
-makeSlider(5, "LIFT", 1, function()
-	return state.lift
+makeSlider(6, "LIFT", 1, function()
+	return cur().lift
 end, function(v)
-	state.lift = v
+	cur().lift = v
 end)
-local swatch = Instance.new("Frame")
-swatch.LayoutOrder = 6
-swatch.Size = UDim2.new(1, 0, 0, 14)
-swatch.BorderSizePixel = 0
-swatch.Parent = panel
-Instance.new("UICorner", swatch).CornerRadius = UDim.new(0, 4)
+local swatch = makeSwatch(7)
 for i, ch in { "R", "G", "B" } do
-	makeSlider(6 + i, "SKULL " .. ch, 255, function()
-		return colors[tierColorName()][i]
+	makeSlider(7 + i, "SKULL " .. ch, 255, function()
+		return cur().skull[i]
 	end, function(v)
-		colors[tierColorName()][i] = v
+		cur().skull[i] = v
 	end)
 end
-local paintSwatch = Instance.new("Frame")
-paintSwatch.LayoutOrder = 10
-paintSwatch.Size = UDim2.new(1, 0, 0, 14)
-paintSwatch.BorderSizePixel = 0
-paintSwatch.Parent = panel
-Instance.new("UICorner", paintSwatch).CornerRadius = UDim.new(0, 4)
+makeSlider(11, "TONE", 1.5, function()
+	return cur().tone
+end, function(v)
+	cur().tone = math.max(0.1, v)
+end)
+makeSlider(12, "PAINT STR", 1, function()
+	return cur().paintStrength
+end, function(v)
+	cur().paintStrength = v
+end)
+makeSlider(13, "TOP POS", 1, function()
+	return cur().topPos
+end, function(v)
+	cur().topPos = v
+end)
+makeSlider(14, "TOP SIZE", 5, function()
+	return cur().topSize
+end, function(v)
+	cur().topSize = math.max(0.5, v)
+end)
+local paintSwatch = makeSwatch(15)
 for i, ch in { "R", "G", "B" } do
-	makeSlider(10 + i, "PAINT " .. ch, 255, function()
+	makeSlider(15 + i, "PAINT " .. ch, 255, function()
 		return state.paint[i]
 	end, function(v)
 		state.paint[i] = v
@@ -356,12 +425,7 @@ makeSlider(25, "M SEED", 60, function()
 end, function(v)
 	state.mossSeed = math.floor(v + 0.5)
 end, true)
-local mossSwatch = Instance.new("Frame")
-mossSwatch.LayoutOrder = 26
-mossSwatch.Size = UDim2.new(1, 0, 0, 14)
-mossSwatch.BorderSizePixel = 0
-mossSwatch.Parent = panelR
-Instance.new("UICorner", mossSwatch).CornerRadius = UDim.new(0, 4)
+local mossSwatch = makeSwatch(26)
 for i, ch in { "R", "G", "B" } do
 	makeSlider(26 + i, "MOSS " .. ch, 255, function()
 		return state.moss[i]
@@ -372,64 +436,77 @@ end
 
 local info = makeLabel(30, "", 11)
 info.TextWrapped = true
-info.Size = UDim2.new(1, 0, 0, 92)
+info.Size = UDim2.new(1, 0, 0, 150)
 
 -- // Применение ----------------------------------------------------------------
--- цвет выбранной ступени (имя из RankSkull.Colors; у ступени без черепа — bone)
-tierColorName = function(): string
-	local t = RANKS[state.tierIndex]
-	local n = t and t.skull and t.skull.color or "bone"
-	return if colors[n] then n else "bone"
-end
-local function tierColor(n: string): Color3
-	local c = colors[n]
-	return Color3.fromRGB(math.floor(c[1] + 0.5), math.floor(c[2] + 0.5), math.floor(c[3] + 0.5))
+local function rgb(t: { number }): Color3
+	return Color3.fromRGB(math.floor(t[1] + 0.5), math.floor(t[2] + 0.5), math.floor(t[3] + 0.5))
 end
 local function paintColor(): Color3
-	return Color3.fromRGB(math.floor(state.paint[1] + 0.5), math.floor(state.paint[2] + 0.5), math.floor(state.paint[3] + 0.5))
+	return rgb(state.paint)
+end
+local function mossColor(): Color3
+	return rgb(state.moss)
 end
 
-local function mossColor(): Color3
-	return Color3.fromRGB(math.floor(state.moss[1] + 0.5), math.floor(state.moss[2] + 0.5), math.floor(state.moss[3] + 0.5))
+local function bodyLine(b: string): string
+	local s = state.bodies[b]
+	return ("%s: mode=%s opacity=%.2f lift=%.2f skull=(%d,%d,%d) tone=%.2f paintStrength=%.2f top tb=%.2f height=%.2f"):format(
+		b, MODES[s.modeIndex], s.opacity, s.lift, s.skull[1] + 0.5, s.skull[2] + 0.5, s.skull[3] + 0.5, s.tone, s.paintStrength, s.topPos, s.topSize)
 end
 
 local function summary(): string
-	local parts = {}
-	for _, n in TIERS do
-		local c = colors[n]
-		table.insert(parts, ("%s=(%d,%d,%d)"):format(n, c[1] + 0.5, c[2] + 0.5, c[3] + 0.5))
-	end
 	local p = state.paint
 	local m = state.moss
-	return ("SkullMode=%s SkullOpacity=%.2f SkullLift=%.2f | %s | rust=(%d,%d,%d) | moss=(%d,%d,%d) mode=%s opacity=%.2f coverage=%.3f scale=%.1f seed=%d"):format(
-		MODES[state.modeIndex], state.opacity, state.lift, table.concat(parts, " "), p[1] + 0.5, p[2] + 0.5, p[3] + 0.5,
+	return ("%s\n%s\nrust=(%d,%d,%d) | moss=(%d,%d,%d) mode=%s opacity=%.2f coverage=%.3f scale=%.1f seed=%d"):format(
+		bodyLine("buggy"), bodyLine("coffin"), p[1] + 0.5, p[2] + 0.5, p[3] + 0.5,
 		m[1] + 0.5, m[2] + 0.5, m[3] + 0.5, PATCH_MODES[state.mossModeIndex], state.mossOpacity, state.mossCoverage, state.mossScale, state.mossSeed)
 end
 
+-- Поля спеки кузова (тон, сила краски, место/размер черепа на капоте) панель правит на
+-- живую — они в ключе кэша RankSkull.compose, пересборка честная. Без панели — как в коде.
+local function pushSpec(b: string, s: BodyState)
+	local spec = RankSkull.Bodies[b]
+	if not spec then
+		return
+	end
+	spec.baseTone = s.tone
+	spec.paintStrength = s.paintStrength
+	local top = spec.zones.top
+	if top then
+		top.tb = s.topPos
+		top.height = s.topSize
+	end
+end
+
 applyAll = function()
-	for _, n in TIERS do
-		RankSkull.Colors[n] = tierColor(n)
+	if state.bodyAuto then
+		local d = drivenBody()
+		local i = d and table.find(BODIES, d)
+		if i then
+			state.bodyIndex = i
+		end
+	end
+	local byBody: { [string]: RankSkull.BodyOverride } = {}
+	for _, b in BODIES do
+		local s = if active then state.bodies[b] else base.bodies[b]
+		pushSpec(b, s)
+		RankSkull.Colors["dev_" .. b] = rgb(s.skull)
+		byBody[b] = { mode = MODES[s.modeIndex], opacity = s.opacity, lift = s.lift, colorName = "dev_" .. b }
 	end
 	RankSkull.Overrides = if active then {
-		mode = MODES[state.modeIndex],
-		opacity = state.opacity,
-		lift = state.lift,
 		tint = paintColor(),
-		colorName = tierColorName(),
+		colorName = "dev_" .. bodyName(),
 		shape = (RANKS[state.tierIndex].skull and RANKS[state.tierIndex].skull.shape) or RANKS[state.tierIndex].name,
+		byBody = byBody,
 		patch = if state.mossOn then {
 			color = mossColor(), coverage = state.mossCoverage, scale = state.mossScale, seed = state.mossSeed,
 			mode = PATCH_MODES[state.mossModeIndex], opacity = state.mossOpacity,
 		} else nil,
 		patchOff = not state.mossOn,
 	} else nil
-	if not active then
-		for _, n in TIERS do
-			RankSkull.Colors[n] = base.colors[n]
-		end
-	end
 	RankSkull.OverridesChanged:Fire()
-	swatch.BackgroundColor3 = tierColor(tierColorName())
+	swatch.BackgroundColor3 = rgb(cur().skull)
 	paintSwatch.BackgroundColor3 = paintColor()
 	mossSwatch.BackgroundColor3 = mossColor()
 	for _, f in refreshers do
@@ -447,14 +524,10 @@ applyAll = function()
 end
 
 local function reset()
-	state.modeIndex = table.find(MODES, base.mode) or 1
-	state.opacity = base.opacity
-	state.lift = base.lift
-	state.paint = { base.paint.R * 255, base.paint.G * 255, base.paint.B * 255 }
-	for _, n in TIERS do
-		local c = base.colors[n]
-		colors[n] = { c.R * 255, c.G * 255, c.B * 255 }
+	for _, b in BODIES do
+		state.bodies[b] = cloneBody(base.bodies[b])
 	end
+	state.paint = { base.paint.R * 255, base.paint.G * 255, base.paint.B * 255 }
 	state.mossModeIndex = table.find(PATCH_MODES, base.moss.mode) or 1
 	state.mossOpacity = base.moss.opacity
 	state.mossCoverage = base.moss.coverage

@@ -79,6 +79,9 @@ export type GameConfigType = {
 		SkullMode: string, -- режим наложения черепа на текстуру кузова (см. RankSkull.Modes)
 		SkullOpacity: number,
 		SkullLift: number, -- подъём яркости черепа сверх режима (доля цвета), см. RankSkull
+		-- по кузовам поверх общих (buggy/coffin): плотность/подъём/режим свои — на багги
+		-- черепу нужно больше плотности, чем на досках гроба (юзер 2026-09-12)
+		SkullBody: { [string]: { mode: string?, opacity: number?, lift: number? } }?,
 	},
 }
 
@@ -216,6 +219,10 @@ local GameConfig: GameConfigType = {
 		SkullMode = "softlight",
 		SkullOpacity = 0.72,
 		SkullLift = 0.11,
+		SkullBody = {
+			buggy = { opacity = 0.90 },
+			coffin = { opacity = 0.80 },
+		},
 	},
 }
 

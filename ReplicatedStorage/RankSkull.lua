@@ -53,6 +53,9 @@ export type BodySpec = {
 	-- (гроб 0.65: BLOOD на досках уходил в чистый тёмно-красный, юзер 2026-09-12 —
 	-- «прижать к тёмно-коричневому»)
 	paintStrength: number?,
+	-- тон холста: домножение текстуры до краски (багги 0.85 — «придави тон, нужен
+	-- контраст с черепом», юзер 2026-09-12)
+	baseTone: number?,
 	texture: string?, -- текстура кузова (nil = белый холст)
 	zones: { [string]: Zone },
 }
@@ -65,7 +68,9 @@ export type BodySpec = {
 RankSkull.Bodies = {
 	buggy = {
 		atlas = 1024,
-		texture = "rbxassetid://135253107984920",
+		texture = "rbxassetid://135253107984920", -- ржавчина (tools/blender/buggy_texture.py): ID после импорта FBX юзером
+		paintStrength = 0.65, -- BLOOD «сильно отдаёт красным» — как у гроба, в тёмно-коричневый
+		baseTone = 0.85,
 		zones = {
 			top   = { u0 = 0.015, v0 = 0.635, u1 = 0.376, v1 = 0.914, rotated = false, studsW = 4.63, studsH = 3.57, ta = 0.5,  tb = 0.5,  height = 3.1, flip = true, mirror = true },
 			rear  = { u0 = 0.406, v0 = 0.635, u1 = 0.802, v1 = 0.846, rotated = false, studsW = 5.07, studsH = 2.70, ta = 0.5,  tb = 0.27, height = 1.25 },
@@ -81,7 +86,7 @@ RankSkull.Bodies = {
 		texture = nil, -- доски (tools/blender/coffin_texture.py): ID после импорта FBX юзером
 		paintStrength = 0.65,
 		zones = {
-			top   = { u0 = 0.015, v0 = 0.585, u1 = 0.366, v1 = 0.942, rotated = false, studsW = 6.00, studsH = 6.10, ta = 0.5,  tb = 0.47, height = 2.8, flip = true, mirror = true },
+			top   = { u0 = 0.015, v0 = 0.585, u1 = 0.366, v1 = 0.942, rotated = false, studsW = 6.00, studsH = 6.10, ta = 0.5,  tb = 0.38, height = 3.1, flip = true, mirror = true },
 			rear  = { u0 = 0.396, v0 = 0.585, u1 = 0.659, v1 = 0.784, rotated = false, studsW = 4.48, studsH = 3.40, ta = 0.5,  tb = 0.42, height = 2.2 },
 			left  = { u0 = 0.585, v0 = 0.015, u1 = 0.758, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.30, tb = 0.45, height = 1.9 },
 			right = { u0 = 0.788, v0 = 0.015, u1 = 0.960, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.70, tb = 0.45, height = 1.9 },
@@ -446,7 +451,10 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	local up = lift or 0
 	-- в ключе сам цвет, а не имя: SkullTune крутит RankSkull.Colors[name] на живую
 	local patchKey = if patch then ("%s|%.3f|%.2f|%d|%s|%.2f"):format(patch.color:ToHex(), patch.coverage, patch.scale, patch.seed, patch.mode or "tint", patch.opacity or 1) else "-"
-	local key = ("%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s"):format(bodyId, table.concat(names, ","), shapeName or "-", color and color:ToHex() or "-", mode, opacity, up, paint:ToHex(), patchKey)
+	-- тон/сила краски/место и размер черепа на капоте — поля спеки, SkullTune крутит их на живую
+	local top = spec.zones.top
+	local specKey = ("%.2f|%.2f|%.2f|%.2f"):format(spec.baseTone or 1, spec.paintStrength or 1, top and top.tb or 0, top and top.height or 0)
+	local key = ("%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s"):format(bodyId, table.concat(names, ","), shapeName or "-", color and color:ToHex() or "-", mode, opacity, up, paint:ToHex(), patchKey, specKey)
 	local ready = imageCache[key]
 	if ready then
 		return ready
@@ -460,13 +468,14 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	buffer.copy(buf, 0, base.buf)
 	-- краска: домножить каждый пиксель; paintStrength < 1 подмешивает белый — холст просвечивает
 	local ps = spec.paintStrength or 1
-	local pr, pg, pb = 1 - (1 - paint.R) * ps, 1 - (1 - paint.G) * ps, 1 - (1 - paint.B) * ps
-	if pr < 0.999 or pg < 0.999 or pb < 0.999 then
+	local tone = spec.baseTone or 1
+	local pr, pg, pb = tone * (1 - (1 - paint.R) * ps), tone * (1 - (1 - paint.G) * ps), tone * (1 - (1 - paint.B) * ps)
+	if math.abs(pr - 1) > 0.001 or math.abs(pg - 1) > 0.001 or math.abs(pb - 1) > 0.001 then
 		for i = 0, size * size - 1 do
 			local o = i * 4
-			buffer.writeu8(buf, o, math.floor(buffer.readu8(buf, o) * pr + 0.5))
-			buffer.writeu8(buf, o + 1, math.floor(buffer.readu8(buf, o + 1) * pg + 0.5))
-			buffer.writeu8(buf, o + 2, math.floor(buffer.readu8(buf, o + 2) * pb + 0.5))
+			buffer.writeu8(buf, o, math.min(255, math.floor(buffer.readu8(buf, o) * pr + 0.5)))
+			buffer.writeu8(buf, o + 1, math.min(255, math.floor(buffer.readu8(buf, o + 1) * pg + 0.5)))
+			buffer.writeu8(buf, o + 2, math.min(255, math.floor(buffer.readu8(buf, o + 2) * pb + 0.5)))
 		end
 	end
 	-- Пятна краски (мох): где шум выше порога — цвет краски по яркости базы, край
@@ -602,7 +611,10 @@ end
 -- // Дев-подкрутка (SkullTune) ------------------------------------------------
 -- Пока Overrides не nil, сторож (RankSkull.client) берёт режим/плотность/подъём/краску
 -- отсюда вместо GameConfig и цвета кузова; OverridesChanged — пересобрать всем машинам.
-export type Overrides = { mode: string?, opacity: number?, lift: number?, tint: Color3?, colorName: string?, shape: string?, patch: Patch?, patchOff: boolean? }
+-- byBody — то же по кузовам (buggy/coffin): плотность/подъём/режим/цвет черепа у каждого
+-- свои (юзер 2026-09-12: «на багги сильнее», «череп цвета ржавчины с наложением»).
+export type BodyOverride = { mode: string?, opacity: number?, lift: number?, colorName: string? }
+export type Overrides = { mode: string?, opacity: number?, lift: number?, tint: Color3?, colorName: string?, shape: string?, patch: Patch?, patchOff: boolean?, byBody: { [string]: BodyOverride }? }
 RankSkull.Overrides = nil :: Overrides?
 RankSkull.OverridesChanged = Instance.new("BindableEvent")
 
