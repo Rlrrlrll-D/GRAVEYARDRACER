@@ -69,7 +69,23 @@ local function dress(body: BasePart, driver: Player)
 	-- ржавчины RUST, а цвет скина ложится пятнами. Подкрутка SkullTune красит сплошь.
 	local tint = (o and o.tint) or body.Color
 	local patch: RankSkull.Patch? = nil
-	if o and o.patch then
+	local devSkin = body.Parent and body.Parent:GetAttribute("DevSkin")
+	if type(devSkin) == "string" then
+		-- Гараж (DevGarage): каждый экземпляр носит свою краску из каталога, панель
+		-- перекрашивает только базу RUST (и базу под мхом) и сам мох.
+		local skin = ShopCatalog.get(devSkin)
+		local baseSkin = ShopCatalog.get(ShopCatalog.DefaultSkin)
+		local rust = (o and o.tint) or (baseSkin and baseSkin.color) or Color3.new(1, 1, 1)
+		if skin and skin.patchy and skin.color then
+			tint = rust
+			local py = skin.patchy
+			patch = (o and o.patch) or { color = skin.color, coverage = py.coverage, scale = py.scale, seed = py.seed, mode = py.mode, opacity = py.opacity }
+		elseif devSkin == ShopCatalog.DefaultSkin then
+			tint = rust
+		else
+			tint = (skin and skin.color) or body.Color
+		end
+	elseif o and o.patch then
 		patch = o.patch -- SkullTune: мох поверх RUST, что бы ни было надето
 	elseif not (o and (o.tint or o.patchOff)) then
 		local skin = ShopCatalog.get(driver:GetAttribute("EquippedSkin"))
@@ -188,13 +204,17 @@ RankSkull.OverridesChanged.Event:Connect(function()
 	end
 end)
 
-for _, car in CollectionService:GetTagged("PlayerVehicle") do
-	if car:IsA("Model") then
-		watchCar(car)
+-- DevGarageBody — экземпляры гаража-песочницы (ServerScriptService.DevGarage, Studio):
+-- та же модель с BuggyBody и OwnerUserId, только без физики и гонки.
+for _, tag in { "PlayerVehicle", "DevGarageBody" } do
+	for _, car in CollectionService:GetTagged(tag) do
+		if car:IsA("Model") then
+			watchCar(car)
+		end
 	end
+	CollectionService:GetInstanceAddedSignal(tag):Connect(function(car)
+		if car:IsA("Model") then
+			watchCar(car)
+		end
+	end)
 end
-CollectionService:GetInstanceAddedSignal("PlayerVehicle"):Connect(function(car)
-	if car:IsA("Model") then
-		watchCar(car)
-	end
-end)

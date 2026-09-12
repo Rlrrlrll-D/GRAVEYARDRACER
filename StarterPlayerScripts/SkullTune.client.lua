@@ -21,8 +21,12 @@
 --                 просвечивает (BLOOD уходит из красного в тёмно-коричневый)
 --   TOP POS/SIZE  место (0 — у кабины, 1 — у носа) и высота черепа на капоте/крышке
 --   PAINT R G B   краска кузова (общая, как RUST)
--- ПРАВАЯ КОЛОНКА — мох: MOSS (вкл + перебор режима), MOSS OFF, M OPAC/COVER/SCALE/SEED,
--- MOSS R G B. \ — сброс к конфигу, P — напечатать всё, Z — зомби выкл/вкл.
+-- ПРАВАЯ КОЛОНКА — GARAGE: гараж-песочница вне заезда — сервер (DevGarage) ставит над
+-- стартом площадку со ВСЕМИ кузовами × ВСЕМИ красками, камера орбитальная (ПКМ —
+-- крутить, колесо — зум, СКМ — сдвиг), заставка и блюр на время гаснут; ручки слева
+-- красят все экземпляры сразу. Ниже мох: MOSS (вкл + перебор режима), MOSS OFF,
+-- M OPAC/COVER/SCALE/SEED, MOSS R G B. \ — сброс к конфигу, P — напечатать всё,
+-- Z — зомби выкл/вкл.
 --   F3            вкл / выкл панели. НЕ F8: в Studio это «Run» (сервер без игрока) —
 --                 нажатие в Play роняло сессию в серверный режим, «меню пропало»
 --                 (2026-09-12). F7 — тоже Studio, F6 — NeonTune, F4 — PhotoMode.
@@ -34,6 +38,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
+local Lighting = game:GetService("Lighting")
 
 if not RunService:IsStudio() then
 	return
@@ -43,6 +48,7 @@ local UITheme = require(ReplicatedStorage:WaitForChild("UITheme"))
 local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local RankSkull = require(ReplicatedStorage:WaitForChild("RankSkull"))
 local ShopCatalog = require(ReplicatedStorage:WaitForChild("ShopCatalog"))
+local EnvironmentConfig = require(ReplicatedStorage:WaitForChild("EnvironmentConfig"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -145,13 +151,22 @@ local active = false
 -- Выключатель зомби — тот же ремоут, что у NeonTune (PhotoModeService, только Studio).
 local zombiesOff = false
 local zombiesRemote: RemoteEvent? = nil
+local garageRemote: RemoteEvent? = nil
 task.spawn(function()
 	local remotes = ReplicatedStorage:WaitForChild("Remotes", 20)
 	local r = remotes and remotes:WaitForChild("DevZombies", 20)
 	if r and r:IsA("RemoteEvent") then
 		zombiesRemote = r
 	end
+	local g = remotes and remotes:WaitForChild("DevGarage", 20)
+	if g and g:IsA("RemoteEvent") then
+		garageRemote = g
+	end
 end)
+local garageOn = false
+local setGarage: (boolean) -> () -- ниже
+local nightOn = false
+local setNight: (boolean) -> () -- ниже
 
 -- // Панель ------------------------------------------------------------------
 local gui = Instance.new("ScreenGui")
@@ -388,8 +403,18 @@ for i, ch in { "R", "G", "B" } do
 		state.paint[i] = v
 	end)
 end
--- // Мох (вторая колонка) -------------------------------------------------------
+-- // Гараж и мох (вторая колонка) -----------------------------------------------
 column = panelR
+makeButton(17, function()
+	return "GARAGE: " .. (garageOn and "ON   (ПКМ крутить, колесо зум, СКМ сдвиг)" or "OFF")
+end, function()
+	setGarage(not garageOn)
+end)
+makeButton(18, function()
+	return "LIGHT: " .. (nightOn and "NIGHT (как в заезде)" or "DAY (как в лобби)")
+end, function()
+	setNight(not nightOn)
+end)
 makeLabel(19, "MOSS  (пятнистая краска)", 15)
 makeButton(20, function()
 	return "MOSS: " .. (state.mossOn and "ON" or "OFF") .. "   mode " .. PATCH_MODES[state.mossModeIndex]
@@ -537,6 +562,161 @@ local function reset()
 	applyAll()
 end
 
+-- // Гараж-песочница ------------------------------------------------------------
+-- Сервер (ServerScriptService.DevGarage) ставит модель workspace.DevGarage с атрибутом
+-- Origin; экземпляры одевает сторож RankSkull.client по тегу DevGarageBody. Здесь —
+-- камера-орбита и подавление заставки/блюра (как в PhotoMode, короче: только LobbyUI).
+local camera = workspace.CurrentCamera
+local orbit = { yaw = math.rad(30), pitch = math.rad(-22), dist = 70, target = Vector3.zero }
+local suppressed: { [LayerCollector]: { wanted: boolean, conn: RBXScriptConnection } } = {}
+local blurs: { [BlurEffect]: { size: number, conn: RBXScriptConnection } } = {}
+
+local function suppressLobby()
+	for _, g in playerGui:GetChildren() do
+		if g:IsA("ScreenGui") and g.Name == "LobbyUI" and not suppressed[g] then
+			local record = { wanted = g.Enabled } :: any
+			-- реагируем только на включение: сигналы свойств отложенные, своё гашение
+			-- от чужого флагом не отличить (см. PhotoMode)
+			record.conn = g:GetPropertyChangedSignal("Enabled"):Connect(function()
+				if g.Enabled then
+					record.wanted = true
+					g.Enabled = false
+				end
+			end)
+			g.Enabled = false
+			suppressed[g] = record
+		end
+	end
+	for _, inst in Lighting:GetDescendants() do
+		if inst:IsA("BlurEffect") and not blurs[inst] then
+			local record = { size = inst.Size } :: any
+			record.conn = inst:GetPropertyChangedSignal("Size"):Connect(function()
+				if inst.Size > 0 then
+					record.size = inst.Size
+					inst.Size = 0
+				end
+			end)
+			inst.Size = 0
+			blurs[inst] = record
+		end
+	end
+end
+
+local function restoreLobby()
+	for g, record in suppressed do
+		record.conn:Disconnect()
+		if g.Parent then
+			g.Enabled = record.wanted
+		end
+	end
+	table.clear(suppressed)
+	for b, record in blurs do
+		record.conn:Disconnect()
+		if b.Parent then
+			b.Size = record.size
+		end
+	end
+	table.clear(blurs)
+end
+
+-- Свет: лобби стоит на вечере (DayNightCycle, anchor < 0), заезд уходит в ночь — а
+-- черепа и краски смотрят ночью. Кнопка LIGHT ставит ночную опору EnvironmentConfig
+-- локально, как apply(1) в DayNightCycle; на выходе — вечер обратно.
+local function applyLight(cfg: any)
+	Lighting.ClockTime = cfg.ClockTime % 24
+	Lighting.Brightness = cfg.Brightness
+	Lighting.OutdoorAmbient = cfg.OutdoorAmbient
+	Lighting.Ambient = cfg.OutdoorAmbient
+	local atmo = Lighting:FindFirstChildOfClass("Atmosphere")
+	if atmo then
+		atmo.Density = cfg.Density
+	end
+	local cc = Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+	if cc then
+		cc.Saturation = cfg.ColorCorrectionSaturation
+		cc.TintColor = cfg.ColorCorrectionTintColor
+	end
+end
+
+-- Молния (DayNightCycle) после вспышки зовёт apply(0) и возвращает вечер — держим
+-- ночь, пока включена: сигнал отложенный, на кадр вспышки не спорим.
+local nightConn: RBXScriptConnection? = nil
+setNight = function(on: boolean)
+	nightOn = on
+	if nightConn then
+		nightConn:Disconnect()
+		nightConn = nil
+	end
+	applyLight(if on then EnvironmentConfig.Atmosphere else EnvironmentConfig.Evening)
+	if on then
+		nightConn = Lighting:GetPropertyChangedSignal("ClockTime"):Connect(function()
+			if nightOn and math.abs(Lighting.ClockTime - EnvironmentConfig.Atmosphere.ClockTime % 24) > 0.01 then
+				applyLight(EnvironmentConfig.Atmosphere)
+			end
+		end)
+	end
+	for _, f in refreshers do
+		f()
+	end
+end
+
+local function orbitStep()
+	local rot = CFrame.fromEulerAnglesYXZ(orbit.pitch, orbit.yaw, 0)
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.CFrame = CFrame.new(orbit.target) * rot * CFrame.new(0, 0, orbit.dist)
+end
+
+UserInputService.InputChanged:Connect(function(input)
+	if not garageOn then
+		return
+	end
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		local d = input.Delta
+		if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+			orbit.yaw -= d.X * 0.006
+			orbit.pitch = math.clamp(orbit.pitch - d.Y * 0.006, -1.45, 0.4)
+		elseif UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton3) then
+			local cf = camera.CFrame
+			orbit.target -= (cf.RightVector * d.X - cf.UpVector * d.Y) * (orbit.dist * 0.0015)
+		end
+	elseif input.UserInputType == Enum.UserInputType.MouseWheel then
+		orbit.dist = math.clamp(orbit.dist - input.Position.Z * 6, 8, 250)
+	end
+end)
+
+setGarage = function(on: boolean)
+	local r = garageRemote
+	if not r then
+		print("[SkullTune] ремоута DevGarage нет — он только в Studio")
+		return
+	end
+	garageOn = on
+	r:FireServer(on)
+	if on then
+		task.spawn(function()
+			local model = workspace:WaitForChild("DevGarage", 10)
+			local origin = model and model:GetAttribute("Origin")
+			if not garageOn or typeof(origin) ~= "Vector3" then
+				return
+			end
+			orbit.target = origin + Vector3.new(0, 3, 0)
+			orbit.yaw, orbit.pitch, orbit.dist = math.rad(30), math.rad(-22), 70
+			suppressLobby()
+			RunService:BindToRenderStep("SkullTuneGarage", Enum.RenderPriority.Camera.Value + 1, orbitStep)
+		end)
+	else
+		RunService:UnbindFromRenderStep("SkullTuneGarage")
+		camera.CameraType = Enum.CameraType.Custom
+		restoreLobby()
+		if nightOn then
+			setNight(false)
+		end
+	end
+	for _, f in refreshers do
+		f()
+	end
+end
+
 UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == TOGGLE_KEY then
 		active = not active
@@ -547,6 +727,9 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		player:SetAttribute("DevPanelOpen", active or nil)
 		UserInputService.MouseIconEnabled = true
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		if not active and garageOn then
+			setGarage(false)
+		end
 		applyAll()
 		return
 	end

@@ -68,7 +68,7 @@ export type BodySpec = {
 RankSkull.Bodies = {
 	buggy = {
 		atlas = 1024,
-		texture = "rbxassetid://135253107984920", -- ржавчина (tools/blender/buggy_texture.py): ID после импорта FBX юзером
+		texture = "rbxassetid://108257958365417", -- ржавчина (tools/blender/buggy_texture.py), импорт юзера 2026-09-12
 		paintStrength = 0.65, -- BLOOD «сильно отдаёт красным» — как у гроба, в тёмно-коричневый
 		baseTone = 0.85,
 		zones = {
@@ -83,7 +83,7 @@ RankSkull.Bodies = {
 	-- кормы, «right» — у носа; заднее колесо на ta ≈ 0.34 от кормы.
 	coffin = {
 		atlas = 1024,
-		texture = nil, -- доски (tools/blender/coffin_texture.py): ID после импорта FBX юзером
+		texture = "rbxassetid://90339981575144", -- доски (tools/blender/coffin_texture.py), импорт юзера 2026-09-12
 		paintStrength = 0.65,
 		zones = {
 			top   = { u0 = 0.015, v0 = 0.585, u1 = 0.366, v1 = 0.942, rotated = false, studsW = 6.00, studsH = 6.10, ta = 0.5,  tb = 0.38, height = 3.1, flip = true, mirror = true },
@@ -232,11 +232,19 @@ RankSkull.Modes = BLEND
 local baseCache: { [string]: { size: number, buf: buffer }? } = {}
 local baseTried: { [string]: boolean } = {}
 
+local baseLoading: { [string]: boolean } = {}
 local function loadBase(bodyId: string): { size: number, buf: buffer }?
+	-- Первый вызов читает текстуру с йилдом; остальные, пришедшие в это время, ЖДУТ его,
+	-- а не получают nil (гараж: десять кузовов одеваются разом, восемь оставались без
+	-- черепов — 2026-09-12).
+	while baseLoading[bodyId] do
+		task.wait()
+	end
 	if baseTried[bodyId] then
 		return baseCache[bodyId]
 	end
 	baseTried[bodyId] = true
+	baseLoading[bodyId] = true
 	local spec = RankSkull.Bodies[bodyId]
 	if not spec then
 		return nil
@@ -248,6 +256,7 @@ local function loadBase(bodyId: string): { size: number, buf: buffer }?
 			return AssetService:CreateEditableImageAsync(Content.fromAssetId(tonumber(spec.texture:match("%d+")) :: number))
 		end)
 		if not ok or not img then
+			baseLoading[bodyId] = nil
 			warn("[RankSkull] текстура кузова " .. bodyId .. " не читается: " .. tostring(img))
 			return nil
 		end
@@ -259,6 +268,7 @@ local function loadBase(bodyId: string): { size: number, buf: buffer }?
 		buffer.fill(buf, 0, 255) -- белый холст, непрозрачный
 	end
 	baseCache[bodyId] = { size = size, buf = buf }
+	baseLoading[bodyId] = nil
 	return baseCache[bodyId]
 end
 
@@ -326,12 +336,13 @@ end
 --     носит ТОЛЬКО пересобираемый кузов, переписываем НА МЕСТЕ (WritePixelsBuffer),
 --     не создавая новой — так подкрутка не плодит картинок вовсе;
 --   * картинок в пуле не больше MAX_IMAGES: лишние, которых никто не носит,
---     уничтожаем перед созданием новой.
+--     уничтожаем перед созданием новой. 12, а не 6: гараж-песочница (DevGarage)
+--     одевает 2 кузова × 5 красок разом, плюс своя машина.
 local imageCache: { [string]: EditableImage } = {}
 local keyOf: { [EditableImage]: string } = {}
 local users: { [EditableImage]: { [Instance]: boolean } } = {}
 local wornBy: { [Instance]: EditableImage } = setmetatable({}, { __mode = "k" }) :: any
-local MAX_IMAGES = 6
+local MAX_IMAGES = 12
 
 local function userCount(img: EditableImage): number
 	local n = 0
