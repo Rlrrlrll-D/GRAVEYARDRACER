@@ -61,7 +61,8 @@ local function dress(body: BasePart, driver: Player)
 		end
 	end
 	local img = RankSkull.compose(bodyId, zones, colorName,
-		(o and o.mode) or MODE, (o and o.opacity) or OPACITY, (o and o.tint) or body.Color, (o and o.lift) or LIFT)
+		(o and o.mode) or MODE, (o and o.opacity) or OPACITY, (o and o.tint) or body.Color, (o and o.lift) or LIFT,
+		RankSkull.worn(body)) -- свою картинку переписываем на месте, а не плодим новые
 	if not body.Parent then
 		return -- кузов успели заменить, пока читали текстуру
 	end
@@ -107,6 +108,13 @@ local function watchCar(car: Model)
 			task.defer(redress)
 		end
 	end))
+	-- кузов сменили в магазине: старая деталь больше ничего не носит — отпустить
+	-- картинку, иначе пул считает её занятой навсегда
+	table.insert(conns, car.ChildRemoved:Connect(function(child)
+		if child.Name == "BuggyBody" then
+			RankSkull.release(child)
+		end
+	end))
 	table.insert(conns, car:GetAttributeChangedSignal("OwnerUserId"):Connect(redress))
 
 	-- ранг водителя растёт по ходу сессии: пересобрать, когда изменились статы
@@ -131,6 +139,10 @@ local function watchCar(car: Model)
 	table.insert(conns, car:GetAttributeChangedSignal("OwnerUserId"):Connect(rewireDriver))
 	table.insert(conns, car.AncestryChanged:Connect(function(_, parent)
 		if parent == nil then
+			local body = car:FindFirstChild("BuggyBody")
+			if body then
+				RankSkull.release(body)
+			end
 			for _, c in conns do
 				c:Disconnect()
 			end

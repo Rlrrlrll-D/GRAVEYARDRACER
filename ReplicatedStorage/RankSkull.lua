@@ -279,7 +279,58 @@ local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, m
 	end
 end
 
+-- // Пул картинок -----------------------------------------------------------------
+-- БЮДЖЕТ EditableImage КОНЕЧЕН (2026-09-12: «Failed to create empty EditableImage …
+-- memory budget limits» после десятка движений ползунка SkullTune: каждый вариант
+-- создавал новую 1024² = 4 МБ и жил в кэше вечно). Поэтому:
+--   * учитываем, какие кузова носят какую картинку (users), и картинку, которую
+--     носит ТОЛЬКО пересобираемый кузов, переписываем НА МЕСТЕ (WritePixelsBuffer),
+--     не создавая новой — так подкрутка не плодит картинок вовсе;
+--   * картинок в пуле не больше MAX_IMAGES: лишние, которых никто не носит,
+--     уничтожаем перед созданием новой.
 local imageCache: { [string]: EditableImage } = {}
+local keyOf: { [EditableImage]: string } = {}
+local users: { [EditableImage]: { [Instance]: boolean } } = {}
+local wornBy: { [Instance]: EditableImage } = setmetatable({}, { __mode = "k" }) :: any
+local MAX_IMAGES = 6
+
+local function userCount(img: EditableImage): number
+	local n = 0
+	for _ in users[img] or {} do
+		n += 1
+	end
+	return n
+end
+
+local function forget(img: EditableImage)
+	local key = keyOf[img]
+	if key then
+		imageCache[key] = nil
+	end
+	keyOf[img] = nil
+	users[img] = nil
+	img:Destroy()
+end
+
+local function cacheCount(): number
+	local n = 0
+	for _ in imageCache do
+		n += 1
+	end
+	return n
+end
+
+-- Освободить место: выкинуть картинки, которые никто не носит.
+local function evictUnused(keep: EditableImage?)
+	for _, img in imageCache do
+		if cacheCount() < MAX_IMAGES then
+			break
+		end
+		if img ~= keep and userCount(img) == 0 then
+			forget(img)
+		end
+	end
+end
 
 -- Собрать текстуру кузова bodyId: холст × краска, сверху черепа в зонах zoneNames
 -- (список может быть пустым — на нулевом ранге нужна одна краска). Кэш по ключу:
@@ -293,7 +344,9 @@ local imageCache: { [string]: EditableImage } = {}
 -- сами: текстура × краска у багги, ровный холст цвета краски у гроба. Из этого же
 -- следует, что композит нужен ВСЕГДА, даже без черепов — иначе на нулевом ранге
 -- багги был бы некрашеным, а с первым черепом вдруг перекрашивался.
-function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: string?, mode: string, opacity: number, tint: Color3?, lift: number?): EditableImage?
+-- reuse — картинка, которую кузов носит сейчас: если её больше никто не носит, новый
+-- композит пишется в неё на месте (см. пул выше).
+function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: string?, mode: string, opacity: number, tint: Color3?, lift: number?, reuse: EditableImage?): EditableImage?
 	local spec = RankSkull.Bodies[bodyId]
 	if not spec then
 		return nil
@@ -334,22 +387,70 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 			end
 		end
 	end
-	local ok, img = pcall(function()
-		local image = AssetService:CreateEditableImage({ Size = Vector2.new(size, size) })
-		image:WritePixelsBuffer(Vector2.zero, Vector2.new(size, size), buf)
-		return image
+	local dims = Vector2.new(size, size)
+	-- (1) своя картинка, которую никто больше не носит — переписать на месте
+	local target: EditableImage? = nil
+	if reuse and keyOf[reuse] and userCount(reuse) <= 1 and reuse.Size == dims then
+		target = reuse
+	end
+	-- (2) иначе освободить пул и создать новую
+	if not target then
+		evictUnused(reuse)
+		local ok, img = pcall(function()
+			return AssetService:CreateEditableImage({ Size = dims })
+		end)
+		if ok and img then
+			target = img
+		elseif reuse and keyOf[reuse] and reuse.Size == dims then
+			-- бюджет кончился: жертвуем своей, даже если её носит кто-то ещё — он
+			-- пересоберётся своим ключом при следующем обращении
+			target = reuse
+		else
+			warn("[RankSkull] EditableImage недоступен: " .. tostring(img))
+			return nil
+		end
+	end
+	local final = target :: EditableImage
+	local wrote = pcall(function()
+		final:WritePixelsBuffer(Vector2.zero, dims, buf)
 	end)
-	if not ok or not img then
-		warn("[RankSkull] EditableImage недоступен: " .. tostring(img))
+	if not wrote then
+		warn("[RankSkull] EditableImage не пишется")
 		return nil
 	end
-	imageCache[key] = img
-	return img
+	local old = keyOf[final]
+	if old then
+		imageCache[old] = nil
+	end
+	imageCache[key] = final
+	keyOf[final] = key
+	return final
 end
 
--- Надеть картинку на кузов (nil — вернуть штатную текстуру).
+-- Что носит кузов сейчас (для reuse в compose).
+function RankSkull.worn(body: Instance): EditableImage?
+	return wornBy[body]
+end
+
+-- Кузов больше не носит ничего (машину убрали): отпустить картинку.
+function RankSkull.release(body: Instance)
+	local prev = wornBy[body]
+	if prev and users[prev] then
+		users[prev][body] = nil
+	end
+	wornBy[body] = nil
+end
+
+-- Надеть картинку на кузов (nil — вернуть штатную текстуру). Ведёт учёт, кто что носит.
 function RankSkull.apply(body: MeshPart, img: EditableImage?)
+	local prev = wornBy[body]
+	if prev and prev ~= img and users[prev] then
+		users[prev][body] = nil
+	end
+	wornBy[body] = img
 	if img then
+		users[img] = users[img] or {}
+		users[img][body] = true
 		body.TextureContent = Content.fromObject(img)
 	else
 		local spec = RankSkull.Bodies[body:GetAttribute("BodyId") :: any]
