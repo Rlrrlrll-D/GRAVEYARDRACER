@@ -348,7 +348,10 @@ end
 -- композит пишется в неё на месте (см. пул выше).
 -- patch — пятнистая краска (ShopCatalog.Item.patchy): tint тогда — базовая ржавчина,
 -- а patch.color ложится локальными пятнами по шуму на долю coverage площади.
-export type Patch = { color: Color3, coverage: number, scale: number, seed: number }
+-- mode — как цвет пятна ложится на базу: "tint" = цвет × (0.6 + яркость базы) или любой
+-- режим из BLEND (multiply/overlay/screen/softlight/lineardodge/normal); opacity —
+-- плотность пятна.
+export type Patch = { color: Color3, coverage: number, scale: number, seed: number, mode: string?, opacity: number? }
 
 -- Порог шума под заданную долю площади: шум не равномерен, поэтому порог не считаем,
 -- а меряем — 4096 проб по всему атласу, берём квантиль. Один раз на набор параметров.
@@ -357,6 +360,28 @@ local function patchNoise(u: number, v: number, scale: number, seed: number): nu
 	-- две октавы: крупные пятна + рваный край
 	return math.noise(u * scale, v * scale, seed) + 0.5 * math.noise(u * scale * 2.1 + 3.7, v * scale * 2.1 + 1.3, seed + 11)
 end
+-- Поле шума на весь атлас, f32-буфер. Считать ~1 с (2M вызовов math.noise), поэтому
+-- держим одно последнее на (size, scale, seed): подкрутка цвета/доли/режима шум не
+-- трогает, пересчёт только при смене масштаба или раскладки.
+local fieldKey: string? = nil
+local fieldBuf: buffer? = nil
+local function noiseField(size: number, scale: number, seed: number): buffer
+	local k = ("%d|%.2f|%d"):format(size, scale, seed)
+	if fieldKey == k and fieldBuf then
+		return fieldBuf
+	end
+	local b = buffer.create(size * size * 4)
+	local inv = 1 / size
+	for y = 0, size - 1 do
+		local v = (y + 0.5) * inv
+		for x = 0, size - 1 do
+			buffer.writef32(b, (y * size + x) * 4, patchNoise((x + 0.5) * inv, v, scale, seed))
+		end
+	end
+	fieldKey, fieldBuf = k, b
+	return b
+end
+
 local function patchThreshold(p: Patch): number
 	local k = ("%.3f|%.2f|%d"):format(p.coverage, p.scale, p.seed)
 	local ready = thrCache[k]
@@ -385,7 +410,7 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	local paint = tint or Color3.new(1, 1, 1)
 	local up = lift or 0
 	-- в ключе сам цвет, а не имя: SkullTune крутит RankSkull.Colors[name] на живую
-	local patchKey = if patch then ("%s|%.3f|%.2f|%d"):format(patch.color:ToHex(), patch.coverage, patch.scale, patch.seed) else "-"
+	local patchKey = if patch then ("%s|%.3f|%.2f|%d|%s|%.2f"):format(patch.color:ToHex(), patch.coverage, patch.scale, patch.seed, patch.mode or "tint", patch.opacity or 1) else "-"
 	local key = ("%s|%s|%s|%s|%.2f|%.2f|%s|%s"):format(bodyId, table.concat(names, ","), color and color:ToHex() or "-", mode, opacity, up, paint:ToHex(), patchKey)
 	local ready = imageCache[key]
 	if ready then
@@ -412,19 +437,27 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	-- мягкий (полоса ±0.06 по шуму), чтобы пятно не резалось по пикселям.
 	if patch then
 		local thr = patchThreshold(patch)
+		local field = noiseField(size, patch.scale, patch.seed)
 		local cr, cg, cb = patch.color.R, patch.color.G, patch.color.B
-		local inv = 1 / size
+		local pmode = patch.mode or "tint"
+		local pblend = BLEND[pmode]
+		local pop = patch.opacity or 1
 		for y = 0, size - 1 do
-			local v = (y + 0.5) * inv
 			for x = 0, size - 1 do
-				local n = patchNoise((x + 0.5) * inv, v, patch.scale, patch.seed)
-				local a = math.clamp((n - thr + 0.06) / 0.12, 0, 1)
+				local i4 = (y * size + x) * 4
+				local n = buffer.readf32(field, i4)
+				local a = math.clamp((n - thr + 0.06) / 0.12, 0, 1) * pop
 				if a > 0 then
-					local o = (y * size + x) * 4
+					local o = i4
 					local br, bg, bb = buffer.readu8(buf, o) / 255, buffer.readu8(buf, o + 1) / 255, buffer.readu8(buf, o + 2) / 255
-					-- цвет мха × яркость базы: зерно ржавчины остаётся и внутри пятна
-					local lum = 0.6 + (0.3 * br + 0.59 * bg + 0.11 * bb)
-					local mr, mg, mb = math.min(1, cr * lum), math.min(1, cg * lum), math.min(1, cb * lum)
+					local mr, mg, mb
+					if pblend then
+						mr, mg, mb = pblend(br, cr), pblend(bg, cg), pblend(bb, cb)
+					else
+						-- "tint": цвет × яркость базы — зерно ржавчины остаётся и внутри пятна
+						local lum = 0.6 + (0.3 * br + 0.59 * bg + 0.11 * bb)
+						mr, mg, mb = math.min(1, cr * lum), math.min(1, cg * lum), math.min(1, cb * lum)
+					end
 					buffer.writeu8(buf, o, math.floor((br + (mr - br) * a) * 255 + 0.5))
 					buffer.writeu8(buf, o + 1, math.floor((bg + (mg - bg) * a) * 255 + 0.5))
 					buffer.writeu8(buf, o + 2, math.floor((bb + (mb - bb) * a) * 255 + 0.5))
@@ -514,7 +547,7 @@ end
 -- // Дев-подкрутка (SkullTune) ------------------------------------------------
 -- Пока Overrides не nil, сторож (RankSkull.client) берёт режим/плотность/подъём/краску
 -- отсюда вместо GameConfig и цвета кузова; OverridesChanged — пересобрать всем машинам.
-export type Overrides = { mode: string?, opacity: number?, lift: number?, tint: Color3?, colorName: string? }
+export type Overrides = { mode: string?, opacity: number?, lift: number?, tint: Color3?, colorName: string?, patch: Patch?, patchOff: boolean? }
 RankSkull.Overrides = nil :: Overrides?
 RankSkull.OverridesChanged = Instance.new("BindableEvent")
 

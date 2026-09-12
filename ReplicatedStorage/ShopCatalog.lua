@@ -43,7 +43,7 @@ export type Item = {
 	-- Пятнистая краска: цвет ложится не сплошь, а локальными пятнами по шуму на
 	-- базовой ржавчине (RankSkull.compose). coverage — доля площади под пятнами,
 	-- scale — пятен на ширину атласа (больше = мельче), seed — раскладка.
-	patchy: { coverage: number, scale: number, seed: number }?,
+	patchy: { coverage: number, scale: number, seed: number, mode: string?, opacity: number? }?,
 }
 
 -- Скин по умолчанию есть у всех и не продаётся: с него игра начинается, и на него
@@ -91,7 +91,7 @@ ShopCatalog.Items = {
 		color = Color3.fromRGB(52, 90, 64), material = Enum.Material.Grass,
 		-- Мох пятнами, а не сплошь (юзер 2026-09-12: «локальными участками, ~1:6»):
 		-- шестая часть кузова под мхом, остальное — ржавчина базовой краски.
-		patchy = { coverage = 1 / 6, scale = 9, seed = 7 },
+		patchy = { coverage = 1 / 6, scale = 9, seed = 7, mode = "tint", opacity = 1 },
 	},
 	{
 		id = "blood", name = "BLOOD RED", blurb = "don't ask whose",

@@ -65,12 +65,15 @@ local function dress(body: BasePart, driver: Player)
 	-- ржавчины RUST, а цвет скина ложится пятнами. Подкрутка SkullTune красит сплошь.
 	local tint = (o and o.tint) or body.Color
 	local patch: RankSkull.Patch? = nil
-	if not (o and o.tint) then
+	if o and o.patch then
+		patch = o.patch -- SkullTune: мох поверх RUST, что бы ни было надето
+	elseif not (o and (o.tint or o.patchOff)) then
 		local skin = ShopCatalog.get(driver:GetAttribute("EquippedSkin"))
 		if skin and skin.patchy and skin.color then
 			local baseSkin = ShopCatalog.get(ShopCatalog.DefaultSkin)
 			tint = (baseSkin and baseSkin.color) or Color3.new(1, 1, 1)
-			patch = { color = skin.color, coverage = skin.patchy.coverage, scale = skin.patchy.scale, seed = skin.patchy.seed }
+			local py = skin.patchy
+			patch = { color = skin.color, coverage = py.coverage, scale = py.scale, seed = py.seed, mode = py.mode, opacity = py.opacity }
 		end
 	end
 	local img = RankSkull.compose(bodyId, zones, colorName,

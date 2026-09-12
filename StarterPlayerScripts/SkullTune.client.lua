@@ -17,6 +17,11 @@
 --   OPACITY/LIFT  0..1
 --   R G B         цвет черепа выбранной ступени, 0..255
 --   PAINT R G B   краска кузова (то, чем домножается текстура), 0..255
+--   MOSS          кнопка: включить мох поверх RUST; повторные нажатия перебирают
+--                 режим наложения пятна; MOSS OFF — убрать
+--   M OPAC/COVER  плотность пятна и доля площади под мхом
+--   M SCALE/SEED  размер пятен и раскладка — пересчёт шума ~1 с, применяются на отпускании
+--   MOSS R G B    цвет мха
 --   \             сброс к конфигу
 --   P             напечатать всё в Output
 -- Пересборка текстуры ~0.05с на изменение; ползунок тянуть можно, пересобирается на
@@ -43,6 +48,7 @@ local TOGGLE_KEY = Enum.KeyCode.F3
 local FONT = Enum.Font.Code
 local MODES = { "overlay", "multiply", "screen", "softlight", "lineardodge", "normal" }
 local TIERS = { "bone", "ivory", "amber", "gold" }
+local PATCH_MODES = { "tint", "multiply", "overlay", "screen", "softlight", "lineardodge", "normal" }
 
 -- Исходные значения — чтобы «\» возвращал к конфигу.
 local base = {
@@ -56,6 +62,14 @@ for _, n in TIERS do
 end
 local rustItem = ShopCatalog.get(ShopCatalog.DefaultSkin)
 base.paint = (rustItem and rustItem.color) or Color3.new(1, 1, 1)
+-- Мох: пятнистая краска из каталога (ShopCatalog.moss.patchy)
+local mossItem = ShopCatalog.get("moss")
+local mossPatchy = (mossItem and mossItem.patchy) or { coverage = 1 / 6, scale = 9, seed = 7, mode = "tint", opacity = 1 }
+base.moss = {
+	color = (mossItem and mossItem.color) or Color3.fromRGB(52, 90, 64),
+	coverage = mossPatchy.coverage, scale = mossPatchy.scale, seed = mossPatchy.seed,
+	mode = mossPatchy.mode or "tint", opacity = mossPatchy.opacity or 1,
+}
 
 local state = {
 	modeIndex = table.find(MODES, base.mode) or 1,
@@ -63,6 +77,13 @@ local state = {
 	opacity = base.opacity,
 	lift = base.lift,
 	paint = { base.paint.R * 255, base.paint.G * 255, base.paint.B * 255 },
+	mossOn = false, -- показывать мох поверх RUST (что бы ни было надето)
+	mossModeIndex = table.find(PATCH_MODES, base.moss.mode) or 1,
+	mossOpacity = base.moss.opacity,
+	mossCoverage = base.moss.coverage,
+	mossScale = base.moss.scale,
+	mossSeed = base.moss.seed,
+	moss = { base.moss.color.R * 255, base.moss.color.G * 255, base.moss.color.B * 255 },
 }
 local colors: { [string]: { number } } = {}
 for _, n in TIERS do
@@ -101,6 +122,17 @@ layout.SortOrder = Enum.SortOrder.LayoutOrder
 layout.Padding = UDim.new(0, 3)
 layout.Parent = panel
 
+-- ВТОРАЯ КОЛОНКА: с секцией мха одна колонка перестала влезать по высоте (верх уезжал
+-- за экран). Конструкторы кладут строки в `column`; перед секцией мха она меняется.
+local panelR = panel:Clone()
+panelR:ClearAllChildren()
+Instance.new("UICorner", panelR).CornerRadius = UDim.new(0, 8)
+panelR.Position = UDim2.new(0, 16 + 330 + 10, 1, -16)
+panelR.Parent = gui
+local padR = pad:Clone(); padR.Parent = panelR
+local layoutR = layout:Clone(); layoutR.Parent = panelR
+local column: Frame = panel
+
 local refreshers: { () -> () } = {}
 local applyAll -- ниже
 
@@ -114,7 +146,7 @@ local function makeLabel(order: number, text: string, size: number): TextLabel
 	l.TextColor3 = UITheme.Palette.Bone
 	l.TextXAlignment = Enum.TextXAlignment.Left
 	l.Text = text
-	l.Parent = panel
+	l.Parent = column
 	return l
 end
 
@@ -128,7 +160,7 @@ local function makeButton(order: number, get: () -> string, onClick: () -> ()): 
 	b.TextSize = 13
 	b.TextColor3 = UITheme.Palette.Bone
 	b.Text = get()
-	b.Parent = panel
+	b.Parent = column
 	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
 	table.insert(refreshers, function()
 		b.Text = get()
@@ -140,12 +172,12 @@ local function makeButton(order: number, get: () -> string, onClick: () -> ()): 
 	return b
 end
 
-local function makeSlider(order: number, name: string, max: number, get: () -> number, set: (number) -> ())
+local function makeSlider(order: number, name: string, max: number, get: () -> number, set: (number) -> (), heavy: boolean?)
 	local row = Instance.new("Frame")
 	row.LayoutOrder = order
 	row.Size = UDim2.new(1, 0, 0, 24)
 	row.BackgroundTransparency = 1
-	row.Parent = panel
+	row.Parent = column
 	local caption = Instance.new("TextLabel")
 	caption.Size = UDim2.new(1, 0, 0, 13)
 	caption.BackgroundTransparency = 1
@@ -194,7 +226,8 @@ local function makeSlider(order: number, name: string, max: number, get: () -> n
 		local width = math.max(track.AbsoluteSize.X, 1)
 		set(math.clamp((x - track.AbsolutePosition.X) / width, 0, 1) * max)
 		refresh()
-		if final or os.clock() - lastApply > 0.15 then
+		-- тяжёлые (мох: пересчёт шума ~1 с) — только на отпускании
+		if final or (not heavy and os.clock() - lastApply > 0.15) then
 			lastApply = os.clock()
 			applyAll()
 		end
@@ -265,7 +298,58 @@ for i, ch in { "R", "G", "B" } do
 		state.paint[i] = v
 	end)
 end
-local info = makeLabel(14, "", 11)
+-- // Мох (вторая колонка) -------------------------------------------------------
+column = panelR
+makeLabel(19, "MOSS  (пятнистая краска)", 15)
+makeButton(20, function()
+	return "MOSS: " .. (state.mossOn and "ON" or "OFF") .. "   mode " .. PATCH_MODES[state.mossModeIndex]
+end, function()
+	if not state.mossOn then
+		state.mossOn = true
+	else
+		state.mossModeIndex = state.mossModeIndex % #PATCH_MODES + 1
+	end
+end)
+makeButton(21, function()
+	return "MOSS OFF"
+end, function()
+	state.mossOn = false
+end)
+makeSlider(22, "M OPAC", 1, function()
+	return state.mossOpacity
+end, function(v)
+	state.mossOpacity = v
+end)
+makeSlider(23, "M COVER", 1, function()
+	return state.mossCoverage
+end, function(v)
+	state.mossCoverage = math.max(0.02, v)
+end)
+makeSlider(24, "M SCALE", 30, function()
+	return state.mossScale
+end, function(v)
+	state.mossScale = math.max(1, v)
+end, true)
+makeSlider(25, "M SEED", 60, function()
+	return state.mossSeed
+end, function(v)
+	state.mossSeed = math.floor(v + 0.5)
+end, true)
+local mossSwatch = Instance.new("Frame")
+mossSwatch.LayoutOrder = 26
+mossSwatch.Size = UDim2.new(1, 0, 0, 14)
+mossSwatch.BorderSizePixel = 0
+mossSwatch.Parent = panelR
+Instance.new("UICorner", mossSwatch).CornerRadius = UDim.new(0, 4)
+for i, ch in { "R", "G", "B" } do
+	makeSlider(26 + i, "MOSS " .. ch, 255, function()
+		return state.moss[i]
+	end, function(v)
+		state.moss[i] = v
+	end)
+end
+
+local info = makeLabel(30, "", 11)
 info.TextWrapped = true
 info.Size = UDim2.new(1, 0, 0, 92)
 
@@ -278,6 +362,10 @@ local function paintColor(): Color3
 	return Color3.fromRGB(math.floor(state.paint[1] + 0.5), math.floor(state.paint[2] + 0.5), math.floor(state.paint[3] + 0.5))
 end
 
+local function mossColor(): Color3
+	return Color3.fromRGB(math.floor(state.moss[1] + 0.5), math.floor(state.moss[2] + 0.5), math.floor(state.moss[3] + 0.5))
+end
+
 local function summary(): string
 	local parts = {}
 	for _, n in TIERS do
@@ -285,8 +373,10 @@ local function summary(): string
 		table.insert(parts, ("%s=(%d,%d,%d)"):format(n, c[1] + 0.5, c[2] + 0.5, c[3] + 0.5))
 	end
 	local p = state.paint
-	return ("SkullMode=%s SkullOpacity=%.2f SkullLift=%.2f | %s | rust=(%d,%d,%d)"):format(
-		MODES[state.modeIndex], state.opacity, state.lift, table.concat(parts, " "), p[1] + 0.5, p[2] + 0.5, p[3] + 0.5)
+	local m = state.moss
+	return ("SkullMode=%s SkullOpacity=%.2f SkullLift=%.2f | %s | rust=(%d,%d,%d) | moss=(%d,%d,%d) mode=%s opacity=%.2f coverage=%.3f scale=%.1f seed=%d"):format(
+		MODES[state.modeIndex], state.opacity, state.lift, table.concat(parts, " "), p[1] + 0.5, p[2] + 0.5, p[3] + 0.5,
+		m[1] + 0.5, m[2] + 0.5, m[3] + 0.5, PATCH_MODES[state.mossModeIndex], state.mossOpacity, state.mossCoverage, state.mossScale, state.mossSeed)
 end
 
 applyAll = function()
@@ -299,6 +389,11 @@ applyAll = function()
 		lift = state.lift,
 		tint = paintColor(),
 		colorName = TIERS[state.tierIndex],
+		patch = if state.mossOn then {
+			color = mossColor(), coverage = state.mossCoverage, scale = state.mossScale, seed = state.mossSeed,
+			mode = PATCH_MODES[state.mossModeIndex], opacity = state.mossOpacity,
+		} else nil,
+		patchOff = not state.mossOn,
 	} else nil
 	if not active then
 		for _, n in TIERS do
@@ -308,6 +403,7 @@ applyAll = function()
 	RankSkull.OverridesChanged:Fire()
 	swatch.BackgroundColor3 = tierColor(TIERS[state.tierIndex])
 	paintSwatch.BackgroundColor3 = paintColor()
+	mossSwatch.BackgroundColor3 = mossColor()
 	for _, f in refreshers do
 		f()
 	end
@@ -331,6 +427,12 @@ local function reset()
 		local c = base.colors[n]
 		colors[n] = { c.R * 255, c.G * 255, c.B * 255 }
 	end
+	state.mossModeIndex = table.find(PATCH_MODES, base.moss.mode) or 1
+	state.mossOpacity = base.moss.opacity
+	state.mossCoverage = base.moss.coverage
+	state.mossScale = base.moss.scale
+	state.mossSeed = base.moss.seed
+	state.moss = { base.moss.color.R * 255, base.moss.color.G * 255, base.moss.color.B * 255 }
 	applyAll()
 end
 
@@ -354,6 +456,13 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		reset()
 	elseif input.KeyCode == Enum.KeyCode.P then
 		print("[SkullTune] " .. summary())
+	end
+end)
+
+-- строка «надета краска …» обновляется, когда запись доехала или краску сменили
+player:GetAttributeChangedSignal("EquippedSkin"):Connect(function()
+	if active then
+		applyAll()
 	end
 end)
 
