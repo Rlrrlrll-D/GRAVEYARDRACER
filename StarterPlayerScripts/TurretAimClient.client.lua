@@ -15,12 +15,11 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
-local Debris = game:GetService("Debris")
 
-local Audio = require(ReplicatedStorage:WaitForChild("Audio"))
 -- Слот WEAPON: темп/дальность/дробины/вид выстрела по надетому стволу (атрибут игрока
 -- EquippedWeapon); веер дробин — та же функция, что у сервера, от одного seed.
 local Weapons = require(ReplicatedStorage:WaitForChild("Weapons"))
+local ShotFX = require(ReplicatedStorage:WaitForChild("ShotFX"))
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local fireWeapon = remotes:WaitForChild("FireWeapon") :: RemoteEvent
@@ -309,161 +308,26 @@ local function getMouseHit(excludeVehicle: Model?): (Vector3, Instance?)
 	return unitRay.Origin + unitRay.Direction * range, nil
 end
 
--- НАЧАЛО ТРАССЕРА ЕДЕТ С ДУЛОМ. Жалоба: «отстаёт точка выхода трассера у ствола,
--- совпадает только когда не движется». Так и было: трассер со вспышкой — АНКОРНЫЕ
--- детали в мировых координатах, поставленные по позиции дула в МОМЕНТ выстрела и
--- живущие 0.1 с. На 80 studs/с ствол за эту десятую уезжает на 8 studs, и начало
--- трассера остаётся висеть позади — стоя на месте расхождения нет вовсе.
--- Поэтому источник теперь передаётся не точкой, а самим дулом (Attachment): пока
--- эффект жив, его начало каждый кадр берётся от текущего положения дула, а дальний
--- конец остаётся там, куда попали. Vector3 тоже принимается — им рисуются чужие
--- выстрелы, прилетевшие ремоутом: чужого дула у нас на руках нет.
-type EffectSource = Attachment | Vector3
-
-local function originOf(source: EffectSource): Vector3?
-	if typeof(source) == "Vector3" then
-		return source
-	end
-	local a = source :: Attachment
-	return a.Parent and a.WorldPosition or nil
-end
-
--- Держим эффект приклеенным к дулу на всё его недолгое время жизни.
-local function followMuzzle(source: EffectSource, life: number, place: (Vector3) -> ())
-	if typeof(source) == "Vector3" then
-		return -- чужой выстрел: следовать не за чем, точка и так статична
-	end
-	local t0 = os.clock()
-	local conn: RBXScriptConnection
-	conn = RunService.RenderStepped:Connect(function()
-		local origin = originOf(source)
-		if not origin or os.clock() - t0 >= life then
-			conn:Disconnect()
-			return
-		end
-		place(origin)
-	end)
-end
-
-local TRACER_LIFE = 0.1
-local FLASH_LIFE = 0.05
-
-local function createTracer(source: EffectSource, hitPosition: Vector3, stats: Weapons.Stats)
-	local start = originOf(source)
-	if not start then
-		return
-	end
-	local tracer = Instance.new("Part")
-	tracer.Anchored = true
-	tracer.CanCollide = false
-	tracer.CanQuery = false
-	tracer.Material = Enum.Material.Neon
-	tracer.Color = stats.tracerColor -- пулемёт: кость (был янтарный)
-	local w = stats.tracerWidth
-	local function place(origin: Vector3)
-		local distance = (hitPosition - origin).Magnitude
-		tracer.Size = Vector3.new(w, w, distance)
-		tracer.CFrame = CFrame.new(origin:Lerp(hitPosition, 0.5), hitPosition)
-	end
-	place(start)
-	tracer.Parent = workspace
-	followMuzzle(source, TRACER_LIFE, place)
-	Debris:AddItem(tracer, TRACER_LIFE)
-end
-
-local function createMuzzleFlash(source: EffectSource, stats: Weapons.Stats)
-	local start = originOf(source)
-	if not start then
-		return
-	end
-	local flash = Instance.new("Part")
-	flash.Shape = Enum.PartType.Ball
-	flash.Anchored = true
-	flash.CanCollide = false
-	flash.CanQuery = false
-	flash.Material = Enum.Material.Neon
-	flash.Color = Color3.fromRGB(255, 220, 130)
-	flash.Size = Vector3.new(stats.flashSize, stats.flashSize, stats.flashSize)
-	flash.CFrame = CFrame.new(start)
-
-	local light = Instance.new("PointLight")
-	light.Color = Color3.fromRGB(255, 210, 120)
-	light.Brightness = 6
-	light.Range = 14
-	light.Parent = flash
-
-	flash.Parent = workspace
-	followMuzzle(source, FLASH_LIFE, function(origin)
-		flash.CFrame = CFrame.new(origin)
-	end)
-	Debris:AddItem(flash, FLASH_LIFE)
-end
-
--- Щелчок осечки. Тем же приёмом, что и выстрел (временный динамик + Debris), но
--- тише и с коротким хвостом: это механический звук самого оружия, а не удар по
--- окрестностям, и разноситься на две сотни studs ему незачем.
+-- Трассер/вспышка/звук — ReplicatedStorage.ShotFX (вынесено 2026-09-12: тем же рисует
+-- оружейная песочница гаража). Осечка — там же, dryFire.
 local function playDryFire(position: Vector3)
-	local speaker = Instance.new("Part")
-	speaker.Anchored = true
-	speaker.CanCollide = false
-	speaker.CanQuery = false
-	speaker.Transparency = 1
-	speaker.Size = Vector3.new(0.2, 0.2, 0.2)
-	speaker.CFrame = CFrame.new(position)
-
-	local sound = Instance.new("Sound")
-	sound.SoundId = DRYFIRE_SOUND_ID
-	sound.Volume = 0.7
-	sound.SoundGroup = Audio.SFX
-	sound.RollOffMode = Enum.RollOffMode.InverseTapered
-	sound.RollOffMinDistance = 6
-	sound.RollOffMaxDistance = 60
-	sound.PlaybackSpeed = 0.97 + math.random() * 0.08
-	sound.Parent = speaker
-
-	speaker.Parent = workspace
-	sound:Play()
-	Debris:AddItem(speaker, 1)
-end
-
-local function playGunshot(position: Vector3, stats: Weapons.Stats)
-	local speaker = Instance.new("Part")
-	speaker.Anchored = true
-	speaker.CanCollide = false
-	speaker.CanQuery = false
-	speaker.Transparency = 1
-	speaker.Size = Vector3.new(0.2, 0.2, 0.2)
-	speaker.CFrame = CFrame.new(position)
-
-	local sound = Instance.new("Sound")
-	sound.SoundId = stats.soundId
-	sound.Volume = stats.soundVolume
-	sound.SoundGroup = Audio.SFX
-	sound.RollOffMode = Enum.RollOffMode.InverseTapered
-	sound.RollOffMinDistance = 8
-	sound.RollOffMaxDistance = 220
-	sound.PlaybackSpeed = stats.soundPitch * (0.95 + math.random() * 0.12) -- лёгкий разброс, чтобы очередь не звучала механически
-	sound.Parent = speaker
-
-	speaker.Parent = workspace
-	sound:Play()
-	Debris:AddItem(speaker, 1)
+	ShotFX.dryFire(position, DRYFIRE_SOUND_ID)
 end
 
 -- Чужой выстрел: список точек попадания (по дробине на луч) и id ствола стрелка.
 bulletFired.OnClientEvent:Connect(function(origin: Vector3, hits: unknown, weaponId: unknown)
 	local stats = Weapons.get(weaponId)
+	local list: { Vector3 } = {}
 	if typeof(hits) == "Vector3" then
-		createTracer(origin, hits :: Vector3, stats)
+		list[1] = hits :: Vector3
 	elseif type(hits) == "table" then
 		for _, h in hits :: { Vector3 } do
 			if typeof(h) == "Vector3" then
-				createTracer(origin, h, stats)
+				table.insert(list, h)
 			end
 		end
 	end
-	createMuzzleFlash(origin, stats)
-	playGunshot(origin, stats)
+	ShotFX.fire(origin, list, stats)
 end)
 
 -- // Crosshair (виден, пока идёт заезд; следует за прицелом-мышью) -----------
@@ -705,14 +569,13 @@ local function tryFire()
 	end
 	rp.FilterDescendantsInstances = flt
 	-- СВОЙ выстрел рисуем от самого дула, а не от снятой с него точки: на ходу точка
-	-- устаревает за первый же кадр (см. комментарий у createTracer).
+	-- устаревает за первый же кадр (см. комментарий в ShotFX).
+	local hits = {}
 	for _, dir in Weapons.pelletDirections(direction, stats, seed) do
 		local res = workspace:Raycast(origin, dir * stats.range, rp)
-		local hitPos = res and res.Position or (origin + dir * stats.range)
-		createTracer(muzzle :: Attachment, hitPos, stats)
+		table.insert(hits, res and res.Position or (origin + dir * stats.range))
 	end
-	createMuzzleFlash(muzzle :: Attachment, stats)
-	playGunshot(origin, stats)
+	ShotFX.fire(muzzle :: Attachment, hits, stats)
 
 	fireWeapon:FireServer(origin, direction, seed)
 end

@@ -575,9 +575,15 @@ function PlayerFlow.applyWeapon(car: Model, player: Player)
 	if not (item and item.kind == "weapon") then
 		item = ShopCatalog.get(ShopCatalog.DefaultWeapon)
 	end
-	if not item then
-		return
+	if item then
+		PlayerFlow.mountWeapon(car, item, player)
 	end
+end
+
+-- Поставить КОНКРЕТНЫЙ ствол на люльку модели (машина или турельная стойка гаража —
+-- DevGarage зовёт напрямую по товару). player нужен только чтобы вернуть владение
+-- машине с водителем.
+function PlayerFlow.mountWeapon(car: Model, item: ShopCatalog.Item, player: Player?)
 	local cradle = car:FindFirstChild("GunCradle", true)
 	if not (cradle and cradle:IsA("BasePart")) then
 		return
@@ -658,12 +664,14 @@ function PlayerFlow.applyWeapon(car: Model, player: Player)
 		gun.Anchored = false
 		quietChassis(car)
 		stillVelocities(car)
-		if seat and seat:IsA("VehicleSeat") then
+		if seat and seat:IsA("VehicleSeat") and player then
 			pcall(function()
 				(seat :: VehicleSeat):SetNetworkOwner(player)
 			end)
 		end
-		giveTurretOwnership(car, player)
+		if player then
+			giveTurretOwnership(car, player)
+		end
 	end
 end
 

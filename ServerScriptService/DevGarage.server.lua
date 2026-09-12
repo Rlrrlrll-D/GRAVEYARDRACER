@@ -25,8 +25,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 
 local ShopCatalog = require(ReplicatedStorage:WaitForChild("ShopCatalog"))
+local PlayerFlow = require(script.Parent:WaitForChild("PlayerFlow"))
 
 local TAG = "DevGarageBody"
+local TURRET_PARTS = { "TurretBase", "TurretMast", "Turret", "GunCradle" } -- GunMesh приедет с люлькой
+local RANGE_DEPTH = 46 -- стена-мишень перед стволами
 local GAP_X = 16 -- между красками
 local GAP_Z = 22 -- между кузовами
 local RISE = 70 -- площадка над персонажем заказчика
@@ -89,14 +92,15 @@ local function build(player: Player)
 	model.ModelStreamingMode = Enum.ModelStreamingMode.Persistent -- далеко от персонажа, а видеть надо
 	model:SetAttribute("Origin", origin)
 
-	local w = GAP_X * #skins + 12
-	local d = GAP_Z * #bodies + 12
+	local weapons = ShopCatalog.weapons()
+	local w = GAP_X * math.max(#skins, #weapons) + 12
+	local d = GAP_Z * (#bodies + 1) + 12 + RANGE_DEPTH + 6 -- + ряд стволов и тир до стены
 	local floor = Instance.new("Part")
 	floor.Name = "Floor"
 	floor.Anchored = true
 	floor.CanCollide = false
 	floor.Size = Vector3.new(w, 1, d)
-	floor.CFrame = CFrame.new(origin - Vector3.new(0, 0.5, 0))
+	floor.CFrame = CFrame.new(origin - Vector3.new(0, 0.5, (RANGE_DEPTH + 6) / 2)) -- тир уходит в −Z
 	floor.Material = Enum.Material.Slate
 	floor.Color = Color3.fromRGB(38, 36, 40)
 	floor.Parent = model
@@ -171,6 +175,92 @@ local function build(player: Player)
 			t.Text = skin.name
 			t.Parent = bb
 		end
+	end
+	-- // Оружейная песочница: ряд турельных стоек с каждым стволом + стена-мишень.
+	-- Стойка = турель из VehicleTemplate (основание, мачта, поворот, люлька) на тумбе,
+	-- всё на якоре; ствол ставит PlayerFlow.mountWeapon — та же посадка, что на машине.
+	-- Стрельбу (трассер/звук) рисует клиент сам (SkullTune, ShotFX): сервер тут не нужен.
+	local tpl = ServerStorage:FindFirstChild("VehicleTemplate")
+	local tSeat = tpl and tpl:FindFirstChild("DriveSeat")
+	local tBase = tpl and tpl:FindFirstChild("TurretBase", true)
+	if tpl and tSeat and tSeat:IsA("BasePart") and tBase and tBase:IsA("BasePart") then
+		local rowZ = origin.Z - (GAP_Z * (#bodies + 1)) / 2 -- перед рядами кузовов, стреляют в −Z, где никого нет
+		for wi, item in weapons do
+			local rig = Instance.new("Model")
+			rig.Name = "GarageGun_" .. item.id
+			rig:SetAttribute("DevWeapon", item.id)
+			local x = origin.X - (GAP_X * (#weapons - 1)) / 2 + GAP_X * (wi - 1)
+			-- виртуальное сиденье: та же высота, что у кузовов; турель встаёт как на машине.
+			-- В покое ствол шаблона смотрит НАЗАД (в заезде его доворачивает шарнир прицела),
+			-- поэтому стойку разворачиваем на 180°: стрелять в −Z, к стене, а не в кузова.
+			local slot = CFrame.new(x, origin.Y - ground.Y, rowZ) * CFrame.Angles(0, math.pi, 0)
+			for _, name in TURRET_PARTS do
+				local src = tpl:FindFirstChild(name, true)
+				if src and src:IsA("BasePart") then
+					local part = src:Clone()
+					for _, c in part:GetDescendants() do
+						if c:IsA("Weld") or c:IsA("WeldConstraint") or c:IsA("HingeConstraint") then
+							c:Destroy() -- всё на якоре, шарниры и сварки не нужны
+						end
+					end
+					part.Anchored = true
+					part.CanCollide = false
+					part.CFrame = slot * ((tSeat :: BasePart).CFrame:Inverse() * src.CFrame)
+					part.Parent = rig
+				end
+			end
+			-- тумба под основанием
+			local base = rig:FindFirstChild("TurretBase")
+			if base and base:IsA("BasePart") then
+				local post = Instance.new("Part")
+				post.Name = "Post"
+				post.Anchored = true
+				post.CanCollide = false
+				post.Material = Enum.Material.Slate
+				post.Color = Color3.fromRGB(50, 48, 52)
+				local h = base.Position.Y - base.Size.Y / 2 - origin.Y
+				post.Size = Vector3.new(2, math.max(h, 0.5), 2)
+				post.CFrame = CFrame.new(base.Position.X, origin.Y + post.Size.Y / 2, base.Position.Z)
+				post.Parent = rig
+			end
+			rig.Parent = model
+			PlayerFlow.mountWeapon(rig, item, nil)
+			local gun = rig:FindFirstChild("GunMesh", true)
+			if gun and gun:IsA("BasePart") then
+				gun.Anchored = true
+			end
+			local label = Instance.new("Part")
+			label.Name = "Label"
+			label.Anchored = true
+			label.CanCollide = false
+			label.Transparency = 1
+			label.Size = Vector3.new(1, 1, 1)
+			label.CFrame = CFrame.new(x, origin.Y + 0.6, rowZ + 6)
+			label.Parent = rig
+			local bb = Instance.new("BillboardGui")
+			bb.Size = UDim2.fromOffset(180, 24)
+			bb.AlwaysOnTop = true
+			bb.MaxDistance = 200
+			bb.Parent = label
+			local t = Instance.new("TextLabel")
+			t.Size = UDim2.fromScale(1, 1)
+			t.BackgroundTransparency = 1
+			t.Font = Enum.Font.Code
+			t.TextSize = 14
+			t.TextColor3 = Color3.fromRGB(220, 210, 190)
+			t.Text = item.name
+			t.Parent = bb
+		end
+		-- стена-мишень: перед стволами (они смотрят в −Z, как машина от сиденья)
+		local wall = Instance.new("Part")
+		wall.Name = "TargetWall"
+		wall.Anchored = true
+		wall.CanCollide = false
+		wall.Material = Enum.Material.WoodPlanks
+		wall.Color = Color3.fromRGB(96, 78, 58)
+		wall.Size = Vector3.new(w, 14, 1)
+		wall.CFrame = CFrame.new(origin.X, origin.Y + 7, rowZ - RANGE_DEPTH)
+		wall.Parent = model
 	end
 	model.Parent = workspace
 	garage = model

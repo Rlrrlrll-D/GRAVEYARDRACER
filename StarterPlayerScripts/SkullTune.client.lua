@@ -25,7 +25,10 @@
 -- ПРАВАЯ КОЛОНКА — GARAGE: гараж-песочница вне заезда — сервер (DevGarage) ставит над
 -- стартом площадку со ВСЕМИ кузовами × ВСЕМИ красками, камера орбитальная (ПКМ —
 -- крутить, колесо — зум, СКМ — сдвиг), заставка и блюр на время гаснут; ручки слева
--- красят все экземпляры сразу. Ниже мох: MOSS (вкл + перебор режима), MOSS OFF,
+-- красят все экземпляры сразу. В гараже же ОРУЖЕЙНАЯ ПЕСОЧНИЦА: ряд турельных стоек со
+-- всеми стволами и стена-мишень; кнопка WEAPON выбирает стойку, ЛКМ по сцене (не по
+-- панели) стреляет с неё в точку под курсором — трассер/вспышка/звук как в заезде
+-- (ShotFX, статы из Weapons), удержание — очередь в темпе ствола. Ниже мох: MOSS (вкл + перебор режима), MOSS OFF,
 -- M OPAC/COVER/SCALE/SEED, MOSS R G B. \ — сброс к конфигу, P — напечатать всё,
 -- Z — зомби выкл/вкл.
 --   F3            вкл / выкл панели. НЕ F8: в Studio это «Run» (сервер без игрока) —
@@ -50,6 +53,8 @@ local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local RankSkull = require(ReplicatedStorage:WaitForChild("RankSkull"))
 local ShopCatalog = require(ReplicatedStorage:WaitForChild("ShopCatalog"))
 local EnvironmentConfig = require(ReplicatedStorage:WaitForChild("EnvironmentConfig"))
+local Weapons = require(ReplicatedStorage:WaitForChild("Weapons"))
+local ShotFX = require(ReplicatedStorage:WaitForChild("ShotFX"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -171,6 +176,11 @@ local garageOn = false
 local setGarage: (boolean) -> () -- ниже
 local nightOn = false
 local setNight: (boolean) -> () -- ниже
+local WEAPON_IDS = {}
+for _, item in ShopCatalog.weapons() do
+	table.insert(WEAPON_IDS, item.id)
+end
+local weaponIndex = 1
 
 -- // Панель ------------------------------------------------------------------
 local gui = Instance.new("ScreenGui")
@@ -423,6 +433,12 @@ makeButton(18, function()
 	return "LIGHT: " .. (nightOn and "NIGHT (как в заезде)" or "DAY (как в лобби)")
 end, function()
 	setNight(not nightOn)
+end)
+makeButton(18, function()
+	local item = ShopCatalog.get(WEAPON_IDS[weaponIndex])
+	return "WEAPON: " .. (item and item.name or "?") .. "   (ЛКМ по сцене — стрелять)"
+end, function()
+	weaponIndex = weaponIndex % #WEAPON_IDS + 1
 end)
 makeLabel(19, "MOSS  (пятнистая краска)", 15)
 makeButton(20, function()
@@ -707,6 +723,11 @@ UserInputService.InputBegan:Connect(function(input)
 		lastMouse = input.Position
 	end
 end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		garageFiring = false
+	end
+end)
 
 setGarage = function(on: boolean)
 	local r = garageRemote
@@ -741,6 +762,62 @@ setGarage = function(on: boolean)
 	end
 end
 
+-- // Оружейная песочница: стрельба со стойки гаража ------------------------------
+-- Стойка GarageGun_<id> (DevGarage), дуло — Attachment Muzzle на её люльке. Цель — точка
+-- под курсором (луч камеры мимо самих стоек), веер дробин и вид выстрела — как в заезде.
+local garageFiring = false
+local lastGarageShot = 0
+
+local function garageRig(): Model?
+	local g = workspace:FindFirstChild("DevGarage")
+	local rig = g and g:FindFirstChild("GarageGun_" .. WEAPON_IDS[weaponIndex])
+	return if rig and rig:IsA("Model") then rig else nil
+end
+
+local function garageFire()
+	local rig = garageRig()
+	local muzzle = rig and rig:FindFirstChild("Muzzle", true)
+	if not (muzzle and muzzle:IsA("Attachment")) then
+		return
+	end
+	local stats = Weapons.get(WEAPON_IDS[weaponIndex])
+	local now = os.clock()
+	if now - lastGarageShot < 1 / stats.fireRate then
+		return
+	end
+	lastGarageShot = now
+	local mouse = UserInputService:GetMouseLocation()
+	local ray = camera:ViewportPointToRay(mouse.X, mouse.Y - game:GetService("GuiService"):GetGuiInset().Y)
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Exclude
+	local g = workspace:FindFirstChild("DevGarage")
+	local excl: { Instance } = {}
+	if g then
+		for _, c in g:GetChildren() do
+			if c.Name:sub(1, 10) == "GarageGun_" then
+				table.insert(excl, c)
+			end
+		end
+	end
+	rp.FilterDescendantsInstances = excl
+	local aim = workspace:Raycast(ray.Origin, ray.Direction * 500, rp)
+	local target = aim and aim.Position or (ray.Origin + ray.Direction * 500)
+	local origin = muzzle.WorldPosition
+	local direction = (target - origin).Unit
+	local hits = {}
+	for _, dir in Weapons.pelletDirections(direction, stats, math.random(1, 1073741824)) do
+		local res = workspace:Raycast(origin, dir * stats.range, rp)
+		table.insert(hits, res and res.Position or (origin + dir * stats.range))
+	end
+	ShotFX.fire(muzzle, hits, stats)
+end
+
+RunService.RenderStepped:Connect(function()
+	if garageOn and garageFiring then
+		garageFire()
+	end
+end)
+
 UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == TOGGLE_KEY then
 		active = not active
@@ -758,6 +835,11 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		return
 	end
 	if not active or processed then
+		return
+	end
+	if garageOn and input.UserInputType == Enum.UserInputType.MouseButton1 then
+		garageFiring = true
+		garageFire()
 		return
 	end
 	if input.KeyCode == Enum.KeyCode.BackSlash then
