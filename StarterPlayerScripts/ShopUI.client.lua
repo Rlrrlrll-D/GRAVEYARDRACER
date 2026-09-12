@@ -49,6 +49,7 @@ local state = {
 	owned = {} :: { [string]: boolean },
 	equipped = ShopCatalog.DefaultSkin,
 	equippedBody = ShopCatalog.DefaultBody,
+	equippedWeapon = ShopCatalog.DefaultWeapon,
 }
 
 local gui = Instance.new("ScreenGui")
@@ -191,6 +192,16 @@ local function priceText(item: ShopCatalog.Item): string
 	return r and (tostring(r) .. " R$") or "R$"
 end
 
+-- Что надето в слоте этого товара (краска / кузов / ствол).
+local function wornId(item: ShopCatalog.Item): string
+	if item.kind == "body" then
+		return state.equippedBody
+	elseif item.kind == "weapon" then
+		return state.equippedWeapon
+	end
+	return state.equipped
+end
+
 -- Что написано на кнопке и какого она цвета — целиком производная от состояния.
 -- Отдельной «логики нажатия» нет: обработчик смотрит на то же состояние.
 local function renderRow(row: Row)
@@ -200,12 +211,12 @@ local function renderRow(row: Row)
 	-- UIListLayout невидимые не считает. Купленное показываем при любом ранге.
 	row.holder.Visible = owned or not ShopCatalog.lockedByRank(item, player)
 	if owned then
-		if item.kind == "skin" or item.kind == "body" then
-			-- Кузов и краска — надеваемые слоты, и надет всегда ровно один из каждого.
+		if item.kind == "skin" or item.kind == "body" or item.kind == "weapon" then
+			-- Кузов, краска и ствол — надеваемые слоты, и надет всегда ровно один из каждого.
 			-- Подписи USE / IN USE, а не WEAR / WORN (правка юзера 2026-09-07): пара
 			-- «надень / надето» читалась двусмысленно — WORN можно понять и как
 			-- «изношенный». USE — действие, IN USE — состояние, спутать нечем.
-			local worn = (item.kind == "body" and state.equippedBody or state.equipped) == item.id
+			local worn = wornId(item) == item.id
 			row.caption.Text = worn and "IN USE" or "USE"
 			PlateArt.tint(row.button, worn and GREEN_LIGHT or MOSS)
 		else
@@ -275,8 +286,8 @@ local function buildRow(item: ShopCatalog.Item, index: number)
 	button.Activated:Connect(function()
 		local owned = state.owned[item.id] == true
 		if owned then
-			local worn = (item.kind == "body" and state.equippedBody or state.equipped) == item.id
-			if (item.kind == "skin" or item.kind == "body") and not worn then
+			local worn = wornId(item) == item.id
+			if (item.kind == "skin" or item.kind == "body" or item.kind == "weapon") and not worn then
 				shopAction:FireServer("equip", item.id)
 			end
 			return -- надетое и постоянные улучшения нажимать незачем
@@ -304,6 +315,11 @@ local function showcase(): { ShopCatalog.Item }
 	local baseSkin = ShopCatalog.get(ShopCatalog.DefaultSkin)
 	if baseSkin then
 		table.insert(list, baseSkin)
+	end
+	-- И базовый пулемёт — чтобы было куда вернуться с купленного ствола.
+	local baseWeapon = ShopCatalog.get(ShopCatalog.DefaultWeapon)
+	if baseWeapon then
+		table.insert(list, baseWeapon)
 	end
 	for _, item in ShopCatalog.onSale() do
 		table.insert(list, item)
@@ -379,6 +395,7 @@ shopState.OnClientEvent:Connect(function(s)
 	state.owned = type(s.owned) == "table" and s.owned or {}
 	state.equipped = tostring(s.equipped or ShopCatalog.DefaultSkin)
 	state.equippedBody = tostring(s.equippedBody or ShopCatalog.DefaultBody)
+	state.equippedWeapon = tostring(s.equippedWeapon or ShopCatalog.DefaultWeapon)
 	renderAll()
 end)
 

@@ -17,8 +17,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 
-local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local Audio = require(ReplicatedStorage:WaitForChild("Audio"))
+-- Слот WEAPON: темп/дальность/дробины/вид выстрела по надетому стволу (атрибут игрока
+-- EquippedWeapon); веер дробин — та же функция, что у сервера, от одного seed.
+local Weapons = require(ReplicatedStorage:WaitForChild("Weapons"))
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local fireWeapon = remotes:WaitForChild("FireWeapon") :: RemoteEvent
@@ -39,19 +41,33 @@ local GUNSHOT_SOUND_ID = "rbxassetid://88311346538102"
 local DRYFIRE_SOUND_ID = "rbxassetid://72166668675269"
 local DRYFIRE_INTERVAL = 0.45 -- реже темпа стрельбы: щелчок должен читаться поштучно
 
--- Предзагрузка звука выстрела — чтобы первые выстрелы не запаздывали.
+-- Предзагрузка звуков выстрела (всех стволов) — чтобы первые выстрелы не запаздывали.
 task.spawn(function()
 	local ContentProvider = game:GetService("ContentProvider")
-	local s = Instance.new("Sound")
-	s.SoundId = GUNSHOT_SOUND_ID
-	local d = Instance.new("Sound")
-	d.SoundId = DRYFIRE_SOUND_ID
+	local list = {}
+	local seen = {}
+	for _, id in { GUNSHOT_SOUND_ID, DRYFIRE_SOUND_ID } do
+		seen[id] = true
+	end
+	for _, w in Weapons.Stats do
+		seen[w.soundId] = true
+	end
+	for id in seen do
+		local snd = Instance.new("Sound")
+		snd.SoundId = id
+		table.insert(list, snd)
+	end
 	pcall(function()
-		ContentProvider:PreloadAsync({ s, d })
+		ContentProvider:PreloadAsync(list)
 	end)
-	s:Destroy()
-	d:Destroy()
+	for _, snd in list do
+		snd:Destroy()
+	end
 end)
+
+local function myWeapon(): Weapons.Stats
+	return Weapons.forPlayer(player)
+end
 
 local function findMyVehicle(): Model?
 	for _, vehicle in CollectionService:GetTagged("PlayerVehicle") do
@@ -163,7 +179,7 @@ local function pickTarget(origin: Vector3): Model?
 			local p = zombiePoint(z)
 			if p then
 				local d = (p - origin).Magnitude
-				if d < bestDist and d <= GameConfig.Weapon.Range then
+				if d < bestDist and d <= myWeapon().range then
 					best, bestDist = z, d
 				end
 			end
@@ -232,7 +248,7 @@ local function autoAim(vehicle: Model?): (Vector3?, Instance?)
 		locked = nil
 	elseif locked then
 		local p = zombiePoint(locked)
-		if not p or (p - origin).Magnitude > GameConfig.Weapon.Range then
+		if not p or (p - origin).Magnitude > myWeapon().range then
 			locked = nil
 		end
 	end
@@ -285,11 +301,12 @@ local function getMouseHit(excludeVehicle: Model?): (Vector3, Instance?)
 		table.insert(filter, player.Character)
 	end
 	raycastParams.FilterDescendantsInstances = filter
-	local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * GameConfig.Weapon.Range, raycastParams)
+	local range = myWeapon().range
+	local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * range, raycastParams)
 	if result then
 		return result.Position, result.Instance
 	end
-	return unitRay.Origin + unitRay.Direction * GameConfig.Weapon.Range, nil
+	return unitRay.Origin + unitRay.Direction * range, nil
 end
 
 -- НАЧАЛО ТРАССЕРА ЕДЕТ С ДУЛОМ. Жалоба: «отстаёт точка выхода трассера у ствола,
@@ -331,7 +348,7 @@ end
 local TRACER_LIFE = 0.1
 local FLASH_LIFE = 0.05
 
-local function createTracer(source: EffectSource, hitPosition: Vector3)
+local function createTracer(source: EffectSource, hitPosition: Vector3, stats: Weapons.Stats)
 	local start = originOf(source)
 	if not start then
 		return
@@ -341,10 +358,11 @@ local function createTracer(source: EffectSource, hitPosition: Vector3)
 	tracer.CanCollide = false
 	tracer.CanQuery = false
 	tracer.Material = Enum.Material.Neon
-	tracer.Color = Color3.fromRGB(224, 214, 170) -- кость (был янтарный)
+	tracer.Color = stats.tracerColor -- пулемёт: кость (был янтарный)
+	local w = stats.tracerWidth
 	local function place(origin: Vector3)
 		local distance = (hitPosition - origin).Magnitude
-		tracer.Size = Vector3.new(0.15, 0.15, distance)
+		tracer.Size = Vector3.new(w, w, distance)
 		tracer.CFrame = CFrame.new(origin:Lerp(hitPosition, 0.5), hitPosition)
 	end
 	place(start)
@@ -353,7 +371,7 @@ local function createTracer(source: EffectSource, hitPosition: Vector3)
 	Debris:AddItem(tracer, TRACER_LIFE)
 end
 
-local function createMuzzleFlash(source: EffectSource)
+local function createMuzzleFlash(source: EffectSource, stats: Weapons.Stats)
 	local start = originOf(source)
 	if not start then
 		return
@@ -365,7 +383,7 @@ local function createMuzzleFlash(source: EffectSource)
 	flash.CanQuery = false
 	flash.Material = Enum.Material.Neon
 	flash.Color = Color3.fromRGB(255, 220, 130)
-	flash.Size = Vector3.new(1.1, 1.1, 1.1)
+	flash.Size = Vector3.new(stats.flashSize, stats.flashSize, stats.flashSize)
 	flash.CFrame = CFrame.new(start)
 
 	local light = Instance.new("PointLight")
@@ -408,7 +426,7 @@ local function playDryFire(position: Vector3)
 	Debris:AddItem(speaker, 1)
 end
 
-local function playGunshot(position: Vector3)
+local function playGunshot(position: Vector3, stats: Weapons.Stats)
 	local speaker = Instance.new("Part")
 	speaker.Anchored = true
 	speaker.CanCollide = false
@@ -418,13 +436,13 @@ local function playGunshot(position: Vector3)
 	speaker.CFrame = CFrame.new(position)
 
 	local sound = Instance.new("Sound")
-	sound.SoundId = GUNSHOT_SOUND_ID
-	sound.Volume = 0.55
+	sound.SoundId = stats.soundId
+	sound.Volume = stats.soundVolume
 	sound.SoundGroup = Audio.SFX
 	sound.RollOffMode = Enum.RollOffMode.InverseTapered
 	sound.RollOffMinDistance = 8
 	sound.RollOffMaxDistance = 220
-	sound.PlaybackSpeed = 0.95 + math.random() * 0.12 -- лёгкий разброс, чтобы очередь не звучала механически
+	sound.PlaybackSpeed = stats.soundPitch * (0.95 + math.random() * 0.12) -- лёгкий разброс, чтобы очередь не звучала механически
 	sound.Parent = speaker
 
 	speaker.Parent = workspace
@@ -432,10 +450,20 @@ local function playGunshot(position: Vector3)
 	Debris:AddItem(speaker, 1)
 end
 
-bulletFired.OnClientEvent:Connect(function(origin: Vector3, hitPosition: Vector3)
-	createTracer(origin, hitPosition)
-	createMuzzleFlash(origin)
-	playGunshot(origin)
+-- Чужой выстрел: список точек попадания (по дробине на луч) и id ствола стрелка.
+bulletFired.OnClientEvent:Connect(function(origin: Vector3, hits: unknown, weaponId: unknown)
+	local stats = Weapons.get(weaponId)
+	if typeof(hits) == "Vector3" then
+		createTracer(origin, hits :: Vector3, stats)
+	elseif type(hits) == "table" then
+		for _, h in hits :: { Vector3 } do
+			if typeof(h) == "Vector3" then
+				createTracer(origin, h, stats)
+			end
+		end
+	end
+	createMuzzleFlash(origin, stats)
+	playGunshot(origin, stats)
 end)
 
 -- // Crosshair (виден, пока идёт заезд; следует за прицелом-мышью) -----------
@@ -658,12 +686,14 @@ local function tryFire()
 	local muzzle = vehicle:FindFirstChild("Muzzle", true) -- дуло переехало на GunCradle
 	if not muzzle or not muzzle:IsA("Attachment") then return end
 
+	local stats = myWeapon()
 	local now = os.clock()
-	if now - lastLocalFire < 1 / GameConfig.Weapon.FireRate then return end
+	if now - lastLocalFire < 1 / stats.fireRate then return end
 	lastLocalFire = now
 
 	local origin = (muzzle :: Attachment).WorldPosition
 	local direction = (getMouseHit(vehicle) - origin).Unit
+	local seed = math.random(1, 1073741824) -- веер дробин: сервер разложит так же
 
 	-- ЛОКАЛЬНОЕ ПРЕДСКАЗАНИЕ: трассер/вспышка/звук СРАЗУ у стрелка,
 	-- без ожидания сервера (сервер шлёт bulletFired только ОСТАЛЬНЫМ).
@@ -674,15 +704,17 @@ local function tryFire()
 		table.insert(flt, player.Character)
 	end
 	rp.FilterDescendantsInstances = flt
-	local res = workspace:Raycast(origin, direction * GameConfig.Weapon.Range, rp)
-	local hitPos = res and res.Position or (origin + direction * GameConfig.Weapon.Range)
 	-- СВОЙ выстрел рисуем от самого дула, а не от снятой с него точки: на ходу точка
 	-- устаревает за первый же кадр (см. комментарий у createTracer).
-	createTracer(muzzle :: Attachment, hitPos)
-	createMuzzleFlash(muzzle :: Attachment)
-	playGunshot(origin)
+	for _, dir in Weapons.pelletDirections(direction, stats, seed) do
+		local res = workspace:Raycast(origin, dir * stats.range, rp)
+		local hitPos = res and res.Position or (origin + dir * stats.range)
+		createTracer(muzzle :: Attachment, hitPos, stats)
+	end
+	createMuzzleFlash(muzzle :: Attachment, stats)
+	playGunshot(origin, stats)
 
-	fireWeapon:FireServer(origin, direction)
+	fireWeapon:FireServer(origin, direction, seed)
 end
 
 -- Machine gun: hold the button to keep firing. tryFire self-limits to FireRate.

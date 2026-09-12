@@ -8,15 +8,19 @@ local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
-local GameConfig = require(ReplicatedStorage:WaitForChild("GameConfig"))
 local VehicleRegistry = require(ReplicatedStorage:WaitForChild("VehicleRegistry"))
+-- Характеристики ствола (слот WEAPON): урон/темп/дальность/дробины по атрибуту игрока
+-- EquippedWeapon; веер дробин считается той же функцией, что у клиента (seed от него).
+local Weapons = require(ReplicatedStorage:WaitForChild("Weapons"))
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local fireWeapon = remotes:WaitForChild("FireWeapon") :: RemoteEvent
 local bulletFired = remotes:WaitForChild("BulletFired") :: RemoteEvent
 
 local lastFireTime: {[Player]: number} = {}
-local MIN_FIRE_INTERVAL = 1 / GameConfig.Weapon.FireRate
+-- Темп проверяем с люфтом 15%: клиент шлёт по своим часам, и честная очередь на
+-- границе интервала иначе теряла бы каждый пятый выстрел.
+local RATE_TOLERANCE = 0.85
 
 -- Насколько присланная клиентом точка выстрела может отличаться от настоящего дула.
 -- Небольшой люфт нужен: у стреляющего трассер рисуется предсказанием, и за пинг
@@ -38,15 +42,17 @@ local function muzzlePosition(vehicle: Model): Vector3?
 	return primary and primary.Position or nil
 end
 
-fireWeapon.OnServerEvent:Connect(function(player: Player, origin: unknown, direction: unknown)
+fireWeapon.OnServerEvent:Connect(function(player: Player, origin: unknown, direction: unknown, seed: unknown)
 	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return end
 	if (direction :: Vector3).Magnitude < 0.001 then return end
+	local stats = Weapons.forPlayer(player)
 
 	local now = os.clock()
-	if lastFireTime[player] and now - lastFireTime[player] < MIN_FIRE_INTERVAL then
+	if lastFireTime[player] and now - lastFireTime[player] < RATE_TOLERANCE / stats.fireRate then
 		return -- rate limited, ignore
 	end
 	lastFireTime[player] = now
+	local seedNum = if type(seed) == "number" then math.floor(seed) else 0
 
 	local vehicle = VehicleRegistry.GetVehicleForPlayer(player)
 	if not vehicle then return end
@@ -78,31 +84,35 @@ fireWeapon.OnServerEvent:Connect(function(player: Player, origin: unknown, direc
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 	raycastParams.FilterDescendantsInstances = { vehicle }
 
-	local result = workspace:Raycast(originVec, directionVec * GameConfig.Weapon.Range, raycastParams)
-	local hitPosition = originVec + directionVec * GameConfig.Weapon.Range
-
-	if result then
-		hitPosition = result.Position
-		local zombieModel = result.Instance:FindFirstAncestorOfClass("Model")
-
-		if zombieModel and CollectionService:HasTag(zombieModel, "Zombie") then
-			local humanoid = zombieModel:FindFirstChildOfClass("Humanoid")
-			if humanoid and humanoid.Health > 0 then
-				zombieModel:SetAttribute("KilledBy", player.UserId)
-				-- Куда опрокинуть тело, если этот выстрел окажется смертельным:
-				-- пуля толкает зомби ОТ стрелка (ZombieAI.PlayDeath читает атрибут).
-				zombieModel:SetAttribute("DeathPush", Vector3.new(directionVec.X, 0, directionVec.Z))
-				zombieModel:SetAttribute("DeathCause", "gun") -- выбор варианта падения, см. ZombieAI.PlayDeath
-				humanoid:TakeDamage(GameConfig.Weapon.Damage)
+	-- Каждая дробина — свой луч и свой урон: дробовик в упор кладёт всеми восемью,
+	-- с расстояния — теми, что долетели.
+	local hits = table.create(stats.pellets)
+	for _, dir in Weapons.pelletDirections(directionVec, stats, seedNum) do
+		local result = workspace:Raycast(originVec, dir * stats.range, raycastParams)
+		local hitPosition = originVec + dir * stats.range
+		if result then
+			hitPosition = result.Position
+			local zombieModel = result.Instance:FindFirstAncestorOfClass("Model")
+			if zombieModel and CollectionService:HasTag(zombieModel, "Zombie") then
+				local humanoid = zombieModel:FindFirstChildOfClass("Humanoid")
+				if humanoid and humanoid.Health > 0 then
+					zombieModel:SetAttribute("KilledBy", player.UserId)
+					-- Куда опрокинуть тело, если этот выстрел окажется смертельным:
+					-- пуля толкает зомби ОТ стрелка (ZombieAI.PlayDeath читает атрибут).
+					zombieModel:SetAttribute("DeathPush", Vector3.new(dir.X, 0, dir.Z))
+					zombieModel:SetAttribute("DeathCause", "gun") -- выбор варианта падения, см. ZombieAI.PlayDeath
+					humanoid:TakeDamage(stats.damage)
+				end
 			end
 		end
+		table.insert(hits, hitPosition)
 	end
 
 	-- стреляющему эффекты уже показаны локально (предсказание) —
 	-- транслируем ОСТАЛЬНЫМ, чтоб у него не было двойного/запоздалого трассера
 	for _, other in Players:GetPlayers() do
 		if other ~= player then
-			bulletFired:FireClient(other, originVec, hitPosition)
+			bulletFired:FireClient(other, originVec, hits, stats.id)
 		end
 	end
 end)

@@ -30,13 +30,18 @@ export type Item = {
 	id: string, -- внутренний ключ; он же ключ владения в записи игрока
 	name: string, -- подпись на витрине (английская: шрифт Creepster без кириллицы)
 	blurb: string, -- строка пояснения под названием
-	kind: "skin" | "body" | "perk" | "consumable",
+	kind: "skin" | "body" | "weapon" | "perk" | "consumable",
 	bones: number?, -- цена в костях; nil = за кости не продаётся
 	gamePass: number?, -- id game pass; 0 = ещё не заведён на Dashboard
 	product: number?, -- id developer product; 0 = ещё не заведён
 	color: Color3?, -- скин: цвет кузова
 	material: Enum.Material?, -- скин: материал кузова
 	bodyTemplate: string?, -- кузов: имя шаблона в ServerStorage.BodyTemplates
+	-- Ствол: имя MeshPart-шаблона в ServerStorage.WeaponTemplates и посадка на GunCradle —
+	-- смещение центра детали от оси качания (weld C0) и точка дула (Attachment Muzzle);
+	-- числа печатает tools/blender/weapons.py. Характеристики — ReplicatedStorage.Weapons.
+	weaponTemplate: string?,
+	mount: { offset: Vector3, muzzle: Vector3 }?,
 	grantBones: number?, -- расходник: сколько костей выдать
 	lives: number?, -- расходник: сколько жизней добавить в заезде
 	minRank: string?, -- ранг (имя из GameConfig.Ranks), ниже которого товар скрыт и не продаётся
@@ -54,6 +59,10 @@ ShopCatalog.DefaultSkin = "rust"
 -- продаётся и есть у всех: слот BODY обязан быть чем-то занят всегда, иначе машина
 -- соберётся без кузова. Остальные кузова покупаются и надеваются поверх него.
 ShopCatalog.DefaultBody = "buggy"
+
+-- Ствол по умолчанию — пулемёт из шаблона машины: есть у всех, не продаётся, слот
+-- WEAPON всегда занят (как DefaultBody).
+ShopCatalog.DefaultWeapon = "machinegun"
 
 ShopCatalog.Items = {
 	-- // Кузова -------------------------------------------------------------
@@ -105,6 +114,24 @@ ShopCatalog.Items = {
 		color = Color3.fromRGB(198, 214, 214), material = Enum.Material.Glass,
 	},
 
+	-- // Стволы (PLAN_SHOP §6 шаг 5) -------------------------------------------
+	-- Меш — отдельный шаблон в ServerStorage.WeaponTemplates (импорт руками, как кузова);
+	-- пулемёт живёт прямо в VehicleTemplate.GunCradle.GunMesh, шаблона ему не нужно.
+	{
+		id = "machinegun", name = "MACHINE GUN", blurb = "came bolted to the cage",
+		kind = "weapon",
+	},
+	{
+		id = "nailer", name = "COFFIN NAILER", blurb = "eight nails, one answer, up close",
+		kind = "weapon", bones = 6000, weaponTemplate = "Nailer",
+		mount = { offset = Vector3.new(1.155, 0.05, 0), muzzle = Vector3.new(3.56, 0.18, 0) },
+	},
+	{
+		id = "rattle", name = "REAPER'S RATTLE", blurb = "six barrels, no manners",
+		kind = "weapon", bones = 9000, weaponTemplate = "Rattle", minRank = "GRAVE ROBBER",
+		mount = { offset = Vector3.new(0.975, 0.215, -0.198), muzzle = Vector3.new(3.6, 0.1, 0) },
+	},
+
 	-- // Постоянные улучшения ------------------------------------------------
 	{
 		id = "double_bones", name = "DOUBLE BONES", blurb = "every bone counts twice, forever",
@@ -134,7 +161,7 @@ end
 -- Настроен ли товар: за кости — есть цена; за робуксы — вписан ненулевой id.
 -- Скин по умолчанию настроен всегда: он бесплатный и выдаётся сам.
 function ShopCatalog.isConfigured(item: Item): boolean
-	if item.id == ShopCatalog.DefaultSkin or item.id == ShopCatalog.DefaultBody then
+	if item.id == ShopCatalog.DefaultSkin or item.id == ShopCatalog.DefaultBody or item.id == ShopCatalog.DefaultWeapon then
 		return true
 	end
 	return (item.bones ~= nil and item.bones > 0)
@@ -159,7 +186,7 @@ end
 function ShopCatalog.onSale(): { Item }
 	local list: { Item } = {}
 	for _, item in ShopCatalog.Items do
-		local isDefault = item.id == ShopCatalog.DefaultSkin or item.id == ShopCatalog.DefaultBody
+		local isDefault = item.id == ShopCatalog.DefaultSkin or item.id == ShopCatalog.DefaultBody or item.id == ShopCatalog.DefaultWeapon
 		if ShopCatalog.isConfigured(item) and not isDefault then
 			table.insert(list, item)
 		end
@@ -183,6 +210,17 @@ function ShopCatalog.bodies(): { Item }
 	local list: { Item } = {}
 	for _, item in ShopCatalog.Items do
 		if item.kind == "body" then
+			table.insert(list, item)
+		end
+	end
+	return list
+end
+
+-- Стволы: базовый пулемёт + всё купленное.
+function ShopCatalog.weapons(): { Item }
+	local list: { Item } = {}
+	for _, item in ShopCatalog.Items do
+		if item.kind == "weapon" then
 			table.insert(list, item)
 		end
 	end

@@ -83,7 +83,7 @@ end
 local function ownsItem(player: Player, item: ShopCatalog.Item): boolean
 	-- Базовые краска и кузов есть у всех и в записи не хранятся. Без этой строки
 	-- «надеть обратно старый багги» отвечало бы «not owned»: в owned его нет.
-	if item.id == ShopCatalog.DefaultSkin or item.id == ShopCatalog.DefaultBody then
+	if item.id == ShopCatalog.DefaultSkin or item.id == ShopCatalog.DefaultBody or item.id == ShopCatalog.DefaultWeapon then
 		return true
 	end
 	if PlayerData.owns(player, item.id) then
@@ -123,6 +123,14 @@ local function reshapeVehicle(player: Player)
 	end
 end
 
+-- Ствол из слота WEAPON — тем же порядком, что кузов.
+local function rearmVehicle(player: Player)
+	local car = VehicleRegistry.GetVehicleForPlayer(player)
+	if car then
+		PlayerFlow.applyWeapon(car, player)
+	end
+end
+
 -- // Пакет состояния ----------------------------------------------------------
 local function pushState(player: Player)
 	if not player.Parent then
@@ -137,11 +145,13 @@ local function pushState(player: Player)
 	end
 	owned[ShopCatalog.DefaultSkin] = true
 	owned[ShopCatalog.DefaultBody] = true -- стартовый багги есть у всех и не продаётся
+	owned[ShopCatalog.DefaultWeapon] = true -- и пулемёт с шаблона машины
 	shopState:FireClient(player, {
 		bones = Economy.balance(player),
 		owned = owned,
 		equipped = player:GetAttribute("EquippedSkin") or ShopCatalog.DefaultSkin,
 		equippedBody = player:GetAttribute("EquippedBody") or ShopCatalog.DefaultBody,
+		equippedWeapon = player:GetAttribute("EquippedWeapon") or ShopCatalog.DefaultWeapon,
 	})
 end
 
@@ -175,7 +185,7 @@ local function doBuy(player: Player, item: ShopCatalog.Item)
 end
 
 local function doEquip(player: Player, item: ShopCatalog.Item)
-	if item.kind ~= "skin" and item.kind ~= "body" then
+	if item.kind ~= "skin" and item.kind ~= "body" and item.kind ~= "weapon" then
 		reply(player, false, item.id, "not wearable")
 		return
 	end
@@ -183,7 +193,10 @@ local function doEquip(player: Player, item: ShopCatalog.Item)
 		reply(player, false, item.id, "not owned")
 		return
 	end
-	if item.kind == "body" then
+	if item.kind == "weapon" then
+		player:SetAttribute("EquippedWeapon", item.id)
+		rearmVehicle(player)
+	elseif item.kind == "body" then
 		player:SetAttribute("EquippedBody", item.id)
 		reshapeVehicle(player)
 		-- Кузов сменился — краску наносим заново: новая деталь приехала из шаблона

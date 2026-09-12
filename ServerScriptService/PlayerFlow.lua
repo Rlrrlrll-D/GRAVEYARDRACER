@@ -537,6 +537,136 @@ function PlayerFlow.applySkin(car: Model, player: Player)
 	end
 end
 
+-- // Слот WEAPON --------------------------------------------------------------
+-- Ствол — MeshPart GunMesh, вваренный в GunCradle (люльку наклона); дуло — Attachment
+-- Muzzle на люльке. Подмена: клон шаблона из ServerStorage.WeaponTemplates (пулемёт —
+-- из самого VehicleTemplate), сварка с C0 = item.mount.offset, Muzzle в item.mount.muzzle.
+-- Числа посадки печатает tools/blender/weapons.py (см. ShopCatalog.Item.mount).
+local WEAPON_FOLDER = "WeaponTemplates"
+
+local function weaponTemplateFor(item: ShopCatalog.Item): BasePart?
+	if item.id == ShopCatalog.DefaultWeapon then
+		local t = template or ensureTemplate()
+		local g = t and t:FindFirstChild("GunMesh", true)
+		return if g and g:IsA("BasePart") then g else nil
+	end
+	local folder = ServerStorage:FindFirstChild(WEAPON_FOLDER)
+	local tpl = folder and item.weaponTemplate and folder:FindFirstChild(item.weaponTemplate)
+	return if tpl and tpl:IsA("BasePart") then tpl else nil
+end
+
+-- Посадка пулемёта из шаблона машины: смещение центра от люльки и дуло — как стоят.
+local function defaultMount(): { offset: Vector3, muzzle: Vector3 }
+	local t = template or ensureTemplate()
+	local cradle = t and t:FindFirstChild("GunCradle", true)
+	local g = cradle and cradle:FindFirstChild("GunMesh")
+	local m = cradle and cradle:FindFirstChild("Muzzle")
+	if cradle and cradle:IsA("BasePart") and g and g:IsA("BasePart") then
+		return {
+			offset = cradle.CFrame:ToObjectSpace(g.CFrame).Position,
+			muzzle = if m and m:IsA("Attachment") then m.Position else Vector3.new(3.16, 0.18, 0),
+		}
+	end
+	return { offset = Vector3.new(0.996, -0.25, 0.01), muzzle = Vector3.new(3.16, 0.18, 0) }
+end
+
+function PlayerFlow.applyWeapon(car: Model, player: Player)
+	local item = ShopCatalog.get(player:GetAttribute("EquippedWeapon"))
+	if not (item and item.kind == "weapon") then
+		item = ShopCatalog.get(ShopCatalog.DefaultWeapon)
+	end
+	if not item then
+		return
+	end
+	local cradle = car:FindFirstChild("GunCradle", true)
+	if not (cradle and cradle:IsA("BasePart")) then
+		return
+	end
+	local current = cradle:FindFirstChild("GunMesh")
+	local currentId = current and current:GetAttribute("WeaponId") or ShopCatalog.DefaultWeapon
+	if current and currentId == item.id then
+		return -- нужный ствол уже стоит
+	end
+	local tpl = weaponTemplateFor(item)
+	if not tpl then
+		warn("[PlayerFlow] Нет шаблона ствола " .. tostring(item.weaponTemplate) .. " (" .. item.id .. ")")
+		return
+	end
+	local mount = item.mount or defaultMount()
+
+	-- МАШИНУ С ВОДИТЕЛЕМ ПЕРЕБИРАТЬ «НА ЖИВУЮ» НЕЛЬЗЯ (см. mountTurret): физикой владеет
+	-- клиент, подмена детали в сборке с сервера расходится с его копией. Меняем на якоре
+	-- и возвращаем владение.
+	local seat = car:FindFirstChild("DriveSeat")
+	local occupied = seat ~= nil and seat:IsA("VehicleSeat") and (seat :: VehicleSeat).Occupant ~= nil
+	local frozen: { [BasePart]: boolean }? = nil
+	if occupied then
+		local snapshot: { [BasePart]: boolean } = {}
+		for _, d in car:GetDescendants() do
+			if d:IsA("BasePart") then
+				snapshot[d :: BasePart] = (d :: BasePart).Anchored;
+				(d :: BasePart).Anchored = true
+			end
+		end
+		frozen = snapshot
+	end
+
+	local gun = (tpl :: BasePart):Clone()
+	gun.Name = "GunMesh"
+	gun:SetAttribute("WeaponId", item.id)
+	-- косметика, как у пулемёта из шаблона: без массы, коллизий и запросов
+	gun.Anchored = frozen ~= nil
+	gun.CanCollide = false
+	gun.CanQuery = false
+	gun.CanTouch = false
+	gun.Massless = true
+	for _, c in gun:GetDescendants() do
+		if c:IsA("WeldConstraint") or c:IsA("JointInstance") then
+			c:Destroy()
+		end
+	end
+	if current then
+		-- сварка старого ствола лежит в люльке (RigidWeld_GunCradle_GunMesh): без этого
+		-- она остаётся висеть с пустым Part1 и путает поиск по имени
+		for _, c in cradle:GetChildren() do
+			if (c:IsA("Weld") or c:IsA("WeldConstraint")) and (c.Part0 == current or c.Part1 == current) then
+				c:Destroy()
+			end
+		end
+		current:Destroy()
+	end
+	local c0 = CFrame.new(mount.offset)
+	gun.CFrame = cradle.CFrame * c0
+	gun.Parent = cradle
+	local weld = Instance.new("Weld")
+	weld.Name = "RigidWeld_GunCradle_GunMesh"
+	weld.Part0 = cradle
+	weld.Part1 = gun
+	weld.C0 = c0
+	weld.Parent = cradle
+	local muzzle = cradle:FindFirstChild("Muzzle")
+	if muzzle and muzzle:IsA("Attachment") then
+		muzzle.Position = mount.muzzle
+	end
+
+	if frozen then
+		for p, wasAnchored in frozen do
+			if p.Parent then
+				p.Anchored = wasAnchored
+			end
+		end
+		gun.Anchored = false
+		quietChassis(car)
+		stillVelocities(car)
+		if seat and seat:IsA("VehicleSeat") then
+			pcall(function()
+				(seat :: VehicleSeat):SetNetworkOwner(player)
+			end)
+		end
+		giveTurretOwnership(car, player)
+	end
+end
+
 local function tuneHeadlights(car: Model)
 	local body = car:FindFirstChild("BuggyBody")
 	if not (body and body:IsA("BasePart")) then
@@ -702,6 +832,7 @@ function PlayerFlow.assignVehicle(player: Player, seatCFrame: CFrame): Model?
 		seat.HeadsUpDisplay = false -- нативный Roblox-спидометр (CoreGui.VehicleHudFrame) не нужен: свой HUD
 	end
 	PlayerFlow.applyBody(car, player) -- ПЕРВЫМ: фары и краска работают по готовой детали
+	PlayerFlow.applyWeapon(car, player) -- ствол из слота WEAPON, тоже ДО Parent
 	tuneHeadlights(car) -- до Parent: свет приедет клиенту уже наведённым
 	PlayerFlow.applySkin(car, player) -- тоже ДО Parent: игрок не должен видеть смену цвета
 	car:PivotTo(seatCFrame * pivotFromSeat) -- ДО Parent: VehicleController запомнит «дом»

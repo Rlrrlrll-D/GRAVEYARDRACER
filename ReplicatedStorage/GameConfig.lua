@@ -127,6 +127,8 @@ local GameConfig: GameConfigType = {
 		-- окруживших давали 46 в секунду и съедали машину целиком за две.
 		MaxAttackers = 3,
 	},
+	-- Стартовый пулемёт. Остальные стволы слота WEAPON (NAILER, RATTLE) — в
+	-- ReplicatedStorage.Weapons, там же вид и звук выстрела; отсюда берётся только базовый.
 	Weapon = {
 		Damage = 20,
 		Range = 300,

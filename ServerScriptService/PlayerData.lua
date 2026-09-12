@@ -55,6 +55,9 @@ export type Record = {
 	-- Надетый КУЗОВ (слот BODY) — отдельно от краски: форма меняется подменой
 	-- MeshPart-шаблона, а `equipped` красит то, что подставили.
 	equippedBody: string,
+	-- Надетый СТВОЛ (слот WEAPON, 2026-09-12): меш ствола подставляет PlayerFlow.applyWeapon,
+	-- характеристики — ReplicatedStorage.Weapons. В старых записях поля нет = пулемёт.
+	equippedWeapon: string,
 	-- Прошёл ли игрок первый заезд с подсказками. Хранится В ЗАПИСИ, а не в
 	-- атрибуте сессии: подсказки обязаны не вернуться ни завтра, ни с телефона.
 	onboarded: boolean,
@@ -94,6 +97,7 @@ local function defaultRecord(): Record
 		owned = {},
 		equipped = ShopCatalog.DefaultSkin,
 		equippedBody = ShopCatalog.DefaultBody,
+		equippedWeapon = ShopCatalog.DefaultWeapon,
 		onboarded = false,
 	}
 end
@@ -174,6 +178,10 @@ local function recordFrom(raw: any): Record
 		local body = ShopCatalog.get(raw.equippedBody)
 		if body and body.kind == "body" then
 			rec.equippedBody = body.id
+		end
+		local weapon = ShopCatalog.get(raw.equippedWeapon)
+		if weapon and weapon.kind == "weapon" then
+			rec.equippedWeapon = weapon.id
 		end
 		-- Поле появилось позже остальных. Проверяем именно НАЛИЧИЕ поля, а не его
 		-- истинность: у всех новых записей оно есть и равно false, и подмешивать сюда
@@ -289,6 +297,7 @@ local function loadInner(player: Player)
 	player:SetAttribute("Bones", rec.stats.bones)
 	player:SetAttribute("EquippedSkin", rec.equipped)
 	player:SetAttribute("EquippedBody", rec.equippedBody)
+	player:SetAttribute("EquippedWeapon", rec.equippedWeapon)
 	-- Атрибут реплицируется клиенту сам — по нему Onboarding решает, показывать ли
 	-- подсказки; обратно в true его ставит MatchManager после первого доеханного заезда.
 	player:SetAttribute("Onboarded", rec.onboarded)
@@ -314,6 +323,10 @@ local function save(player: Player, release: boolean)
 	local body = ShopCatalog.get(player:GetAttribute("EquippedBody"))
 	if body and body.kind == "body" then
 		rec.equippedBody = body.id
+	end
+	local weapon = ShopCatalog.get(player:GetAttribute("EquippedWeapon"))
+	if weapon and weapon.kind == "weapon" then
+		rec.equippedWeapon = weapon.id
 	end
 	-- Обучённость только НАРАСТАЕТ: снять флаг в записи некому, а вот прочитать
 	-- атрибут раньше, чем PlayerData его засидировал, — вполне возможно.
