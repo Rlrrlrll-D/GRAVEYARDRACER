@@ -281,8 +281,10 @@ local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, m
 			local a = cov[j * w + i + 1] * opacity
 			if a > 0.002 then
 				local x, y
+				-- flip = честный поворот на 180° (как наклейку крутят): и строки, и столбцы;
+				-- один только jj давал зеркальную ленту — буквы вверх ногами, порядок прежний
 				local jj = if zone.flip then h - 1 - j else j -- flip: макушка к водителю, зубы к носу
-				local ii = if zone.mirror then w - 1 - i else i
+				local ii = if (zone.mirror == true) ~= (zone.flip == true) then w - 1 - i else i
 				if zone.rotated then
 					-- макушка (j = 0) смотрит в +U = +x
 					x = math.floor(cx + (h / 2 - 1 - jj) + 0.5)

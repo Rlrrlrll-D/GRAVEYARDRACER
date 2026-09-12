@@ -194,11 +194,19 @@
   кэш по (кузов, зоны, цвет, режим, краска).
 - **`StarterPlayerScripts.RankSkull`**: следит за PlayerVehicle/BuggyBody/OwnerUserId,
   рангом водителя и цветом краски; клиентская работа целиком.
-- **`GameConfig.Ranks`**: `Tiers[i].skull = { zones, color }` — все четыре места на
-  каждой ступени с PALLBEARER, ранг различает цвет: лестница `RankSkull.Colors`
-  bone (188,179,162) → ivory → amber → gold. Режим `SkullMode = "softlight"`,
-  `SkullOpacity = 0.64`, `SkullLift = 0.11` — подобраны юзером на экране
-  (`StarterPlayerScripts.SkullTune`, F3 в Studio, P печатает строку для переноса).
+- **`GameConfig.Ranks`**: `Tiers[i].skull = { zones, color, shape }` — все четыре места
+  на КАЖДОЙ ступени, включая GRAVEDIGGER. **Ранг различает ФОРМА, не цвет** (решение
+  юзера 2026-09-12: «уходим от разных цветов к разным черепам»): пять силуэтов с лентой
+  и именем ранга из `D:\VECTOR\skull_range.ai` → `ReplicatedStorage.SkullShapes`
+  (разбор .ai: `tools/ai_extract.py` + `tools/ai_to_lua.py`). Цвет у всех bone
+  (188,179,162), режим `SkullMode = "softlight"`, `SkullOpacity = 0.64`,
+  `SkullLift = 0.11` — подобраны юзером на экране (`StarterPlayerScripts.SkullTune`,
+  F3 в Studio, P печатает строку для переноса, RANK перебирает ступени). Лестница
+  ivory/amber/gold в `RankSkull.Colors` осталась про запас.
+- **Ориентация**: капот/крышка — всегда зубами к носу (юзер 2026-09-12); `flip` в зоне
+  — честный поворот на 180° (строки и столбцы), лента читается с носа. Roblox при
+  импорте разворачивает меш x→−x — ось U капота/крышки идёт справа налево, без
+  `mirror` лента шла зеркально; корма/борта уже flipU в Blender, им mirror не нужен.
 - Краска `rust` = (229,217,188): краски теперь реально домножают текстуру (композит
   собирается всегда, см. грабли ниже), базовая краска есть на витрине рядом с багги.
 
