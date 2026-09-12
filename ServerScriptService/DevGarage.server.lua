@@ -101,23 +101,8 @@ local function build(player: Player)
 	floor.Color = Color3.fromRGB(38, 36, 40)
 	floor.Parent = model
 
-	-- два мягких фонаря площадки: без них на высоте одна луна, кузова ночью чёрные
-	for _, dx in { -w / 3, w / 3 } do
-		local lampPart = Instance.new("Part")
-		lampPart.Name = "Lamp"
-		lampPart.Anchored = true
-		lampPart.CanCollide = false
-		lampPart.Transparency = 1
-		lampPart.Size = Vector3.new(1, 1, 1)
-		lampPart.CFrame = CFrame.new(origin + Vector3.new(dx, 14, 0))
-		lampPart.Parent = model
-		local light = Instance.new("PointLight")
-		light.Brightness = 0.8
-		light.Range = 60
-		light.Color = Color3.fromRGB(255, 214, 160)
-		light.Shadows = false
-		light.Parent = lampPart
-	end
+	-- Своего света у площадки НЕТ (юзер 2026-09-12: никакого свечения — только свет
+	-- сцены; ночью судить при луне, как в заезде без фонарей).
 
 	for bi, bodyItem in bodies do
 		local tpl = bodyItem.bodyTemplate and templates:FindFirstChild(bodyItem.bodyTemplate)
