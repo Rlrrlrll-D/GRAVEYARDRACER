@@ -80,6 +80,37 @@ def fbm(x, y, seed, octaves=4):
     return s / tot
 
 
+def hsh3(ix, iy, iz, seed):
+    n = (np.asarray(ix).astype(np.int64) * 374761393 + np.asarray(iy).astype(np.int64) * 668265263
+         + np.asarray(iz).astype(np.int64) * 1013904223 + seed * 1442695041) & 0x7fffffff
+    n = ((n ^ (n >> 13)) * 1274126177) & 0x7fffffff
+    return ((n ^ (n >> 16)) & 0xffff) / 65535.0
+
+
+def vnoise3(x, y, z, seed):
+    """Трилинейный value noise по трём координатам. ВАЖНО для граней кузова: 2D-шум от
+    (x + z, y) на грани с постоянным y вырождается в полосы (косые полосы на корме
+    багги, 2026-09-12) — объёмный шум таких артефактов не даёт."""
+    xi = np.floor(x); yi = np.floor(y); zi = np.floor(z)
+    xf = x - xi; yf = y - yi; zf = z - zi
+    u = xf * xf * (3 - 2 * xf); v = yf * yf * (3 - 2 * yf); w = zf * zf * (3 - 2 * zf)
+    c000 = hsh3(xi, yi, zi, seed); c100 = hsh3(xi + 1, yi, zi, seed)
+    c010 = hsh3(xi, yi + 1, zi, seed); c110 = hsh3(xi + 1, yi + 1, zi, seed)
+    c001 = hsh3(xi, yi, zi + 1, seed); c101 = hsh3(xi + 1, yi, zi + 1, seed)
+    c011 = hsh3(xi, yi + 1, zi + 1, seed); c111 = hsh3(xi + 1, yi + 1, zi + 1, seed)
+    x00 = c000 * (1 - u) + c100 * u; x10 = c010 * (1 - u) + c110 * u
+    x01 = c001 * (1 - u) + c101 * u; x11 = c011 * (1 - u) + c111 * u
+    y0 = x00 * (1 - v) + x10 * v; y1 = x01 * (1 - v) + x11 * v
+    return y0 * (1 - w) + y1 * w
+
+
+def fbm3(x, y, z, seed, octaves=4):
+    s = np.zeros_like(x); amp = 0.5; f = 1.0; tot = 0.0
+    for k in range(octaves):
+        s += amp * vnoise3(x * f, y * f, z * f, seed + k * 101); tot += amp; amp *= 0.5; f *= 2.0
+    return s / tot
+
+
 def smoothstep(e0, e1, x):
     t = np.clip((x - e0) / (e1 - e0), 0, 1)
     return t * t * (3 - 2 * t)

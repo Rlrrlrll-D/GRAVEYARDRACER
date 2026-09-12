@@ -8,6 +8,7 @@ local CollectionService = game:GetService("CollectionService") -- нужен у�
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local GuiService = game:GetService("GuiService")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local updateStats = remotes:WaitForChild("UpdateStats") :: RemoteEvent
@@ -95,7 +96,7 @@ hudRoot.Parent = screenGui
 -- Поэтому усиление вносится в его же величины: опора делится на HUD_GAIN, зажимы
 -- умножаются. Это ровно то же самое, что clamp(вьюпорт ÷ опора, min, 1) × HUD_GAIN,
 -- только без правки общей функции, которой пользуются ещё три меню.
-UITheme.fitToScreen(hudRoot, {
+local hudScale = UITheme.fitToScreen(hudRoot, {
 	refWidth = HUD_REF_WIDTH / HUD_GAIN,
 	refHeight = HUD_REF_HEIGHT / HUD_GAIN,
 	minScale = HUD_MIN_SCALE * HUD_GAIN,
@@ -193,8 +194,19 @@ local racePlate = PlateArt.plate(7, UITheme.Palette.Green)
 racePlate.Name = "RaceStatus"
 racePlate.Size = UDim2.fromOffset(420, 50)
 racePlate.AnchorPoint = Vector2.new(0.5, 0)
-racePlate.Position = UDim2.new(0.5, 0, 0, PLATE_Y)
 racePlate.Parent = hudRoot
+-- У САМОГО ВЕРХА ЭКРАНА, внутри полосы инсета Roblox: по центру она пуста и на ПК, и на
+-- телефоне (кнопки Roblox слева). Юзер 2026-09-12: «строку с позицией и кругами поднять
+-- выше». ScreenGui инсет не игнорирует (иначе уехали бы и боковые столбцы), поэтому
+-- сдвиг считаем от инсета и делим на масштаб HUD — отступ RACE_TOP в физических точках
+-- одинаков на всех экранах, мобильная вёрстка (UIScale) не трогается.
+local RACE_TOP = 6
+local function placeRacePlate()
+	local inset = GuiService:GetGuiInset()
+	racePlate.Position = UDim2.new(0.5, 0, 0, (RACE_TOP - inset.Y) / math.max(hudScale.Scale, 0.01))
+end
+hudScale:GetPropertyChangedSignal("Scale"):Connect(placeRacePlate)
+placeRacePlate()
 local raceLabel = PlateArt.caption(racePlate, "", UITheme.Ink, 28)
 
 local raceCenter = Instance.new("TextLabel")
