@@ -41,13 +41,18 @@ local function setCrossHidden(body: BasePart, hidden: boolean)
 	end
 end
 
--- Собрать и надеть на кузов то, что положено водителю. Йилдит на первом кузове
--- каждого типа (чтение текстуры), поэтому вызывается из task.spawn.
+-- Собрать и надеть на кузов то, что положено водителю. Йилдит (чтение текстуры и
+-- нарезка сборки по кадрам в RankSkull.compose), поэтому вызывается из task.spawn.
+-- Поколение на кузов: пока одна сборка ждёт кадры, может прийти новая (сменили краску) —
+-- надевает только самая свежая, иначе старая, дособравшись позже, перекрыла бы новую.
+local dressGen: { [Instance]: number } = setmetatable({}, { __mode = "k" }) :: any
 local function dress(body: BasePart, driver: Player)
 	local bodyId = body:GetAttribute("BodyId")
 	if type(bodyId) ~= "string" then
 		return
 	end
+	local gen = (dressGen[body] or 0) + 1
+	dressGen[body] = gen
 	local spec = skullFor(Ranks.forPlayer(driver))
 	-- Композит всегда: он же несёт краску (текстура на MeshPart отключает Color3, см.
 	-- RankSkull.compose). Без черепов — просто крашеный кузов.
@@ -102,8 +107,8 @@ local function dress(body: BasePart, driver: Player)
 		tint,
 		(ob and ob.lift) or (o and o.lift) or (cb and cb.lift) or LIFT,
 		RankSkull.worn(body), patch, shape) -- свою картинку переписываем на месте, а не плодим новые
-	if not body.Parent then
-		return -- кузов успели заменить, пока читали текстуру
+	if not body.Parent or dressGen[body] ~= gen then
+		return -- кузов успели заменить или переодеть, пока собирали
 	end
 	RankSkull.apply(body :: MeshPart, img)
 	setCrossHidden(body, img ~= nil and spec ~= nil and table.find(spec.zones, "top") ~= nil)

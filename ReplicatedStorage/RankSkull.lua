@@ -155,9 +155,26 @@ local function spansAt(shape: Shape, ny: number): { number }
 	return xs
 end
 
+-- НАРЕЗКА ТЯЖЁЛЫХ ЦИКЛОВ ПО КАДРАМ (2026-09-12). Полный проход по атласу 1024² —
+-- миллион пикселей на краску, ещё миллион на мох и два миллиона math.noise на поле
+-- шума; на ПК это ~0.3 с, на телефоне — секунды, и клиент ЗАМИРАЛ (юзер: «лютые
+-- фризы», а на старте багги «улетела в небеса» — физика после стопа кадра догоняла
+-- скачком). Все проходы работают до SLICE_BUDGET, потом отдают кадр; итог тот же,
+-- просто появляется через несколько кадров. compose и так зовут из task.spawn.
+local SLICE_BUDGET = 0.007
+local function slicer(): () -> ()
+	local t0 = os.clock()
+	return function()
+		if os.clock() - t0 > SLICE_BUDGET then
+			task.wait()
+			t0 = os.clock()
+		end
+	end
+end
+
 -- Покрытие черепа шириной w px (высота от пропорции формы): cov[j*w + i + 1], j = 0 — макушка.
 local covCache: { [string]: { w: number, h: number, cov: { number } } } = {}
-local function coverage(shapeName: string?, w: number): (number, number, { number })
+local function coverage(shapeName: string?, w: number, tick: (() -> ())?): (number, number, { number })
 	local ck = (shapeName or "@outline") .. "|" .. w
 	local ready = covCache[ck]
 	if ready then
@@ -168,6 +185,9 @@ local function coverage(shapeName: string?, w: number): (number, number, { numbe
 	local cov = table.create(w * h, 0)
 	local weight = 1 / SUBROWS
 	for py = 0, h - 1 do
+		if tick then
+			tick()
+		end
 		for s = 0, SUBROWS - 1 do
 			local ny = shape.maxY - ((py + (s + 0.5) / SUBROWS) / h) * shape.aspect
 			local xs = spansAt(shape, ny)
@@ -285,14 +305,14 @@ end
 -- Нужен, потому что кузов тёмный (rust ×0.78): Overlay на базе ~0.3 не даёт светлее
 -- ~0.55 даже белым, а юзер хочет «черепа светлее» при сохранении зерна текстуры
 -- (наклон Overlay остаётся, подъём лишь сдвигает).
-local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, mode: string, opacity: number, lift: number, shapeName: string?)
+local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, mode: string, opacity: number, lift: number, shapeName: string?, tick: () -> ())
 	local blend = BLEND[mode] or BLEND.normal
 	-- плотность px/stud одинакова по обеим осям зоны (так собран атлас)
 	local pxPerStud = if zone.rotated then ((zone.u1 - zone.u0) * size) / zone.studsH else ((zone.u1 - zone.u0) * size) / zone.studsW
 	local aspect = shapeFor(shapeName).aspect
 	local sh = math.max(4, math.floor(zone.height * pxPerStud + 0.5)) -- высота черепа, px
 	local sw = math.max(4, math.floor(sh / aspect + 0.5))
-	local w, h, cov = coverage(shapeName, sw)
+	local w, h, cov = coverage(shapeName, sw, tick)
 	-- центр черепа в пикселях атласа
 	local cx, cy
 	if zone.rotated then
@@ -304,6 +324,7 @@ local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, m
 	end
 	local cr, cg, cb = color.R, color.G, color.B
 	for j = 0, h - 1 do
+		tick()
 		for i = 0, w - 1 do
 			local a = cov[j * w + i + 1] * opacity
 			if a > 0.002 then
@@ -346,6 +367,7 @@ end
 --     уничтожаем перед созданием новой. 12, а не 6: гараж-песочница (DevGarage)
 --     одевает 2 кузова × 5 красок разом, плюс своя машина.
 local imageCache: { [string]: EditableImage } = {}
+local inFlight: { [string]: boolean } = {} -- ключи, которые сейчас собираются (compose йилдит)
 local keyOf: { [EditableImage]: string } = {}
 local users: { [EditableImage]: { [Instance]: boolean } } = {}
 local wornBy: { [Instance]: EditableImage } = setmetatable({}, { __mode = "k" }) :: any
@@ -422,7 +444,7 @@ end
 -- трогает, пересчёт только при смене масштаба или раскладки.
 local fieldKey: string? = nil
 local fieldBuf: buffer? = nil
-local function noiseField(size: number, scale: number, seed: number): buffer
+local function noiseField(size: number, scale: number, seed: number, tick: () -> ()): buffer
 	local k = ("%d|%.2f|%d"):format(size, scale, seed)
 	if fieldKey == k and fieldBuf then
 		return fieldBuf
@@ -430,6 +452,7 @@ local function noiseField(size: number, scale: number, seed: number): buffer
 	local b = buffer.create(size * size * 4)
 	local inv = 1 / size
 	for y = 0, size - 1 do
+		tick()
 		local v = (y + 0.5) * inv
 		for x = 0, size - 1 do
 			buffer.writef32(b, (y * size + x) * 4, patchNoise((x + 0.5) * inv, v, scale, seed))
@@ -477,10 +500,21 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	if ready then
 		return ready
 	end
+	-- Ту же картинку уже собирает другой поток (три машины одного ранга на старте):
+	-- ждём его, а не считаем трижды.
+	while inFlight[key] do
+		task.wait()
+	end
+	ready = imageCache[key]
+	if ready then
+		return ready
+	end
 	local base = loadBase(bodyId)
 	if not base then
 		return nil
 	end
+	inFlight[key] = true
+	local tick = slicer()
 	local size = base.size
 	local buf = buffer.create(size * size * 4)
 	buffer.copy(buf, 0, base.buf)
@@ -489,23 +523,34 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	local tone = spec.baseTone or 1
 	local pr, pg, pb = tone * (1 - (1 - paint.R) * ps), tone * (1 - (1 - paint.G) * ps), tone * (1 - (1 - paint.B) * ps)
 	if math.abs(pr - 1) > 0.001 or math.abs(pg - 1) > 0.001 or math.abs(pb - 1) > 0.001 then
-		for i = 0, size * size - 1 do
-			local o = i * 4
-			buffer.writeu8(buf, o, math.min(255, math.floor(buffer.readu8(buf, o) * pr + 0.5)))
-			buffer.writeu8(buf, o + 1, math.min(255, math.floor(buffer.readu8(buf, o + 1) * pg + 0.5)))
-			buffer.writeu8(buf, o + 2, math.min(255, math.floor(buffer.readu8(buf, o + 2) * pb + 0.5)))
+		-- таблицы на канал вместо умножения на каждый пиксель: на телефоне это самый
+		-- дорогой проход (миллион пикселей), индексация втрое дешевле float-математики
+		local lr, lg, lb = table.create(256), table.create(256), table.create(256)
+		for v = 0, 255 do
+			lr[v] = math.min(255, math.floor(v * pr + 0.5))
+			lg[v] = math.min(255, math.floor(v * pg + 0.5))
+			lb[v] = math.min(255, math.floor(v * pb + 0.5))
+		end
+		for y = 0, size - 1 do
+			tick()
+			for o = y * size * 4, (y * size + size - 1) * 4, 4 do
+				buffer.writeu8(buf, o, lr[buffer.readu8(buf, o)])
+				buffer.writeu8(buf, o + 1, lg[buffer.readu8(buf, o + 1)])
+				buffer.writeu8(buf, o + 2, lb[buffer.readu8(buf, o + 2)])
+			end
 		end
 	end
 	-- Пятна краски (мох): где шум выше порога — цвет краски по яркости базы, край
 	-- мягкий (полоса ±0.06 по шуму), чтобы пятно не резалось по пикселям.
 	if patch then
 		local thr = patchThreshold(patch)
-		local field = noiseField(size, patch.scale, patch.seed)
+		local field = noiseField(size, patch.scale, patch.seed, tick)
 		local cr, cg, cb = patch.color.R, patch.color.G, patch.color.B
 		local pmode = patch.mode or "tint"
 		local pblend = BLEND[pmode]
 		local pop = patch.opacity or 1
 		for y = 0, size - 1 do
+			tick()
 			for x = 0, size - 1 do
 				local i4 = (y * size + x) * 4
 				local n = buffer.readf32(field, i4)
@@ -532,10 +577,11 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 		for _, name in names do
 			local zone = spec.zones[name]
 			if zone then
-				paintZone(buf, size, zone, color, mode, opacity, up, shapeName)
+				paintZone(buf, size, zone, color, mode, opacity, up, shapeName, tick)
 			end
 		end
 	end
+	inFlight[key] = nil -- тяжёлое позади; дальше без йилдов, ждущие увидят imageCache[key]
 	local dims = Vector2.new(size, size)
 	-- (1) своя картинка, которую никто больше не носит — переписать на месте
 	local target: EditableImage? = nil
