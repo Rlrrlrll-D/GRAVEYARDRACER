@@ -88,10 +88,11 @@ ShopCatalog.Items = {
 	{
 		id = "moss", name = "GRAVE MOSS", blurb = "parked too long in the wrong row",
 		kind = "skin", bones = 2500,
-		color = Color3.fromRGB(52, 90, 64), material = Enum.Material.Grass,
-		-- Мох пятнами, а не сплошь (юзер 2026-09-12: «локальными участками, ~1:6»):
-		-- шестая часть кузова под мхом, остальное — ржавчина базовой краски.
-		patchy = { coverage = 1 / 6, scale = 9, seed = 7, mode = "tint", opacity = 1 },
+		-- Мох пятнами, а не сплошь (юзер: «локальными участками»). Цвет и пятна подобраны
+		-- юзером в SkullTune 2026-09-12 (было 52,90,64 сплошь; потом 1/6 tint): треть
+		-- кузова под мхом, Soft Light 0.70, пятна мельче (scale 12.4), раскладка seed 18.
+		color = Color3.fromRGB(45, 78, 37), material = Enum.Material.Grass,
+		patchy = { coverage = 0.308, scale = 12.4, seed = 18, mode = "softlight", opacity = 0.70 },
 	},
 	{
 		id = "blood", name = "BLOOD RED", blurb = "don't ask whose",
