@@ -78,7 +78,7 @@ ShopCatalog.Items = {
 		-- краски на багги цвет не давали вовсе, и ржавчина шла в полную яркость (×1.0).
 		-- Подобрано юзером в SkullTune 2026-09-12: тёплый тинт ×0.9/0.85/0.74 (229,217,188);
 		-- старые 163 дали бы ×0.64 и совсем тёмный кузов.
-		kind = "skin", color = Color3.fromRGB(229, 217, 188), material = Enum.Material.Plastic,
+		kind = "skin", color = Color3.fromRGB(233, 217, 188), material = Enum.Material.Plastic, -- 233: гараж 2026-09-12
 	},
 	{
 		id = "bone", name = "BONE WHITE", blurb = "scrubbed clean, mostly",

@@ -81,7 +81,7 @@ export type GameConfigType = {
 		SkullLift: number, -- подъём яркости черепа сверх режима (доля цвета), см. RankSkull
 		-- по кузовам поверх общих (buggy/coffin): плотность/подъём/режим свои — на багги
 		-- черепу нужно больше плотности, чем на досках гроба (юзер 2026-09-12)
-		SkullBody: { [string]: { mode: string?, opacity: number?, lift: number? } }?,
+		SkullBody: { [string]: { mode: string?, opacity: number?, lift: number?, color: string? } }?,
 	},
 }
 
@@ -216,12 +216,14 @@ local GameConfig: GameConfigType = {
 		-- режима — на тёмной ржавчине без него череп не поднимается выше полутона).
 		-- ЧИСЛА ПОДОБРАНЫ ЮЗЕРОМ НА ЭКРАНЕ (SkullTune, 2026-09-12) и зашиты как есть;
 		-- крутить снова — F3 в Studio, P печатает строку для переноса сюда.
-		SkullMode = "softlight",
-		SkullOpacity = 0.72,
-		SkullLift = 0.11,
+		-- Гараж-песочница 2026-09-12: Overlay у обоих кузовов, общие числа = багги, гроб —
+		-- своя плотность/подъём; у багги череп теплее (RankSkull.Colors.rosebone).
+		SkullMode = "overlay",
+		SkullOpacity = 0.53,
+		SkullLift = 0.31,
 		SkullBody = {
-			buggy = { opacity = 0.90 },
-			coffin = { opacity = 0.80 },
+			buggy = { color = "rosebone" },
+			coffin = { opacity = 0.64, lift = 0.26 },
 		},
 	},
 }

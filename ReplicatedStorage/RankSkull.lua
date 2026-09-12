@@ -69,10 +69,12 @@ RankSkull.Bodies = {
 	buggy = {
 		atlas = 1024,
 		texture = "rbxassetid://108257958365417", -- ржавчина (tools/blender/buggy_texture.py), импорт юзера 2026-09-12
-		paintStrength = 0.65, -- BLOOD «сильно отдаёт красным» — как у гроба, в тёмно-коричневый
-		baseTone = 0.85,
+		-- ЧИСЛА ЮЗЕРА ИЗ ГАРАЖА (SkullTune, 2026-09-12): сила краски, тон, место и высота
+		-- черепа на капоте — зашиты как есть.
+		paintStrength = 0.41, -- BLOOD «сильно отдаёт красным» — в тёмно-коричневый, доски/ржавчина просвечивают
+		baseTone = 1.06,
 		zones = {
-			top   = { u0 = 0.015, v0 = 0.635, u1 = 0.376, v1 = 0.914, rotated = false, studsW = 4.63, studsH = 3.57, ta = 0.5,  tb = 0.5,  height = 3.1, flip = true, mirror = true },
+			top   = { u0 = 0.015, v0 = 0.635, u1 = 0.376, v1 = 0.914, rotated = false, studsW = 4.63, studsH = 3.57, ta = 0.5,  tb = 0.49, height = 3.28, flip = true, mirror = true },
 			rear  = { u0 = 0.406, v0 = 0.635, u1 = 0.802, v1 = 0.846, rotated = false, studsW = 5.07, studsH = 2.70, ta = 0.5,  tb = 0.27, height = 1.25 },
 			left  = { u0 = 0.635, v0 = 0.015, u1 = 0.794, v1 = 0.588, rotated = true,  studsW = 9.77, studsH = 2.71, ta = 0.50, tb = 0.26, height = 1.2 },
 			right = { u0 = 0.824, v0 = 0.015, u1 = 0.982, v1 = 0.586, rotated = true,  studsW = 9.74, studsH = 2.70, ta = 0.50, tb = 0.26, height = 1.2 },
@@ -84,12 +86,14 @@ RankSkull.Bodies = {
 	coffin = {
 		atlas = 1024,
 		texture = "rbxassetid://90339981575144", -- доски (tools/blender/coffin_texture.py), импорт юзера 2026-09-12
-		paintStrength = 0.65,
+		-- ЧИСЛА ЮЗЕРА ИЗ ГАРАЖА (SkullTune, 2026-09-12)
+		paintStrength = 0.39,
+		baseTone = 0.81,
 		zones = {
-			top   = { u0 = 0.015, v0 = 0.585, u1 = 0.366, v1 = 0.942, rotated = false, studsW = 6.00, studsH = 6.10, ta = 0.5,  tb = 0.38, height = 3.1, flip = true, mirror = true },
+			top   = { u0 = 0.015, v0 = 0.585, u1 = 0.366, v1 = 0.942, rotated = false, studsW = 6.00, studsH = 6.10, ta = 0.5,  tb = 0.33, height = 2.83, flip = true, mirror = true },
 			rear  = { u0 = 0.396, v0 = 0.585, u1 = 0.659, v1 = 0.784, rotated = false, studsW = 4.48, studsH = 3.40, ta = 0.5,  tb = 0.42, height = 2.2 },
-			left  = { u0 = 0.585, v0 = 0.015, u1 = 0.758, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.30, tb = 0.45, height = 1.9 },
-			right = { u0 = 0.788, v0 = 0.015, u1 = 0.960, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.70, tb = 0.45, height = 1.9 },
+			left  = { u0 = 0.585, v0 = 0.015, u1 = 0.758, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.42, tb = 0.45, height = 1.9 }, -- ta 0.30→0.42: «ближе к центру» (юзер 2026-09-12)
+			right = { u0 = 0.788, v0 = 0.015, u1 = 0.960, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.58, tb = 0.45, height = 1.9 },
 		},
 	},
 } :: { [string]: BodySpec }
@@ -101,6 +105,9 @@ RankSkull.Colors = {
 	ivory = Color3.fromRGB(236, 222, 140),
 	amber = Color3.fromRGB(248, 214, 100),
 	gold = Color3.fromRGB(255, 210, 70), -- жёлтый «YOU WIN!» и контура черепов чекпоинтов
+	-- Череп на БАГГИ (GameConfig.Ranks.SkullBody.buggy.color): теплее кости — на ржавчине
+	-- Overlay холодная кость серела; подобрано юзером в гараже 2026-09-12.
+	rosebone = Color3.fromRGB(216, 177, 162),
 } :: { [string]: Color3 }
 
 -- // Растр черепа --------------------------------------------------------------
@@ -463,8 +470,8 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	-- в ключе сам цвет, а не имя: SkullTune крутит RankSkull.Colors[name] на живую
 	local patchKey = if patch then ("%s|%.3f|%.2f|%d|%s|%.2f"):format(patch.color:ToHex(), patch.coverage, patch.scale, patch.seed, patch.mode or "tint", patch.opacity or 1) else "-"
 	-- тон/сила краски/место и размер черепа на капоте — поля спеки, SkullTune крутит их на живую
-	local top = spec.zones.top
-	local specKey = ("%.2f|%.2f|%.2f|%.2f"):format(spec.baseTone or 1, spec.paintStrength or 1, top and top.tb or 0, top and top.height or 0)
+	local top, left = spec.zones.top, spec.zones.left
+	local specKey = ("%.2f|%.2f|%.2f|%.2f|%.2f"):format(spec.baseTone or 1, spec.paintStrength or 1, top and top.tb or 0, top and top.height or 0, left and left.ta or 0)
 	local key = ("%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s"):format(bodyId, table.concat(names, ","), shapeName or "-", color and color:ToHex() or "-", mode, opacity, up, paint:ToHex(), patchKey, specKey)
 	local ready = imageCache[key]
 	if ready then

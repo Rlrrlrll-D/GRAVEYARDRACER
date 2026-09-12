@@ -56,7 +56,7 @@ local function dress(body: BasePart, driver: Player)
 	local ob = o and o.byBody and o.byBody[bodyId] or nil -- подкрутка этого кузова
 	local cb = GameConfig.Ranks.SkullBody and GameConfig.Ranks.SkullBody[bodyId] or nil -- конфиг этого кузова
 	local zones = spec and spec.zones or {}
-	local colorName = spec and spec.color or nil
+	local colorName = spec and ((cb and cb.color) or spec.color) or nil -- цвет ступени, у кузова может быть свой
 	local shape = spec and spec.shape or nil
 	if o and (o.colorName or o.shape or (ob and ob.colorName)) then
 		colorName = (ob and ob.colorName) or o.colorName or colorName
