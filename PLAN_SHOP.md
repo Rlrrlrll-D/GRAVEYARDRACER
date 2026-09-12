@@ -194,10 +194,13 @@
   кэш по (кузов, зоны, цвет, режим, краска).
 - **`StarterPlayerScripts.RankSkull`**: следит за PlayerVehicle/BuggyBody/OwnerUserId,
   рангом водителя и цветом краски; клиентская работа целиком.
-- **`GameConfig.Ranks`**: `Tiers[i].skull = { zones, color }` — PALLBEARER капот,
-  GRAVE ROBBER + борта, REAPER + корма, BONE KING всё жёлтым; `SkullMode = "multiply"`
-  (выбор юзера по макетам), `SkullOpacity = 1`.
-- Краска `rust` притемнена 163→140 по просьбе юзера.
+- **`GameConfig.Ranks`**: `Tiers[i].skull = { zones, color }` — все четыре места на
+  каждой ступени с PALLBEARER, ранг различает цвет: лестница `RankSkull.Colors`
+  bone (188,179,162) → ivory → amber → gold. Режим `SkullMode = "softlight"`,
+  `SkullOpacity = 0.64`, `SkullLift = 0.11` — подобраны юзером на экране
+  (`StarterPlayerScripts.SkullTune`, F3 в Studio, P печатает строку для переноса).
+- Краска `rust` = (229,217,188): краски теперь реально домножают текстуру (композит
+  собирается всегда, см. грабли ниже), базовая краска есть на витрине рядом с багги.
 
 **ГРАБЛИ, найденные по ходу: ЛЮБАЯ текстура на MeshPart ОТКЛЮЧАЕТ Color3.** Проверено
 на красном цвете: текстурированный багги и гроб с белым EditableImage — краски нет.

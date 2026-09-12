@@ -81,7 +81,7 @@ RankSkull.Bodies = {
 RankSkull.Colors = {
 	-- Лестница «от кости к золоту» по рангам (юзер 2026-09-11: «цвета черепов от
 	-- костного до жёлтого, светлый череп на тёмном фоне»).
-	bone = Color3.fromRGB(224, 214, 170), -- UITheme.Palette.Bone
+	bone = Color3.fromRGB(188, 179, 162), -- подобрано юзером в SkullTune 2026-09-12 (было Palette.Bone 224,214,170)
 	ivory = Color3.fromRGB(236, 222, 140),
 	amber = Color3.fromRGB(248, 214, 100),
 	gold = Color3.fromRGB(255, 210, 70), -- жёлтый «YOU WIN!» и контура черепов чекпоинтов
