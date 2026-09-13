@@ -269,7 +269,7 @@ local function makeButton(order: number, get: () -> string, onClick: () -> ()): 
 	return b
 end
 
--- Ползунок 0..max; при max <= 5 подпись с двумя знаками, иначе целое.
+-- Ползунок 0..max; при max <= 10 подпись с двумя знаками, иначе целое.
 local function makeSlider(order: number, name: string, max: number, get: () -> number, set: (number) -> (), heavy: boolean?)
 	local row = Instance.new("Frame")
 	row.LayoutOrder = order
@@ -309,7 +309,7 @@ local function makeSlider(order: number, name: string, max: number, get: () -> n
 		local alpha = math.clamp(get() / max, 0, 1)
 		fill.Size = UDim2.fromScale(alpha, 1)
 		knob.Position = UDim2.new(alpha, 0, 0.5, 0)
-		caption.Text = if max <= 5 then string.format("%-9s %.2f", name, get()) else string.format("%-9s %3d", name, math.floor(get() + 0.5))
+		caption.Text = if max <= 10 then string.format("%-9s %.2f", name, get()) else string.format("%-9s %3d", name, math.floor(get() + 0.5))
 	end
 	table.insert(refreshers, refresh)
 	local hit = Instance.new("TextButton")
@@ -448,7 +448,6 @@ end, function()
 end)
 -- Две секции в одной колонке (мох / вид выстрела): обе не влезают по высоте, показываем
 -- одну, кнопка PANEL переключает.
-local fxMode = false
 local function makeBox(order: number): Frame
 	local box = Instance.new("Frame")
 	box.LayoutOrder = order
@@ -462,14 +461,25 @@ local function makeBox(order: number): Frame
 end
 local mossBox = makeBox(19)
 local fxBox = makeBox(19)
-fxBox.Visible = false
+local sizeBox = makeBox(19)
+local PANELS = {
+	{ name = "MOSS + ARROWS", box = mossBox },
+	{ name = "WEAPON FX: цвет и свет", box = fxBox },
+	{ name = "WEAPON FX: размеры", box = sizeBox },
+}
+local panelIndex = 1
+local function showPanel(i: number)
+	panelIndex = i
+	for k, pnl in PANELS do
+		pnl.box.Visible = (k == i)
+	end
+end
+showPanel(1)
 column = panelR
 makeButton(18, function()
-	return "PANEL: " .. (fxMode and "WEAPON FX   (ниже — вид выстрела)" or "MOSS   (ниже — мох)")
+	return "PANEL: " .. PANELS[panelIndex].name .. "   (" .. panelIndex .. "/" .. #PANELS .. ")"
 end, function()
-	fxMode = not fxMode
-	mossBox.Visible = not fxMode
-	fxBox.Visible = fxMode
+	showPanel(panelIndex % #PANELS + 1)
 end)
 column = mossBox
 makeLabel(19, "MOSS  (пятнистая краска)   ·   ниже — ARROW: неон стрелок старта", 13)
@@ -611,13 +621,71 @@ end, function(v)
 	arrowTr = v
 	applyArrows()
 end)
+
+-- // Размеры вида выстрела выбранного ствола (юзер 2026-09-13: «ручки масштабирования
+-- и размеров трейсеров и основ»). 0 у FLASH LEN / CORE — «нет».
+column = sizeBox
+makeSlider(70, "FLASH SIZE", 5, function()
+	return fx().flashSize
+end, function(v)
+	fx().flashSize = math.max(0.05, v)
+end)
+makeSlider(71, "FLASH LEN", 6, function()
+	return fx().flashLength or 0
+end, function(v)
+	fx().flashLength = if v > 0.05 then v else nil
+end)
+makeSlider(72, "FLASH LIFE", 0.5, function()
+	return fx().flashLife or 0.05
+end, function(v)
+	fx().flashLife = math.max(0.02, v)
+end)
+makeSlider(73, "TRACER W", 0.6, function()
+	return fx().tracerWidth
+end, function(v)
+	fx().tracerWidth = if v < 0.01 then 0 else v
+end)
+local function core(): any
+	local st = fx()
+	if not st.flashCore then
+		-- ядра не было — заводим с нулевым размером, чтобы ручки было за что взять
+		st.flashCore = { size = 0, color = Color3.fromRGB(255, 220, 130), length = nil, light = 0, lightRange = 12, up = 0 }
+	end
+	return st.flashCore
+end
+makeSlider(74, "CORE SIZE", 2, function()
+	local c = fx().flashCore
+	return c and c.size or 0
+end, function(v)
+	core().size = v
+end)
+makeSlider(75, "CORE LEN", 4, function()
+	local c = fx().flashCore
+	return c and c.length or 0
+end, function(v)
+	core().length = if v > 0.05 then v else nil
+end)
+makeSlider(76, "CORE UP", 1.5, function()
+	local c = fx().flashCore
+	return c and c.up or 0
+end, function(v)
+	core().up = v
+end)
+makeSlider(77, "CORE LIGHT", 20, function()
+	local c = fx().flashCore
+	return c and c.light or 0
+end, function(v)
+	core().light = v
+end)
 column = panelR
 
 -- исходные статы стволов — для «\» и печати
-local baseFx: { [string]: { flashColor: Color3, tracerColor: Color3, flashTransparency: number?, lightBrightness: number?, lightRange: number?, core: Color3? } } = {}
+local baseFx: { [string]: any } = {}
 for _, id in WEAPON_IDS do
 	local st = Weapons.get(id)
-	baseFx[id] = { flashColor = st.flashColor, tracerColor = st.tracerColor, flashTransparency = st.flashTransparency, lightBrightness = st.lightBrightness, lightRange = st.lightRange, core = st.flashCore and st.flashCore.color or nil }
+	baseFx[id] = { flashColor = st.flashColor, tracerColor = st.tracerColor, flashTransparency = st.flashTransparency, lightBrightness = st.lightBrightness, lightRange = st.lightRange, core = st.flashCore and st.flashCore.color or nil,
+		flashSize = st.flashSize, flashLength = st.flashLength, flashLife = st.flashLife, tracerWidth = st.tracerWidth,
+		coreTable = st.flashCore and table.clone(st.flashCore) or nil }
 end
 
 local info = makeLabel(30, "", 11)
@@ -650,8 +718,11 @@ local function summary(): string
 		local function c3(c: Color3): string
 			return ("(%d,%d,%d)"):format(c.R * 255 + 0.5, c.G * 255 + 0.5, c.B * 255 + 0.5)
 		end
-		table.insert(fxLines, ("fx %s: flash=%s tr=%.2f light=%s range=%s tracer=%s core=%s"):format(
-			id, c3(st.flashColor), st.flashTransparency or 0, tostring(st.lightBrightness or 6), tostring(st.lightRange or "-"), c3(st.tracerColor), st.flashCore and c3(st.flashCore.color) or "-"))
+		local core = st.flashCore
+		table.insert(fxLines, ("fx %s: flash=%s tr=%.2f light=%s range=%s tracer=%s core=%s | size=%.2f len=%s life=%.2f tracerW=%.2f coreSize=%s coreLen=%s coreUp=%s coreLight=%s"):format(
+			id, c3(st.flashColor), st.flashTransparency or 0, tostring(st.lightBrightness or 6), tostring(st.lightRange or "-"), c3(st.tracerColor), core and c3(core.color) or "-",
+			st.flashSize, tostring(st.flashLength or "-"), st.flashLife or 0.05, st.tracerWidth,
+			core and ("%.2f"):format(core.size) or "-", core and tostring(core.length or "-") or "-", core and ("%.2f"):format(core.up or 0) or "-", core and tostring(core.light or 0) or "-"))
 	end
 	table.insert(fxLines, ("arrows: color=(%d,%d,%d) tr=%.2f"):format(arrowColor.R * 255 + 0.5, arrowColor.G * 255 + 0.5, arrowColor.B * 255 + 0.5, arrowTr))
 	return ("%s\n%s\nrust=(%d,%d,%d) | moss=(%d,%d,%d) mode=%s opacity=%.2f coverage=%.3f scale=%.1f seed=%d\n%s"):format(
@@ -764,9 +835,11 @@ local function reset()
 		st.flashTransparency = b.flashTransparency
 		st.lightBrightness = b.lightBrightness
 		st.lightRange = b.lightRange
-		if st.flashCore and b.core then
-			st.flashCore.color = b.core
-		end
+		st.flashSize = b.flashSize
+		st.flashLength = b.flashLength
+		st.flashLife = b.flashLife
+		st.tracerWidth = b.tracerWidth
+		st.flashCore = if b.coreTable then table.clone(b.coreTable) else nil
 	end
 	applyAll()
 end
