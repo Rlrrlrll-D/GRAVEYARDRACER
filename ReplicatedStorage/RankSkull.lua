@@ -364,14 +364,15 @@ end
 --     носит ТОЛЬКО пересобираемый кузов, переписываем НА МЕСТЕ (WritePixelsBuffer),
 --     не создавая новой — так подкрутка не плодит картинок вовсе;
 --   * картинок в пуле не больше MAX_IMAGES: лишние, которых никто не носит,
---     уничтожаем перед созданием новой. 12, а не 6: гараж-песочница (DevGarage)
---     одевает 2 кузова × 5 красок разом, плюс своя машина.
+--     уничтожаем перед созданием новой (см. MAX_IMAGES ниже).
 local imageCache: { [string]: EditableImage } = {}
 local inFlight: { [string]: boolean } = {} -- ключи, которые сейчас собираются (compose йилдит)
 local keyOf: { [EditableImage]: string } = {}
 local users: { [EditableImage]: { [Instance]: boolean } } = {}
 local wornBy: { [Instance]: EditableImage } = setmetatable({}, { __mode = "k" }) :: any
-local MAX_IMAGES = 12
+-- 12 только в Studio (гараж одевает 2 кузова × 5 красок разом); в живой игре 6 — на
+-- телефоне каждая картинка 1024² это 4 МБ CPU + столько же GPU (2026-09-13).
+local MAX_IMAGES = if game:GetService("RunService"):IsStudio() then 12 else 6
 
 local function userCount(img: EditableImage): number
 	local n = 0
