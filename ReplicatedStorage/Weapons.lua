@@ -27,6 +27,8 @@ export type Stats = {
 	flashColor: Color3,
 	flashLife: number?, -- с; по умолчанию 0.05
 	flashLength: number?, -- язык огня: вытянуть вспышку вдоль выстрела на столько studs (дробовик)
+	lightBrightness: number?, -- PointLight вспышки; по умолчанию 6
+	lightRange: number?, -- по умолчанию 10 + 4·flashSize
 	flashTransparency: number?, -- 0 — плотный шар; >0 — прозрачность (для спрайта — его ImageTransparency)
 	flashCore: { size: number, color: Color3 }?, -- второй, малый шар/спрайт внутри той же плотности
 	-- Спрайт вместо неонового шара (дробовик): мягкое свечение без плотного ядра —
@@ -61,8 +63,11 @@ Weapons.Stats = {
 		-- жёлто-белое ядро («жёлтый круг в середине») — это рендер неона, а не второй шар;
 		-- у (150,30,30) ядра нет.
 		-- вспышка — язык огня из ствола: эллипсоид 0.4 в поперечнике и 1.1 в длину (юзер
-		-- 2026-09-13: было 1.5×4.5, «уменьшь вчетверо»)
-		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 0.4, flashLength = 1.1, flashColor = Color3.fromRGB(150, 30, 30), flashLife = 0.08,
+		-- 2026-09-13: было 1.5×4.5, «уменьшь вчетверо»). ЦВЕТ ЯРКО-КРАСНЫЙ: неон светится
+		-- пропорционально яркости цвета, тёмный (150,30,30) не светился вовсе; свет на
+		-- сцену — отдельный сильный красный PointLight («мне нужен красный СВЕТ»).
+		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 0.4, flashLength = 1.1, flashColor = Color3.fromRGB(255, 40, 30), flashLife = 0.08,
+		lightBrightness = 24, lightRange = 34,
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {

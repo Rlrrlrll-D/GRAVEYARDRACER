@@ -185,8 +185,8 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 	local flash = ball(stats.flashSize, stats.flashColor)
 	local light = Instance.new("PointLight")
 	light.Color = stats.flashColor
-	light.Brightness = 6
-	light.Range = 10 + 4 * stats.flashSize -- радиус свечения растёт со вспышкой
+	light.Brightness = stats.lightBrightness or 6
+	light.Range = stats.lightRange or (10 + 4 * stats.flashSize) -- радиус свечения растёт со вспышкой
 	light.Parent = flash
 	flash.Parent = workspace
 	-- малое ядро внутри свечения (дробовик): та же плотность, свой цвет
