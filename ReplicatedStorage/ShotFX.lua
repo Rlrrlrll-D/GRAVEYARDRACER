@@ -56,7 +56,7 @@ end
 
 function ShotFX.tracer(source: Source, hitPosition: Vector3, stats: Weapons.Stats)
 	local start = originOf(source)
-	if not start then
+	if not start or stats.tracerWidth <= 0 then
 		return
 	end
 	local tracer = Instance.new("Part")
@@ -99,10 +99,11 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats)
 	light.Parent = flash
 
 	flash.Parent = workspace
-	followMuzzle(source, FLASH_LIFE, function(origin)
+	local life = stats.flashLife or FLASH_LIFE
+	followMuzzle(source, life, function(origin)
 		flash.CFrame = CFrame.new(origin)
 	end)
-	Debris:AddItem(flash, FLASH_LIFE)
+	Debris:AddItem(flash, life)
 end
 
 -- Временный динамик в точке выстрела: звук позиционный, слышен всем клиентам.
@@ -125,7 +126,7 @@ function ShotFX.shot(position: Vector3, stats: Weapons.Stats)
 	sound.SoundGroup = Audio.SFX
 	sound.RollOffMode = Enum.RollOffMode.InverseTapered
 	sound.RollOffMinDistance = 8
-	sound.RollOffMaxDistance = 220
+	sound.RollOffMaxDistance = stats.soundRange or 220
 	sound.PlaybackSpeed = stats.soundPitch * (0.95 + math.random() * 0.12) -- лёгкий разброс, чтобы очередь не звучала механически
 	sound.Parent = speaker
 	speaker.Parent = workspace

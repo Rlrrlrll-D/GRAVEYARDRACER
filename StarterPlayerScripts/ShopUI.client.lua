@@ -331,6 +331,49 @@ for i, item in showcase() do
 	buildRow(item, i)
 end
 
+-- ПРОКРУТКА ПО ЦЕЛЫМ СТРОКАМ. Список без рамки, и обрезанная по краю окна плашка
+-- читалась как «плашки заходят за границы» (юзер 2026-09-13). После затихания
+-- прокрутки (колесо, палец, инерция) довозим канвас до ближайшей строки. Шаг берём
+-- по абсолютным позициям строк — с UIScale он не равен ROW_H + ROW_GAP.
+local TweenService = game:GetService("TweenService")
+local snapToken = 0
+local snapping = false
+local function rowStep(): number
+	local a, b = rows[1], rows[2]
+	if a and b then
+		local d = b.holder.AbsolutePosition.Y - a.holder.AbsolutePosition.Y
+		if d > 1 then
+			return d
+		end
+	end
+	return ROW_H + ROW_GAP
+end
+list:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+	if snapping then
+		return
+	end
+	snapToken += 1
+	local my = snapToken
+	task.delay(0.15, function()
+		if my ~= snapToken or snapping then
+			return
+		end
+		local step = rowStep()
+		local y = list.CanvasPosition.Y
+		local maxY = math.max(0, list.AbsoluteCanvasSize.Y - list.AbsoluteWindowSize.Y)
+		local target = math.clamp(math.round(y / step) * step, 0, maxY)
+		if math.abs(target - y) < 0.5 then
+			return
+		end
+		snapping = true
+		local tw = TweenService:Create(list, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { CanvasPosition = Vector2.new(0, target) })
+		tw.Completed:Connect(function()
+			snapping = false
+		end)
+		tw:Play()
+	end)
+end)
+
 -- Цены за робуксы — фоном, по одному запросу на товар. Витрина уже нарисована и
 -- работает без них: придут — просто перерисуемся.
 task.spawn(function()
