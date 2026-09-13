@@ -24,6 +24,41 @@ local Weapons = require(ReplicatedStorage:WaitForChild("Weapons"))
 
 local ShotFX = {}
 
+-- РАДИАЛЬНЫЙ ГРАДИЕНТ ДЛЯ СВЕЧЕНИЯ. Картинку не загрузить (upload → 401), встроенные
+-- текстуры Roblox — облака и звёзды, а ParticleEmitter EditableImage не рисует
+-- (проверено 2026-09-13). ImageLabel — рисует: один раз считаем 128² белый круг с
+-- альфой (1−r)^1.4 и красим ImageColor3 под ствол. Свечение чистое: без плотного тела,
+-- радиус — размер билборда, ярче — PointLight.
+local AssetService = game:GetService("AssetService")
+local glowImage: EditableImage? = nil
+local function radialGlow(): EditableImage?
+	if glowImage then
+		return glowImage
+	end
+	local size = 128
+	local ok, img = pcall(function()
+		return AssetService:CreateEditableImage({ Size = Vector2.new(size, size) })
+	end)
+	if not ok or not img then
+		return nil
+	end
+	local buf = buffer.create(size * size * 4)
+	for y = 0, size - 1 do
+		for x = 0, size - 1 do
+			local dx, dy = (x + 0.5) / size * 2 - 1, (y + 0.5) / size * 2 - 1
+			local r = math.min(1, math.sqrt(dx * dx + dy * dy))
+			local o = (y * size + x) * 4
+			buffer.writeu8(buf, o, 255)
+			buffer.writeu8(buf, o + 1, 255)
+			buffer.writeu8(buf, o + 2, 255)
+			buffer.writeu8(buf, o + 3, math.floor((1 - r) ^ 1.4 * 255 + 0.5))
+		end
+	end
+	img:WritePixelsBuffer(Vector2.zero, Vector2.new(size, size), buf)
+	glowImage = img
+	return img
+end
+
 export type Source = Attachment | Vector3
 
 local TRACER_LIFE = 0.1
@@ -96,14 +131,15 @@ local function flashPoint(source: Source, origin: Vector3, dir: Vector3?, size: 
 end
 
 function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
-	local start = originOf(source)
-	if not start then
+	local start0 = originOf(source)
+	if not start0 then
 		return
 	end
-	start = flashPoint(source, start, dir, stats.flashSize)
-	-- Спрайт-свечение (дробовик): один невидимый якорь у дула, на нём билборды —
-	-- внешнее мягкое свечение и малое ядро; свет тот же PointLight.
-	if stats.flashSprite then
+	local start = flashPoint(source, start0, dir, stats.flashSize)
+	-- Свечение (все стволы): невидимый якорь у дула, на нём билборд с радиальным
+	-- градиентом (или встроенной текстурой); подсветка — PointLight посильнее.
+	local glowImg = if stats.glowSize then radialGlow() else nil
+	if stats.flashSprite or glowImg then
 		local anchor = Instance.new("Part")
 		anchor.Anchored = true
 		anchor.CanCollide = false
@@ -120,24 +156,33 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 			local img = Instance.new("ImageLabel")
 			img.BackgroundTransparency = 1
 			img.Size = UDim2.fromScale(1, 1)
-			img.Image = stats.flashSprite :: string
+			if glowImg then
+				img.ImageContent = Content.fromObject(glowImg)
+			else
+				img.Image = stats.flashSprite :: string
+			end
 			img.ImageColor3 = color
 			img.ImageTransparency = stats.flashTransparency or 0
 			img.Parent = bb
 		end
-		sprite(stats.flashSize, stats.flashColor)
+		local size = stats.glowSize or stats.flashSize
+		sprite(size, stats.flashColor)
 		if stats.flashCore then
 			sprite(stats.flashCore.size, stats.flashCore.color)
 		end
+		-- «общий свет от вспышки слабый» — ярче и дальше, чем у неонового шара
 		local light = Instance.new("PointLight")
 		light.Color = stats.flashColor
-		light.Brightness = 6
-		light.Range = 10 + 4 * stats.flashSize
+		light.Brightness = 14
+		light.Range = math.min(60, 14 + 6 * size)
 		light.Parent = anchor
 		anchor.Parent = workspace
 		local life = stats.flashLife or FLASH_LIFE
+		-- свечение центруем почти на срезе (сдвиг 0.15 диаметра): та часть, что позади,
+		-- прячется за геометрией ствола сама — билборд не AlwaysOnTop
+		anchor.CFrame = CFrame.new(flashPoint(source, start0, dir, size * 0.33))
 		followMuzzle(source, life, function(origin)
-			anchor.CFrame = CFrame.new(flashPoint(source, origin, dir, stats.flashSize))
+			anchor.CFrame = CFrame.new(flashPoint(source, origin, dir, size * 0.33))
 		end)
 		Debris:AddItem(anchor, life)
 		return
