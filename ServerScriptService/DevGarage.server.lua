@@ -206,6 +206,18 @@ local function build(player: Player)
 					part.Anchored = true
 					part.CanCollide = false
 					part.CFrame = slot * ((tSeat :: BasePart).CFrame:Inverse() * src.CFrame)
+					-- пулемёт из шаблона — ДЕТАЛЬ-ребёнок люльки: без сварки и без якоря он падал
+					-- сквозь площадку («первый машинган не заспавнился», юзер 2026-09-13)
+					for _, c in part:GetDescendants() do
+						if c:IsA("BasePart") then
+							c.Anchored = true
+							c.CanCollide = false
+							local srcChild = src:FindFirstChild(c.Name, true)
+							if srcChild and srcChild:IsA("BasePart") then
+								c.CFrame = part.CFrame * src.CFrame:ToObjectSpace(srcChild.CFrame)
+							end
+						end
+					end
 					part.Parent = rig
 				end
 			end

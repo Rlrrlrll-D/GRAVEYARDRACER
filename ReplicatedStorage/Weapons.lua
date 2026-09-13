@@ -24,6 +24,7 @@ export type Stats = {
 	tracerColor: Color3,
 	tracerWidth: number,
 	flashSize: number,
+	flashColor: Color3,
 	soundId: string,
 	soundVolume: number,
 	soundPitch: number, -- множитель PlaybackSpeed
@@ -40,17 +41,19 @@ local MG_SOUND = "rbxassetid://88311346538102" -- «Machine gun shot», 0.22 с 
 Weapons.Stats = {
 	machinegun = {
 		id = "machinegun", damage = mg.Damage, range = mg.Range, fireRate = mg.FireRate, pellets = 1, spread = 0,
-		tracerColor = Color3.fromRGB(224, 214, 170), tracerWidth = 0.15, flashSize = 1.1,
+		tracerColor = Color3.fromRGB(224, 214, 170), tracerWidth = 0.15, flashSize = 1.1, flashColor = Color3.fromRGB(255, 220, 130),
 		soundId = MG_SOUND, soundVolume = 0.55, soundPitch = 1.0,
 	},
 	nailer = {
 		id = "nailer", damage = 14, range = 110, fireRate = 1.4, pellets = 8, spread = 7,
-		tracerColor = Color3.fromRGB(214, 196, 150), tracerWidth = 0.09, flashSize = 1.7,
+		-- красный (юзер 2026-09-13: трассеры разных стволов — разных оттенков)
+		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0.09, flashSize = 1.7, flashColor = Color3.fromRGB(255, 120, 70),
 		soundId = "rbxassetid://85341259642501", soundVolume = 0.7, soundPitch = 0.95, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {
 		id = "rattle", damage = 9, range = 260, fireRate = 15, pellets = 1, spread = 2.2,
-		tracerColor = Color3.fromRGB(255, 200, 120), tracerWidth = 0.12, flashSize = 0.9,
+		-- зелёный, могильный
+		tracerColor = Color3.fromRGB(150, 255, 110), tracerWidth = 0.12, flashSize = 0.9, flashColor = Color3.fromRGB(190, 255, 140),
 		soundId = MG_SOUND, soundVolume = 0.4, soundPitch = 1.35,
 	},
 } :: { [string]: Stats }

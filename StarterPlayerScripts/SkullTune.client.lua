@@ -812,9 +812,87 @@ local function garageFire()
 	ShotFX.fire(muzzle, hits, stats)
 end
 
+-- Наводка выбранной стойки за курсором (юзер 2026-09-13: «в песочнице нет движения
+-- стволов за мышью»). Стойка вся на якоре, шарниры сняты — поворачиваем детали сами:
+-- Turret вокруг вертикали основания (рыскание), GunCradle вокруг своей боковой оси
+-- (наклон), GunMesh едет за люлькой по своей сварке. Покой запоминаем при первом кадре.
+type Rest = { turret: CFrame, cradle: CFrame, gun: CFrame? }
+local rests: { [Model]: Rest } = {}
+local PITCH_LIMIT = math.rad(35)
+
+local function aimRig(rig: Model, target: Vector3)
+	local base = rig:FindFirstChild("TurretBase")
+	local turret = rig:FindFirstChild("Turret")
+	local cradle = rig:FindFirstChild("GunCradle", true)
+	local gun = cradle and cradle:FindFirstChild("GunMesh")
+	if not (base and base:IsA("BasePart") and turret and turret:IsA("BasePart") and cradle and cradle:IsA("BasePart")) then
+		return
+	end
+	local rest = rests[rig]
+	if not rest then
+		rest = {
+			turret = base.CFrame:ToObjectSpace(turret.CFrame),
+			cradle = turret.CFrame:ToObjectSpace(cradle.CFrame),
+			gun = if gun and gun:IsA("BasePart") then cradle.CFrame:ToObjectSpace(gun.CFrame) else nil,
+		}
+		rests[rig] = rest
+	end
+	-- всё в системе основания: покойное направление ствола = +X люльки
+	local restCradle = rest.turret * rest.cradle
+	local restDir = restCradle.RightVector
+	local pivot = restCradle.Position
+	local local_t = base.CFrame:PointToObjectSpace(target) - pivot
+	local flatT = Vector3.new(local_t.X, 0, local_t.Z)
+	local flatR = Vector3.new(restDir.X, 0, restDir.Z)
+	if flatT.Magnitude < 0.01 or flatR.Magnitude < 0.01 then
+		return
+	end
+	flatT = flatT.Unit; flatR = flatR.Unit
+	local yaw = math.atan2(flatR:Cross(flatT).Y, flatR:Dot(flatT))
+	local pitch = math.clamp(math.atan2(local_t.Y, Vector3.new(local_t.X, 0, local_t.Z).Magnitude), -PITCH_LIMIT, PITCH_LIMIT)
+	local turretCF = base.CFrame * CFrame.Angles(0, yaw, 0) * rest.turret
+	local cradleCF = turretCF * rest.cradle * CFrame.Angles(0, 0, pitch)
+	turret.CFrame = turretCF
+	cradle.CFrame = cradleCF
+	if gun and gun:IsA("BasePart") and rest.gun then
+		gun.CFrame = cradleCF * rest.gun
+	end
+end
+
+local function mouseTarget(): Vector3?
+	local mouse = UserInputService:GetMouseLocation()
+	local ray = camera:ViewportPointToRay(mouse.X, mouse.Y - game:GetService("GuiService"):GetGuiInset().Y)
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Exclude
+	local g = workspace:FindFirstChild("DevGarage")
+	local excl: { Instance } = {}
+	if g then
+		for _, c in g:GetChildren() do
+			if c.Name:sub(1, 10) == "GarageGun_" then
+				table.insert(excl, c)
+			end
+		end
+	end
+	rp.FilterDescendantsInstances = excl
+	local aim = workspace:Raycast(ray.Origin, ray.Direction * 500, rp)
+	return aim and aim.Position or (ray.Origin + ray.Direction * 500)
+end
+
 RunService.RenderStepped:Connect(function()
-	if garageOn and garageFiring then
-		garageFire()
+	if not garageOn then
+		return
+	end
+	local rig = garageRig()
+	local target = mouseTarget()
+	if rig and target then
+		aimRig(rig, target)
+	end
+	if garageFiring then
+		if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+			garageFiring = false -- отпускание могло уйти мимо InputEnded (окно потеряло фокус)
+		else
+			garageFire()
+		end
 	end
 end)
 

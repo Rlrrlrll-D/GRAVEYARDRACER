@@ -88,12 +88,12 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats)
 	flash.CanCollide = false
 	flash.CanQuery = false
 	flash.Material = Enum.Material.Neon
-	flash.Color = Color3.fromRGB(255, 220, 130)
+	flash.Color = stats.flashColor
 	flash.Size = Vector3.new(stats.flashSize, stats.flashSize, stats.flashSize)
 	flash.CFrame = CFrame.new(start)
 
 	local light = Instance.new("PointLight")
-	light.Color = Color3.fromRGB(255, 210, 120)
+	light.Color = stats.flashColor
 	light.Brightness = 6
 	light.Range = 14
 	light.Parent = flash
