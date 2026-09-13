@@ -32,7 +32,7 @@ export type Stats = {
 	flashTransparency: number?, -- 0 — плотный шар; >0 — прозрачность (для спрайта — его ImageTransparency)
 	-- малое ядро внутри вспышки: свой цвет, при flashLength — та же вытянутая форма своей
 	-- длины (length), и свой малый PointLight (light/lightRange)
-	flashCore: { size: number, color: Color3, length: number?, light: number?, lightRange: number? }?,
+	flashCore: { size: number, color: Color3, length: number?, light: number?, lightRange: number?, up: number? }?, -- up: сдвиг над пламенем, studs
 	-- Спрайт вместо неонового шара (дробовик): мягкое свечение без плотного ядра —
 	-- билборд с встроенной текстурой Roblox, всегда полной яркости (LightInfluence 0).
 	flashSprite: string?,
@@ -77,8 +77,9 @@ Weapons.Stats = {
 		lightBrightness = 6, lightRange = 22,
 		-- пламя полупрозрачное: неон непрозрачен, и ядро внутри было не видно —
 		-- «светлый источник должен быть выше красного» (юзер 2026-09-13)
-		flashTransparency = 0.45,
-		flashCore = { size = 0.08, color = Color3.fromRGB(255, 220, 130), length = 0.8, light = 4, lightRange = 12 }, -- вдвое меньше (юзер)
+		flashTransparency = 0.22, -- было 0.45: «уменьшь прозрачность вдвое»
+		-- ядро — над пламенем, не внутри (up = радиус пламени + радиус ядра)
+		flashCore = { size = 0.08, color = Color3.fromRGB(255, 220, 130), length = 0.8, light = 4, lightRange = 12, up = 0.26 },
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {

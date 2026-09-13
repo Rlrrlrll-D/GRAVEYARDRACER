@@ -95,6 +95,17 @@ local function flashDir(source: Source, dir: Vector3?): Vector3?
 	return d.Unit
 end
 
+-- «Верх» у дула: ось Y люльки (аттачмент) или мировой верх для чужого выстрела.
+local function flashUp(source: Source): Vector3
+	if typeof(source) ~= "Vector3" then
+		local a = source :: Attachment
+		if a.Parent then
+			return a.WorldCFrame.UpVector
+		end
+	end
+	return Vector3.yAxis
+end
+
 local function flashPoint(source: Source, origin: Vector3, dir: Vector3?, size: number): Vector3
 	local d = flashDir(source, dir)
 	if not d then
@@ -194,8 +205,12 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 	local core: BasePart? = nil
 	local c = stats.flashCore
 	local coreLen = c and (c.length or length) or nil
+	local coreUp = c and c.up or 0
 	if c then
 		core = ball(c.size, c.color, coreLen, 0) -- ядро всегда плотное: оно и должно читаться сквозь пламя
+		if coreUp ~= 0 then
+			core.CFrame = core.CFrame + flashUp(source) * coreUp -- светлый источник НАД пламенем (юзер)
+		end
 		if c.light then
 			local l2 = Instance.new("PointLight")
 			l2.Color = c.color
@@ -210,7 +225,7 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 		if length then
 			flash.CFrame = tongueCFrame(source, origin, dir, length)
 			if core then
-				core.CFrame = tongueCFrame(source, origin, dir, coreLen or length)
+				core.CFrame = tongueCFrame(source, origin, dir, coreLen or length) + flashUp(source) * coreUp
 			end
 		else
 			local p = flashPoint(source, origin, dir, stats.flashSize)
