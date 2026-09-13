@@ -75,7 +75,7 @@ Weapons.Stats = {
 		-- вспышки со своим малым светом (юзер 2026-09-13); оба вытянуты по выстрелу.
 		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 0.4, flashLength = 2.0, flashColor = Color3.fromRGB(255, 60, 50), flashLife = 0.08,
 		lightBrightness = 6, lightRange = 22,
-		flashCore = { size = 0.16, color = Color3.fromRGB(255, 220, 130), length = 1.6, light = 4, lightRange = 12 },
+		flashCore = { size = 0.08, color = Color3.fromRGB(255, 220, 130), length = 0.8, light = 4, lightRange = 12 }, -- вдвое меньше (юзер)
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {
