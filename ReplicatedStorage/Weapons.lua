@@ -77,9 +77,10 @@ Weapons.Stats = {
 		lightBrightness = 6, lightRange = 22,
 		-- пламя полупрозрачное: неон непрозрачен, и ядро внутри было не видно —
 		-- «светлый источник должен быть выше красного» (юзер 2026-09-13)
-		flashTransparency = 0.22, -- было 0.45: «уменьшь прозрачность вдвое»
-		-- ядро — над пламенем, не внутри (up = радиус пламени + радиус ядра)
-		flashCore = { size = 0.08, color = Color3.fromRGB(255, 220, 130), length = 0.8, light = 4, lightRange = 12, up = 0.26 },
+		-- пламя заметно прозрачное (0.7): 0.22 визуально не отличалось от плотного (юзер)
+		flashTransparency = 0.7,
+		-- ядро — над пламенем, не внутри, и крупнее (0.08 на дистанции не читалось)
+		flashCore = { size = 0.16, color = Color3.fromRGB(255, 220, 130), length = 1.2, light = 4, lightRange = 12, up = 0.36 },
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {
