@@ -28,11 +28,9 @@ export type Stats = {
 	flashLife: number?, -- с; по умолчанию 0.05
 	flashTransparency: number?, -- 0 — плотный шар; >0 — прозрачность (для спрайта — его ImageTransparency)
 	flashCore: { size: number, color: Color3 }?, -- второй, малый шар/спрайт внутри той же плотности
-	-- Спрайт-свечение вместо неонового шара: билборд с радиальным градиентом (EditableImage,
-	-- см. ShotFX), полной яркости, без плотного тела — «чистое свечение, как у черепов»
-	-- (юзер 2026-09-13). glowSize — диаметр в studs; при nil рисуется неоновый шар flashSize.
-	glowSize: number?,
-	flashSprite: string?, -- встроенная текстура вместо градиента (не используется)
+	-- Спрайт вместо неонового шара (дробовик): мягкое свечение без плотного ядра —
+	-- билборд с встроенной текстурой Roblox, всегда полной яркости (LightInfluence 0).
+	flashSprite: string?,
 	soundId: string,
 	soundVolume: number,
 	soundPitch: number, -- множитель PlaybackSpeed
@@ -50,7 +48,7 @@ local MG_SOUND = "rbxassetid://88311346538102" -- «Machine gun shot», 0.22 с 
 Weapons.Stats = {
 	machinegun = {
 		id = "machinegun", damage = mg.Damage, range = mg.Range, fireRate = mg.FireRate, pellets = 1, spread = 0,
-		tracerColor = Color3.fromRGB(224, 214, 170), tracerWidth = 0.15, flashSize = 1.1, flashColor = Color3.fromRGB(255, 220, 130), glowSize = 1.8,
+		tracerColor = Color3.fromRGB(224, 214, 170), tracerWidth = 0.15, flashSize = 1.1, flashColor = Color3.fromRGB(255, 220, 130),
 		soundId = MG_SOUND, soundVolume = 0.55, soundPitch = 1.0,
 	},
 	nailer = {
@@ -61,13 +59,13 @@ Weapons.Stats = {
 		-- Цвет вспышки ТЁМНО-красный нарочно: неон яркого цвета под блюмом выгорает в
 		-- жёлто-белое ядро («жёлтый круг в середине») — это рендер неона, а не второй шар;
 		-- у (150,30,30) ядра нет.
-		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 2.0, flashColor = Color3.fromRGB(255, 60, 40), flashLife = 0.08, glowSize = 4.2,
+		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 2.0, flashColor = Color3.fromRGB(150, 30, 30), flashLife = 0.07,
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {
 		id = "rattle", damage = 9, range = 260, fireRate = 15, pellets = 1, spread = 2.2,
 		-- зелёный, могильный
-		tracerColor = Color3.fromRGB(150, 255, 110), tracerWidth = 0.12, flashSize = 1.6, flashColor = Color3.fromRGB(90, 255, 100), glowSize = 2.6, -- зелень: спрайт не выгорает в белое, как неон
+		tracerColor = Color3.fromRGB(150, 255, 110), tracerWidth = 0.12, flashSize = 1.6, flashColor = Color3.fromRGB(190, 255, 140), -- 0.9→1.6: «увеличить радиус свечения»
 		soundId = MG_SOUND, soundVolume = 0.4, soundPitch = 1.35,
 	},
 } :: { [string]: Stats }
