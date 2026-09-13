@@ -53,15 +53,10 @@ Weapons.Stats = {
 	},
 	nailer = {
 		id = "nailer", damage = 14, range = 110, fireRate = 1.4, pellets = 8, spread = 7,
-		-- красный (юзер 2026-09-13: трассеры разных стволов — разных оттенков)
-		-- без трассеров: одна крупная красная вспышка (юзер 2026-09-13), звук ниже и громче
-		-- вспышка — свечение (полупрозрачный красный шар), внутри малое тёплое ядро цвета
-		-- пулемётной вспышки (юзер 2026-09-13)
-		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 3.2, flashColor = Color3.fromRGB(255, 70, 50), flashLife = 0.1,
-		-- неоновый шар и с прозрачностью читался плотным пятном («не получилось», юзер
-		-- 2026-09-13) — теперь мягкий спрайт-свечение + малое тёплое ядро тем же спрайтом
-		flashSprite = "rbxasset://textures/particles/explosion01_core_main.dds",
-		flashTransparency = 0.25, flashCore = { size = 1.1, color = Color3.fromRGB(255, 220, 130) },
+		-- Красный (юзер 2026-09-13: трассеры разных стволов — разных оттенков). Трассеров
+		-- нет, вспышка — тот же неоновый шар, что у остальных, только крупнее (юзер: «сделай
+		-- как у других, только без трассеров»); звук ниже и громче.
+		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 2.0, flashColor = Color3.fromRGB(255, 120, 70), flashLife = 0.07,
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {
