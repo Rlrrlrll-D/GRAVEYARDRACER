@@ -66,8 +66,11 @@ Weapons.Stats = {
 		-- 2026-09-13: было 1.5×4.5, «уменьшь вчетверо»). ЦВЕТ ЯРКО-КРАСНЫЙ: неон светится
 		-- пропорционально яркости цвета, тёмный (150,30,30) не светился вовсе; свет на
 		-- сцену — отдельный сильный красный PointLight («мне нужен красный СВЕТ»).
-		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 0.4, flashLength = 1.1, flashColor = Color3.fromRGB(255, 40, 30), flashLife = 0.08,
-		lightBrightness = 24, lightRange = 34,
+		-- Свет на сцену — как у соседей (яркость 6): 24 клало плотное красное пятно вокруг;
+		-- мягкое удалённое свечение даёт та же яркость с радиусом побольше. Источник ярче
+		-- цветом (255,60,50).
+		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 0.4, flashLength = 1.1, flashColor = Color3.fromRGB(255, 60, 50), flashLife = 0.08,
+		lightBrightness = 6, lightRange = 22,
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {
