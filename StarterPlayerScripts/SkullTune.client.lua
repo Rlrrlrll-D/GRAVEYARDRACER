@@ -32,7 +32,10 @@
 -- M OPAC/COVER/SCALE/SEED, MOSS R G B. Кнопка PANEL переключает нижнюю секцию на
 -- WEAPON FX — ручки вида выстрела выбранного ствола (Weapons.Stats на живую): FLASH R G B,
 -- TRACER R G B, FLASH TR, LIGHT/RANGE, CORE R G B (юзер 2026-09-13: «дай ручки цвета
--- у неоновых полосок — сам пойму, что не так с красным»). \ — сброс к конфигу,
+-- у неоновых полосок — сам пойму, что не так с красным»), и ARROW R G B / ARROW TR —
+-- цвет и прозрачность неоновых стрелок старта (StartChevron) прямо на трассе: тот же
+-- неон, что у черепов, но большой и на земле — на нём видно, как ведёт себя красный.
+-- \ — сброс к конфигу,
 -- P — напечатать всё, Z — зомби выкл/вкл.
 --   F3            вкл / выкл панели. НЕ F8: в Studio это «Run» (сервер без игрока) —
 --                 нажатие в Play роняло сессию в серверный режим, «меню пропало»
@@ -469,7 +472,7 @@ end, function()
 	fxBox.Visible = fxMode
 end)
 column = mossBox
-makeLabel(19, "MOSS  (пятнистая краска)", 15)
+makeLabel(19, "MOSS  (пятнистая краска)   ·   ниже — ARROW: неон стрелок старта", 13)
 makeButton(20, function()
 	return "MOSS: " .. (state.mossOn and "ON" or "OFF") .. "   mode " .. PATCH_MODES[state.mossModeIndex]
 end, function()
@@ -569,6 +572,45 @@ for i, ch in { "R", "G", "B" } do
 		end
 	end)
 end
+-- Неоновые стрелки старта (StartChevron, BuildTemplates): красим все разом на клиенте.
+local function chevrons(): { BasePart }
+	local list = {}
+	for _, d in workspace:GetDescendants() do
+		if d.Name == "StartChevron" and d:IsA("BasePart") then
+			table.insert(list, d)
+		end
+	end
+	return list
+end
+local arrowBase: { color: Color3, tr: number }? = nil
+local arrowColor = Color3.fromRGB(110, 255, 170)
+local arrowTr = 0.15
+local function applyArrows()
+	for _, c in chevrons() do
+		if not arrowBase then
+			arrowBase = { color = c.Color, tr = c.Transparency }
+			arrowColor, arrowTr = c.Color, c.Transparency
+		end
+		c.Color = arrowColor
+		c.Transparency = arrowTr
+	end
+end
+column = mossBox -- стрелки живут в секции MOSS: в секции FX по высоте уже не влезают
+local arrowSwatch = makeSwatch(56)
+for i, ch in { "R", "G", "B" } do
+	makeSlider(56 + i, "ARROW " .. ch, 255, function()
+		return colorChan(arrowColor, i)
+	end, function(v)
+		arrowColor = withChan(arrowColor, i, v)
+		applyArrows()
+	end)
+end
+makeSlider(60, "ARROW TR", 1, function()
+	return arrowTr
+end, function(v)
+	arrowTr = v
+	applyArrows()
+end)
 column = panelR
 
 -- исходные статы стволов — для «\» и печати
@@ -611,6 +653,7 @@ local function summary(): string
 		table.insert(fxLines, ("fx %s: flash=%s tr=%.2f light=%s range=%s tracer=%s core=%s"):format(
 			id, c3(st.flashColor), st.flashTransparency or 0, tostring(st.lightBrightness or 6), tostring(st.lightRange or "-"), c3(st.tracerColor), st.flashCore and c3(st.flashCore.color) or "-"))
 	end
+	table.insert(fxLines, ("arrows: color=(%d,%d,%d) tr=%.2f"):format(arrowColor.R * 255 + 0.5, arrowColor.G * 255 + 0.5, arrowColor.B * 255 + 0.5, arrowTr))
 	return ("%s\n%s\nrust=(%d,%d,%d) | moss=(%d,%d,%d) mode=%s opacity=%.2f coverage=%.3f scale=%.1f seed=%d\n%s"):format(
 		bodyLine("buggy"), bodyLine("coffin"), p[1] + 0.5, p[2] + 0.5, p[3] + 0.5,
 		m[1] + 0.5, m[2] + 0.5, m[3] + 0.5, PATCH_MODES[state.mossModeIndex], state.mossOpacity, state.mossCoverage, state.mossScale, state.mossSeed,
@@ -623,7 +666,7 @@ local function shortSummary(): string
 	local keep = {}
 	local b, w = bodyName(), WEAPON_IDS[weaponIndex]
 	for _, l in lines do
-		if l:sub(1, #b + 1) == b .. ":" or l:sub(1, 5) == "rust=" or l:sub(1, #w + 4) == "fx " .. w .. ":" then
+		if l:sub(1, #b + 1) == b .. ":" or l:sub(1, 5) == "rust=" or l:sub(1, #w + 4) == "fx " .. w .. ":" or l:sub(1, 7) == "arrows:" then
 			table.insert(keep, l)
 		end
 	end
@@ -682,6 +725,7 @@ applyAll = function()
 	paintSwatch.BackgroundColor3 = paintColor()
 	mossSwatch.BackgroundColor3 = mossColor()
 	flashSwatch.BackgroundColor3 = fx().flashColor
+	arrowSwatch.BackgroundColor3 = arrowColor
 	tracerSwatch.BackgroundColor3 = fx().tracerColor
 	coreSwatch.BackgroundColor3 = fx().flashCore and fx().flashCore.color or Color3.new(0, 0, 0)
 	for _, f in refreshers do
@@ -709,6 +753,10 @@ local function reset()
 	state.mossScale = base.moss.scale
 	state.mossSeed = base.moss.seed
 	state.moss = { base.moss.color.R * 255, base.moss.color.G * 255, base.moss.color.B * 255 }
+	if arrowBase then
+		arrowColor, arrowTr = arrowBase.color, arrowBase.tr
+		applyArrows()
+	end
 	for id, b in baseFx do
 		local st = Weapons.get(id)
 		st.flashColor = b.flashColor
