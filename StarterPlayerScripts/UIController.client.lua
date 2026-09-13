@@ -180,6 +180,86 @@ local livesPlate = hudPlate(5, UITheme.cycleColor(3), true, 1) -- кость, с
 livesPlate.Name = "Lives"
 local livesLabel = PlateArt.caption(livesPlate, "Lives: 3", UITheme.Palette.Red)
 
+-- ОРУЖИЕ — третья плашка правого столбца (юзер 2026-09-13): зелёная, слева пиктограмма
+-- надетого ствола, справа его имя. Картинку в игру не залить (upload → 401, см.
+-- память), поэтому пиктограмма — силуэт из прямоугольников в цвет чернил, свой на
+-- каждый ствол (пулемёт / гвоздомёт с магазином-гробиком / гатлинг с тремя стволами).
+-- Ствол — атрибут игрока EquippedWeapon (ShopService/PlayerData), имя — из каталога.
+local ShopCatalog = require(ReplicatedStorage:WaitForChild("ShopCatalog"))
+local weaponPlate = hudPlate(6, UITheme.cycleColor(2), true, 2) -- тёмно-зелёный
+weaponPlate.Name = "Weapon"
+local ICON_W, ICON_H, ICON_X = 44, 30, 22
+local weaponIcon = Instance.new("Frame")
+weaponIcon.Name = "Icon"
+weaponIcon.BackgroundTransparency = 1
+weaponIcon.Size = UDim2.fromOffset(ICON_W, ICON_H)
+weaponIcon.Position = UDim2.fromOffset(ICON_X, (PLATE_H - ICON_H) / 2)
+weaponIcon.ZIndex = weaponPlate.ZIndex + 1
+weaponIcon.Parent = weaponPlate
+local weaponLabel = PlateArt.caption(weaponPlate, "", UITheme.Ink, 16)
+weaponLabel.Position = UDim2.fromOffset(ICON_X + ICON_W + 10, 7)
+weaponLabel.Size = UDim2.new(1, -(ICON_X + ICON_W + 10 + 16), 1, -14)
+weaponLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- прямоугольники силуэта: {x, y, w, h} в поле 44×30, ось Y вниз
+local WEAPON_GLYPHS: { [string]: { { number } } } = {
+	machinegun = {
+		{ 0, 13, 8, 5 }, -- приклад
+		{ 8, 12, 18, 8 }, -- коробка
+		{ 20, 9, 3, 3 }, -- мушка
+		{ 26, 14, 18, 3 }, -- ствол
+		{ 40, 13, 4, 5 }, -- пламегаситель
+		{ 14, 20, 5, 8 }, -- рукоять
+	},
+	nailer = {
+		{ 0, 12, 8, 6 }, -- приклад
+		{ 8, 11, 16, 9 }, -- коробка
+		{ 24, 12, 12, 6 }, -- толстый ствол
+		{ 36, 10, 6, 10 }, -- раструб
+		{ 12, 20, 12, 6 }, -- магазин-гробик
+		{ 10, 22, 16, 3 },
+		{ 4, 19, 5, 8 }, -- рукоять
+	},
+	rattle = {
+		{ 0, 12, 4, 6 }, -- мотор
+		{ 4, 11, 14, 9 }, -- коробка
+		{ 18, 9, 24, 2 }, -- три ствола
+		{ 18, 14, 24, 2 },
+		{ 18, 19, 24, 2 },
+		{ 30, 7, 3, 16 }, -- обойма
+		{ 6, 20, 10, 6 }, -- короб с лентой
+	},
+}
+
+local function drawWeapon(id: string)
+	for _, c in weaponIcon:GetChildren() do
+		c:Destroy()
+	end
+	local glyph = WEAPON_GLYPHS[id] or WEAPON_GLYPHS.machinegun
+	for _, r in glyph do
+		local f = Instance.new("Frame")
+		f.BorderSizePixel = 0
+		f.BackgroundColor3 = UITheme.Ink
+		f.Position = UDim2.fromOffset(r[1], r[2])
+		f.Size = UDim2.fromOffset(r[3], r[4])
+		f.ZIndex = weaponIcon.ZIndex
+		f.Parent = weaponIcon
+	end
+end
+
+local function refreshWeaponPlate()
+	local id = player:GetAttribute("EquippedWeapon")
+	local item = ShopCatalog.get(id)
+	if not (item and item.kind == "weapon") then
+		item = ShopCatalog.get(ShopCatalog.DefaultWeapon)
+	end
+	local wid = item and item.id or "machinegun"
+	weaponLabel.Text = item and item.name or "MACHINE GUN"
+	drawWeapon(wid)
+end
+player:GetAttributeChangedSignal("EquippedWeapon"):Connect(refreshWeaponPlate)
+refreshWeaponPlate()
+
 local wreckedPlate = PlateArt.plate(6, UITheme.Palette.Red)
 wreckedPlate.Name = "WreckedBanner"
 wreckedPlate.Size = UDim2.fromOffset(460, 78)
