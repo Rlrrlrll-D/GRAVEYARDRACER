@@ -29,8 +29,11 @@
 -- всеми стволами и стена-мишень; кнопка WEAPON выбирает стойку, ЛКМ по сцене (не по
 -- панели) стреляет с неё в точку под курсором — трассер/вспышка/звук как в заезде
 -- (ShotFX, статы из Weapons), удержание — очередь в темпе ствола. Ниже мох: MOSS (вкл + перебор режима), MOSS OFF,
--- M OPAC/COVER/SCALE/SEED, MOSS R G B. \ — сброс к конфигу, P — напечатать всё,
--- Z — зомби выкл/вкл.
+-- M OPAC/COVER/SCALE/SEED, MOSS R G B. Кнопка PANEL переключает нижнюю секцию на
+-- WEAPON FX — ручки вида выстрела выбранного ствола (Weapons.Stats на живую): FLASH R G B,
+-- TRACER R G B, FLASH TR, LIGHT/RANGE, CORE R G B (юзер 2026-09-13: «дай ручки цвета
+-- у неоновых полосок — сам пойму, что не так с красным»). \ — сброс к конфигу,
+-- P — напечатать всё, Z — зомби выкл/вкл.
 --   F3            вкл / выкл панели. НЕ F8: в Studio это «Run» (сервер без игрока) —
 --                 нажатие в Play роняло сессию в серверный режим, «меню пропало»
 --                 (2026-09-12). F7 — тоже Studio, F6 — NeonTune, F4 — PhotoMode.
@@ -440,6 +443,32 @@ makeButton(18, function()
 end, function()
 	weaponIndex = weaponIndex % #WEAPON_IDS + 1
 end)
+-- Две секции в одной колонке (мох / вид выстрела): обе не влезают по высоте, показываем
+-- одну, кнопка PANEL переключает.
+local fxMode = false
+local function makeBox(order: number): Frame
+	local box = Instance.new("Frame")
+	box.LayoutOrder = order
+	box.Size = UDim2.new(1, 0, 0, 0)
+	box.AutomaticSize = Enum.AutomaticSize.Y
+	box.BackgroundTransparency = 1
+	box.Parent = panelR
+	local l = layout:Clone()
+	l.Parent = box
+	return box
+end
+local mossBox = makeBox(19)
+local fxBox = makeBox(19)
+fxBox.Visible = false
+column = panelR
+makeButton(18, function()
+	return "PANEL: " .. (fxMode and "WEAPON FX   (ниже — вид выстрела)" or "MOSS   (ниже — мох)")
+end, function()
+	fxMode = not fxMode
+	mossBox.Visible = not fxMode
+	fxBox.Visible = fxMode
+end)
+column = mossBox
 makeLabel(19, "MOSS  (пятнистая краска)", 15)
 makeButton(20, function()
 	return "MOSS: " .. (state.mossOn and "ON" or "OFF") .. "   mode " .. PATCH_MODES[state.mossModeIndex]
@@ -484,9 +513,74 @@ for i, ch in { "R", "G", "B" } do
 	end)
 end
 
+-- // Вид выстрела выбранного ствола (Weapons.Stats правим на живую) ---------------
+column = fxBox
+local function fx(): Weapons.Stats
+	return Weapons.get(WEAPON_IDS[weaponIndex])
+end
+local function colorChan(c: Color3, i: number): number
+	return (if i == 1 then c.R elseif i == 2 then c.G else c.B) * 255
+end
+local function withChan(c: Color3, i: number, v: number): Color3
+	local r, g, b = c.R * 255, c.G * 255, c.B * 255
+	if i == 1 then r = v elseif i == 2 then g = v else b = v end
+	return Color3.fromRGB(math.floor(r + 0.5), math.floor(g + 0.5), math.floor(b + 0.5))
+end
+local flashSwatch = makeSwatch(41)
+for i, ch in { "R", "G", "B" } do
+	makeSlider(41 + i, "FLASH " .. ch, 255, function()
+		return colorChan(fx().flashColor, i)
+	end, function(v)
+		fx().flashColor = withChan(fx().flashColor, i, v)
+	end)
+end
+makeSlider(45, "FLASH TR", 1, function()
+	return fx().flashTransparency or 0
+end, function(v)
+	fx().flashTransparency = v
+end)
+makeSlider(46, "LIGHT", 30, function()
+	return fx().lightBrightness or 6
+end, function(v)
+	fx().lightBrightness = v
+end)
+makeSlider(47, "RANGE", 60, function()
+	return fx().lightRange or (10 + 4 * fx().flashSize)
+end, function(v)
+	fx().lightRange = v
+end)
+local tracerSwatch = makeSwatch(48)
+for i, ch in { "R", "G", "B" } do
+	makeSlider(48 + i, "TRACER " .. ch, 255, function()
+		return colorChan(fx().tracerColor, i)
+	end, function(v)
+		fx().tracerColor = withChan(fx().tracerColor, i, v)
+	end)
+end
+local coreSwatch = makeSwatch(52)
+for i, ch in { "R", "G", "B" } do
+	makeSlider(52 + i, "CORE " .. ch, 255, function()
+		local c = fx().flashCore
+		return c and colorChan(c.color, i) or 0
+	end, function(v)
+		local c = fx().flashCore
+		if c then
+			c.color = withChan(c.color, i, v)
+		end
+	end)
+end
+column = panelR
+
+-- исходные статы стволов — для «\» и печати
+local baseFx: { [string]: { flashColor: Color3, tracerColor: Color3, flashTransparency: number?, lightBrightness: number?, lightRange: number?, core: Color3? } } = {}
+for _, id in WEAPON_IDS do
+	local st = Weapons.get(id)
+	baseFx[id] = { flashColor = st.flashColor, tracerColor = st.tracerColor, flashTransparency = st.flashTransparency, lightBrightness = st.lightBrightness, lightRange = st.lightRange, core = st.flashCore and st.flashCore.color or nil }
+end
+
 local info = makeLabel(30, "", 11)
 info.TextWrapped = true
-info.Size = UDim2.new(1, 0, 0, 150)
+info.Size = UDim2.new(1, 0, 0, 80)
 
 -- // Применение ----------------------------------------------------------------
 local function rgb(t: { number }): Color3
@@ -508,9 +602,32 @@ end
 local function summary(): string
 	local p = state.paint
 	local m = state.moss
-	return ("%s\n%s\nrust=(%d,%d,%d) | moss=(%d,%d,%d) mode=%s opacity=%.2f coverage=%.3f scale=%.1f seed=%d"):format(
+	local fxLines = {}
+	for _, id in WEAPON_IDS do
+		local st = Weapons.get(id)
+		local function c3(c: Color3): string
+			return ("(%d,%d,%d)"):format(c.R * 255 + 0.5, c.G * 255 + 0.5, c.B * 255 + 0.5)
+		end
+		table.insert(fxLines, ("fx %s: flash=%s tr=%.2f light=%s range=%s tracer=%s core=%s"):format(
+			id, c3(st.flashColor), st.flashTransparency or 0, tostring(st.lightBrightness or 6), tostring(st.lightRange or "-"), c3(st.tracerColor), st.flashCore and c3(st.flashCore.color) or "-"))
+	end
+	return ("%s\n%s\nrust=(%d,%d,%d) | moss=(%d,%d,%d) mode=%s opacity=%.2f coverage=%.3f scale=%.1f seed=%d\n%s"):format(
 		bodyLine("buggy"), bodyLine("coffin"), p[1] + 0.5, p[2] + 0.5, p[3] + 0.5,
-		m[1] + 0.5, m[2] + 0.5, m[3] + 0.5, PATCH_MODES[state.mossModeIndex], state.mossOpacity, state.mossCoverage, state.mossScale, state.mossSeed)
+		m[1] + 0.5, m[2] + 0.5, m[3] + 0.5, PATCH_MODES[state.mossModeIndex], state.mossOpacity, state.mossCoverage, state.mossScale, state.mossSeed,
+		table.concat(fxLines, "\n"))
+end
+
+-- Короткая сводка для панели (полная — по P в Output): текущий кузов и текущий ствол.
+local function shortSummary(): string
+	local lines = string.split(summary(), "\n")
+	local keep = {}
+	local b, w = bodyName(), WEAPON_IDS[weaponIndex]
+	for _, l in lines do
+		if l:sub(1, #b + 1) == b .. ":" or l:sub(1, 5) == "rust=" or l:sub(1, #w + 4) == "fx " .. w .. ":" then
+			table.insert(keep, l)
+		end
+	end
+	return table.concat(keep, "\n")
 end
 
 -- Поля спеки кузова (тон, сила краски, место/размер черепа на капоте) панель правит на
@@ -564,6 +681,9 @@ applyAll = function()
 	swatch.BackgroundColor3 = rgb(cur().skull)
 	paintSwatch.BackgroundColor3 = paintColor()
 	mossSwatch.BackgroundColor3 = mossColor()
+	flashSwatch.BackgroundColor3 = fx().flashColor
+	tracerSwatch.BackgroundColor3 = fx().tracerColor
+	coreSwatch.BackgroundColor3 = fx().flashCore and fx().flashCore.color or Color3.new(0, 0, 0)
 	for _, f in refreshers do
 		f()
 	end
@@ -575,7 +695,7 @@ applyAll = function()
 	if worn ~= ShopCatalog.DefaultSkin then
 		note = "\n!! НАДЕТА КРАСКА " .. string.upper(worn) .. " — без панели кузов такой. Панель красит как RUST: SHOP → RUST → USE"
 	end
-	info.Text = summary() .. note
+	info.Text = shortSummary() .. note
 end
 
 local function reset()
@@ -589,6 +709,17 @@ local function reset()
 	state.mossScale = base.moss.scale
 	state.mossSeed = base.moss.seed
 	state.moss = { base.moss.color.R * 255, base.moss.color.G * 255, base.moss.color.B * 255 }
+	for id, b in baseFx do
+		local st = Weapons.get(id)
+		st.flashColor = b.flashColor
+		st.tracerColor = b.tracerColor
+		st.flashTransparency = b.flashTransparency
+		st.lightBrightness = b.lightBrightness
+		st.lightRange = b.lightRange
+		if st.flashCore and b.core then
+			st.flashCore.color = b.core
+		end
+	end
 	applyAll()
 end
 
