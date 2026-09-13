@@ -404,9 +404,13 @@ local function onZombieDied(zombie: Model, humanoid: Humanoid)
 			-- итогов). Обнуляет второй MatchManager на старте; здесь оба растут вместе.
 			local thisRace = (killer:GetAttribute("RaceZombies") :: number?) or 0
 			killer:SetAttribute("RaceZombies", thisRace + 1)
-			-- цена по типу (BonesValue), без типа — общая
-			local bones = (zombie:GetAttribute("BonesValue") :: number?) or GameConfig.Economy.BonesPerZombie
-			Economy.award(killer, bones, "зомби " .. tostring(zombie:GetAttribute("Tier") or ""))
+			-- цена по типу (BonesValue), без типа — общая; сверх потолка за заезд
+			-- (Economy.ZombieBonesCap) — не платим, см. GameConfig
+			local cap = GameConfig.Economy.ZombieBonesCap or math.huge
+			if thisRace < cap then
+				local bones = (zombie:GetAttribute("BonesValue") :: number?) or GameConfig.Economy.BonesPerZombie
+				Economy.award(killer, bones, "зомби " .. tostring(zombie:GetAttribute("Tier") or ""))
+			end
 			-- Счётчик накопительный (PlayerData сидирует его из записи при входе),
 			-- поэтому сотня набирается за все сессии, а не за одну.
 			if defeated + 1 >= 100 then
