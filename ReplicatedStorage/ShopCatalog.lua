@@ -129,7 +129,10 @@ ShopCatalog.Items = {
 	{
 		id = "rattle", name = "REAPER'S RATTLE", blurb = "six barrels, no manners",
 		kind = "weapon", bones = 9000, weaponTemplate = "Rattle", minRank = "GRAVE ROBBER",
-		mount = { offset = Vector3.new(0.975, 0.215, -0.198), muzzle = Vector3.new(3.6, 0.1, 0) },
+		-- z = +0.198, не −: Roblox при импорте зеркалит только X (Blender y → Roblox +z),
+		-- проверено по вершинам меша (ось ротора у среза: z = −0.1975 от центра детали);
+		-- со знаком минус дуло стояло на 0.4 правее оси стволов (юзер 2026-09-13).
+		mount = { offset = Vector3.new(0.975, 0.215, 0.198), muzzle = Vector3.new(3.6, 0.1, 0) },
 	},
 
 	-- // Постоянные улучшения ------------------------------------------------

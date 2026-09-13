@@ -197,9 +197,11 @@ def bake_and_export(ob, name):
     vs = np.array([v.co[:] for v in me.vertices])
     lo, hi = vs.min(0), vs.max(0); c = (lo + hi) / 2
     tip_x = lo[0]
-    # Roblox: x → −x, z → −z (см. RankSkull mirror); Blender Z(верх) → Roblox Y
+    # Roblox (x, y, z) = (−x_b, z_b, +y_b): импортёр зеркалит ТОЛЬКО X (проверено по
+    # вершинам меша через EditableMesh 2026-09-13; с −y_b дуло гатлинга уезжало вбок)
     print("MOUNT %s: size=(%.3f, %.3f, %.3f) faces=%d" % (name, hi[0] - lo[0], hi[2] - lo[2], hi[1] - lo[1], len(me.polygons)))
-    print("MOUNT %s: cradle offset (weld C0) = Vector3.new(%.3f, %.3f, %.3f)" % (name, -c[0], c[2], -c[1]))
+    print("MOUNT %s: cradle offset (weld C0) = Vector3.new(%.3f, %.3f, %.3f)" % (name, -c[0], c[2], c[1]))
+    print("MOUNT %s: muzzle = Vector3.new(%.3f, <высота оси ствола z_b>, <y_b оси>)  (tip x_b = %.3f)" % (name, -tip_x, tip_x))
     return name
 
 def render_preview(objs_by_name):

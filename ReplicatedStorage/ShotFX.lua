@@ -82,28 +82,44 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats)
 	if not start then
 		return
 	end
-	local flash = Instance.new("Part")
-	flash.Shape = Enum.PartType.Ball
-	flash.Anchored = true
-	flash.CanCollide = false
-	flash.CanQuery = false
-	flash.Material = Enum.Material.Neon
-	flash.Color = stats.flashColor
-	flash.Size = Vector3.new(stats.flashSize, stats.flashSize, stats.flashSize)
-	flash.CFrame = CFrame.new(start)
-
+	local function ball(size: number, color: Color3): BasePart
+		local b = Instance.new("Part")
+		b.Shape = Enum.PartType.Ball
+		b.Anchored = true
+		b.CanCollide = false
+		b.CanQuery = false
+		b.Material = Enum.Material.Neon
+		b.Color = color
+		b.Transparency = stats.flashTransparency or 0
+		b.Size = Vector3.new(size, size, size)
+		b.CFrame = CFrame.new(start)
+		return b
+	end
+	local flash = ball(stats.flashSize, stats.flashColor)
 	local light = Instance.new("PointLight")
 	light.Color = stats.flashColor
 	light.Brightness = 6
-	light.Range = 14
+	light.Range = 10 + 4 * stats.flashSize -- радиус свечения растёт со вспышкой
 	light.Parent = flash
-
 	flash.Parent = workspace
+	-- малое ядро внутри свечения (дробовик): та же плотность, свой цвет
+	local core: BasePart? = nil
+	local c = stats.flashCore
+	if c then
+		core = ball(c.size, c.color)
+		core.Parent = workspace
+	end
 	local life = stats.flashLife or FLASH_LIFE
 	followMuzzle(source, life, function(origin)
 		flash.CFrame = CFrame.new(origin)
+		if core then
+			core.CFrame = CFrame.new(origin)
+		end
 	end)
 	Debris:AddItem(flash, life)
+	if core then
+		Debris:AddItem(core, life)
+	end
 end
 
 -- Временный динамик в точке выстрела: звук позиционный, слышен всем клиентам.

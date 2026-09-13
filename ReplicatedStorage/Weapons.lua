@@ -26,6 +26,8 @@ export type Stats = {
 	flashSize: number,
 	flashColor: Color3,
 	flashLife: number?, -- с; по умолчанию 0.05
+	flashTransparency: number?, -- 0 — плотный шар; >0 — свечение (дробовик)
+	flashCore: { size: number, color: Color3 }?, -- второй, малый шар внутри той же плотности
 	soundId: string,
 	soundVolume: number,
 	soundPitch: number, -- множитель PlaybackSpeed
@@ -50,13 +52,16 @@ Weapons.Stats = {
 		id = "nailer", damage = 14, range = 110, fireRate = 1.4, pellets = 8, spread = 7,
 		-- красный (юзер 2026-09-13: трассеры разных стволов — разных оттенков)
 		-- без трассеров: одна крупная красная вспышка (юзер 2026-09-13), звук ниже и громче
+		-- вспышка — свечение (полупрозрачный красный шар), внутри малое тёплое ядро цвета
+		-- пулемётной вспышки (юзер 2026-09-13)
 		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 3.2, flashColor = Color3.fromRGB(255, 70, 50), flashLife = 0.1,
+		flashTransparency = 0.55, flashCore = { size = 0.9, color = Color3.fromRGB(255, 220, 130) },
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {
 		id = "rattle", damage = 9, range = 260, fireRate = 15, pellets = 1, spread = 2.2,
 		-- зелёный, могильный
-		tracerColor = Color3.fromRGB(150, 255, 110), tracerWidth = 0.12, flashSize = 0.9, flashColor = Color3.fromRGB(190, 255, 140),
+		tracerColor = Color3.fromRGB(150, 255, 110), tracerWidth = 0.12, flashSize = 1.6, flashColor = Color3.fromRGB(190, 255, 140), -- 0.9→1.6: «увеличить радиус свечения»
 		soundId = MG_SOUND, soundVolume = 0.4, soundPitch = 1.35,
 	},
 } :: { [string]: Stats }
