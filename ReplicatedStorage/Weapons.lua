@@ -26,8 +26,11 @@ export type Stats = {
 	flashSize: number,
 	flashColor: Color3,
 	flashLife: number?, -- с; по умолчанию 0.05
-	flashTransparency: number?, -- 0 — плотный шар; >0 — свечение (дробовик)
-	flashCore: { size: number, color: Color3 }?, -- второй, малый шар внутри той же плотности
+	flashTransparency: number?, -- 0 — плотный шар; >0 — прозрачность (для спрайта — его ImageTransparency)
+	flashCore: { size: number, color: Color3 }?, -- второй, малый шар/спрайт внутри той же плотности
+	-- Спрайт вместо неонового шара (дробовик): мягкое свечение без плотного ядра —
+	-- билборд с встроенной текстурой Roblox, всегда полной яркости (LightInfluence 0).
+	flashSprite: string?,
 	soundId: string,
 	soundVolume: number,
 	soundPitch: number, -- множитель PlaybackSpeed
@@ -55,7 +58,10 @@ Weapons.Stats = {
 		-- вспышка — свечение (полупрозрачный красный шар), внутри малое тёплое ядро цвета
 		-- пулемётной вспышки (юзер 2026-09-13)
 		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 3.2, flashColor = Color3.fromRGB(255, 70, 50), flashLife = 0.1,
-		flashTransparency = 0.55, flashCore = { size = 0.9, color = Color3.fromRGB(255, 220, 130) },
+		-- неоновый шар и с прозрачностью читался плотным пятном («не получилось», юзер
+		-- 2026-09-13) — теперь мягкий спрайт-свечение + малое тёплое ядро тем же спрайтом
+		flashSprite = "rbxasset://textures/particles/explosion01_core_main.dds",
+		flashTransparency = 0.25, flashCore = { size = 1.1, color = Color3.fromRGB(255, 220, 130) },
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {

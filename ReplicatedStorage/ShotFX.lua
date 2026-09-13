@@ -82,6 +82,47 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats)
 	if not start then
 		return
 	end
+	-- Спрайт-свечение (дробовик): один невидимый якорь у дула, на нём билборды —
+	-- внешнее мягкое свечение и малое ядро; свет тот же PointLight.
+	if stats.flashSprite then
+		local anchor = Instance.new("Part")
+		anchor.Anchored = true
+		anchor.CanCollide = false
+		anchor.CanQuery = false
+		anchor.Transparency = 1
+		anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+		anchor.CFrame = CFrame.new(start)
+		local function sprite(size: number, color: Color3)
+			local bb = Instance.new("BillboardGui")
+			bb.Size = UDim2.fromScale(size, size)
+			bb.LightInfluence = 0
+			bb.AlwaysOnTop = false
+			bb.Parent = anchor
+			local img = Instance.new("ImageLabel")
+			img.BackgroundTransparency = 1
+			img.Size = UDim2.fromScale(1, 1)
+			img.Image = stats.flashSprite :: string
+			img.ImageColor3 = color
+			img.ImageTransparency = stats.flashTransparency or 0
+			img.Parent = bb
+		end
+		sprite(stats.flashSize, stats.flashColor)
+		if stats.flashCore then
+			sprite(stats.flashCore.size, stats.flashCore.color)
+		end
+		local light = Instance.new("PointLight")
+		light.Color = stats.flashColor
+		light.Brightness = 6
+		light.Range = 10 + 4 * stats.flashSize
+		light.Parent = anchor
+		anchor.Parent = workspace
+		local life = stats.flashLife or FLASH_LIFE
+		followMuzzle(source, life, function(origin)
+			anchor.CFrame = CFrame.new(origin)
+		end)
+		Debris:AddItem(anchor, life)
+		return
+	end
 	local function ball(size: number, color: Color3): BasePart
 		local b = Instance.new("Part")
 		b.Shape = Enum.PartType.Ball
