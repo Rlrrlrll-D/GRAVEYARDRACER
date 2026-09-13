@@ -26,6 +26,7 @@ export type Stats = {
 	flashSize: number,
 	flashColor: Color3,
 	flashLife: number?, -- с; по умолчанию 0.05
+	flashLength: number?, -- язык огня: вытянуть вспышку вдоль выстрела на столько studs (дробовик)
 	flashTransparency: number?, -- 0 — плотный шар; >0 — прозрачность (для спрайта — его ImageTransparency)
 	flashCore: { size: number, color: Color3 }?, -- второй, малый шар/спрайт внутри той же плотности
 	-- Спрайт вместо неонового шара (дробовик): мягкое свечение без плотного ядра —
@@ -59,7 +60,8 @@ Weapons.Stats = {
 		-- Цвет вспышки ТЁМНО-красный нарочно: неон яркого цвета под блюмом выгорает в
 		-- жёлто-белое ядро («жёлтый круг в середине») — это рендер неона, а не второй шар;
 		-- у (150,30,30) ядра нет.
-		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 2.0, flashColor = Color3.fromRGB(150, 30, 30), flashLife = 0.07,
+		-- вспышка — язык огня из ствола: эллипсоид 1.5 в поперечнике и 4.5 в длину (юзер 2026-09-13)
+		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 1.5, flashLength = 4.5, flashColor = Color3.fromRGB(150, 30, 30), flashLife = 0.08,
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {

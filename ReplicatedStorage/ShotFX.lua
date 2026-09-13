@@ -81,7 +81,7 @@ end
 -- ствол (юзер 2026-09-13: «вспышки должны рендериться под стволами»). Сдвигаем центр
 -- вперёд на ~половину диаметра: шар только касается среза. Направление — ось люльки
 -- (+X аттачмента Muzzle) или, для чужого выстрела, к первой точке попадания.
-local function flashPoint(source: Source, origin: Vector3, dir: Vector3?, size: number): Vector3
+local function flashDir(source: Source, dir: Vector3?): Vector3?
 	local d = dir
 	if typeof(source) ~= "Vector3" then
 		local a = source :: Attachment
@@ -90,17 +90,33 @@ local function flashPoint(source: Source, origin: Vector3, dir: Vector3?, size: 
 		end
 	end
 	if not d or d.Magnitude < 0.01 then
+		return nil
+	end
+	return d.Unit
+end
+
+local function flashPoint(source: Source, origin: Vector3, dir: Vector3?, size: number): Vector3
+	local d = flashDir(source, dir)
+	if not d then
 		return origin
 	end
-	return origin + d.Unit * (size * 0.45)
+	return origin + d * (size * 0.45)
+end
+
+-- ЯЗЫК ОГНЯ (дробовик): вытянутый вдоль выстрела эллипсоид — Part со SpecialMesh
+-- Sphere тянется по Size, в отличие от Ball; начало у среза, длина flashLength.
+local function tongueCFrame(source: Source, origin: Vector3, dir: Vector3?, length: number): CFrame
+	local d = flashDir(source, dir) or Vector3.zAxis
+	local center = origin + d * (length * 0.5 - 0.1)
+	return CFrame.lookAt(center, center + d)
 end
 
 function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
-	local start = originOf(source)
-	if not start then
+	local start0 = originOf(source)
+	if not start0 then
 		return
 	end
-	start = flashPoint(source, start, dir, stats.flashSize)
+	local start = flashPoint(source, start0, dir, stats.flashSize)
 	-- Спрайт-свечение (дробовик): один невидимый якорь у дула, на нём билборды —
 	-- внешнее мягкое свечение и малое ядро; свет тот же PointLight.
 	if stats.flashSprite then
@@ -142,17 +158,28 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 		Debris:AddItem(anchor, life)
 		return
 	end
+	local length = stats.flashLength
 	local function ball(size: number, color: Color3): BasePart
 		local b = Instance.new("Part")
-		b.Shape = Enum.PartType.Ball
 		b.Anchored = true
 		b.CanCollide = false
 		b.CanQuery = false
 		b.Material = Enum.Material.Neon
 		b.Color = color
 		b.Transparency = stats.flashTransparency or 0
-		b.Size = Vector3.new(size, size, size)
-		b.CFrame = CFrame.new(start)
+		if length then
+			-- эллипсоид: Ball не тянется, SpecialMesh Sphere — тянется по Size
+			b.Shape = Enum.PartType.Block
+			local m = Instance.new("SpecialMesh")
+			m.MeshType = Enum.MeshType.Sphere
+			m.Parent = b
+			b.Size = Vector3.new(size, size, length)
+			b.CFrame = tongueCFrame(source, start0, dir, length)
+		else
+			b.Shape = Enum.PartType.Ball
+			b.Size = Vector3.new(size, size, size)
+			b.CFrame = CFrame.new(start)
+		end
 		return b
 	end
 	local flash = ball(stats.flashSize, stats.flashColor)
@@ -171,10 +198,18 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 	end
 	local life = stats.flashLife or FLASH_LIFE
 	followMuzzle(source, life, function(origin)
-		local p = flashPoint(source, origin, dir, stats.flashSize)
-		flash.CFrame = CFrame.new(p)
-		if core then
-			core.CFrame = CFrame.new(p)
+		if length then
+			local cf = tongueCFrame(source, origin, dir, length)
+			flash.CFrame = cf
+			if core then
+				core.CFrame = cf
+			end
+		else
+			local p = flashPoint(source, origin, dir, stats.flashSize)
+			flash.CFrame = CFrame.new(p)
+			if core then
+				core.CFrame = CFrame.new(p)
+			end
 		end
 	end)
 	Debris:AddItem(flash, life)
