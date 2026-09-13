@@ -159,14 +159,14 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 		return
 	end
 	local length = stats.flashLength
-	local function ball(size: number, color: Color3, len: number?): BasePart
+	local function ball(size: number, color: Color3, len: number?, transparency: number?): BasePart
 		local b = Instance.new("Part")
 		b.Anchored = true
 		b.CanCollide = false
 		b.CanQuery = false
 		b.Material = Enum.Material.Neon
 		b.Color = color
-		b.Transparency = stats.flashTransparency or 0
+		b.Transparency = transparency or stats.flashTransparency or 0
 		if len then
 			-- эллипсоид: Ball не тянется, SpecialMesh Sphere — тянется по Size
 			b.Shape = Enum.PartType.Block
@@ -195,7 +195,7 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 	local c = stats.flashCore
 	local coreLen = c and (c.length or length) or nil
 	if c then
-		core = ball(c.size, c.color, coreLen)
+		core = ball(c.size, c.color, coreLen, 0) -- ядро всегда плотное: оно и должно читаться сквозь пламя
 		if c.light then
 			local l2 = Instance.new("PointLight")
 			l2.Color = c.color
