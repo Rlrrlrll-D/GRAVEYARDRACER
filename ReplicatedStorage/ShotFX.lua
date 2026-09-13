@@ -77,11 +77,30 @@ function ShotFX.tracer(source: Source, hitPosition: Vector3, stats: Weapons.Stat
 	Debris:AddItem(tracer, TRACER_LIFE)
 end
 
-function ShotFX.flash(source: Source, stats: Weapons.Stats)
+-- ВСПЫШКА ВПЕРЕДИ ДУЛА, А НЕ НА НЁМ. Шар, центрованный на срезе, наполовину накрывал
+-- ствол (юзер 2026-09-13: «вспышки должны рендериться под стволами»). Сдвигаем центр
+-- вперёд на ~половину диаметра: шар только касается среза. Направление — ось люльки
+-- (+X аттачмента Muzzle) или, для чужого выстрела, к первой точке попадания.
+local function flashPoint(source: Source, origin: Vector3, dir: Vector3?, size: number): Vector3
+	local d = dir
+	if typeof(source) ~= "Vector3" then
+		local a = source :: Attachment
+		if a.Parent then
+			d = a.WorldCFrame.RightVector
+		end
+	end
+	if not d or d.Magnitude < 0.01 then
+		return origin
+	end
+	return origin + d.Unit * (size * 0.45)
+end
+
+function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 	local start = originOf(source)
 	if not start then
 		return
 	end
+	start = flashPoint(source, start, dir, stats.flashSize)
 	-- Спрайт-свечение (дробовик): один невидимый якорь у дула, на нём билборды —
 	-- внешнее мягкое свечение и малое ядро; свет тот же PointLight.
 	if stats.flashSprite then
@@ -118,7 +137,7 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats)
 		anchor.Parent = workspace
 		local life = stats.flashLife or FLASH_LIFE
 		followMuzzle(source, life, function(origin)
-			anchor.CFrame = CFrame.new(origin)
+			anchor.CFrame = CFrame.new(flashPoint(source, origin, dir, stats.flashSize))
 		end)
 		Debris:AddItem(anchor, life)
 		return
@@ -152,9 +171,10 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats)
 	end
 	local life = stats.flashLife or FLASH_LIFE
 	followMuzzle(source, life, function(origin)
-		flash.CFrame = CFrame.new(origin)
+		local p = flashPoint(source, origin, dir, stats.flashSize)
+		flash.CFrame = CFrame.new(p)
 		if core then
-			core.CFrame = CFrame.new(origin)
+			core.CFrame = CFrame.new(p)
 		end
 	end)
 	Debris:AddItem(flash, life)
@@ -214,7 +234,9 @@ function ShotFX.fire(source: Source, hits: { Vector3 }, stats: Weapons.Stats)
 	for _, h in hits do
 		ShotFX.tracer(source, h, stats)
 	end
-	ShotFX.flash(source, stats)
+	local origin = originOf(source)
+	local dir = if origin and hits[1] then (hits[1] - origin) else nil
+	ShotFX.flash(source, stats, dir)
 	local origin = originOf(source)
 	if origin then
 		ShotFX.shot(origin, stats)

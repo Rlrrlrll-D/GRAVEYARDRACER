@@ -56,7 +56,10 @@ Weapons.Stats = {
 		-- Красный (юзер 2026-09-13: трассеры разных стволов — разных оттенков). Трассеров
 		-- нет, вспышка — тот же неоновый шар, что у остальных, только крупнее (юзер: «сделай
 		-- как у других, только без трассеров»); звук ниже и громче.
-		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 2.0, flashColor = Color3.fromRGB(255, 120, 70), flashLife = 0.07,
+		-- Цвет вспышки ТЁМНО-красный нарочно: неон яркого цвета под блюмом выгорает в
+		-- жёлто-белое ядро («жёлтый круг в середине») — это рендер неона, а не второй шар;
+		-- у (150,30,30) ядра нет.
+		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 2.0, flashColor = Color3.fromRGB(150, 30, 30), flashLife = 0.07,
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {
