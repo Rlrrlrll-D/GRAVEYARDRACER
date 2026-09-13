@@ -268,9 +268,13 @@ local function buildRow(item: ShopCatalog.Item, index: number)
 	blurb.ZIndex = 3
 	blurb.Parent = holder
 
-	-- Номер плашки = порядковый номер строки: PlateArt чередует мазки и повороты,
-	-- поэтому две соседние кнопки не выглядят штампованными.
-	local button = PlateArt.button(index, MOSS)
+	-- Номер плашки = порядковый номер строки: PlateArt чередует мазки, чтобы две
+	-- соседние кнопки не выглядели штампованными. ТОЛЬКО ДВА НЕПОВЁРНУТЫХ ВАРИАНТА:
+	-- повёрнутый (Rotation = 180) GuiObject Roblox НЕ обрезает по ClipsDescendants —
+	-- такие плашки при прокрутке вылезали за окно списка и исчезали целиком, тогда как
+	-- надписи резались по краю честно (юзер 2026-09-13: «плашки заходят на границы и
+	-- потом пропадают»).
+	local button = PlateArt.button(((index - 1) % 2) + 1, MOSS)
 	button.AnchorPoint = Vector2.new(1, 0.5)
 	button.Size = UDim2.fromOffset(146, 42)
 	-- Отступ справа — под полосу прокрутки: без него она ложится прямо на кнопки.
