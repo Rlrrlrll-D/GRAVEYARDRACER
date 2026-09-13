@@ -30,7 +30,9 @@ export type Stats = {
 	lightBrightness: number?, -- PointLight вспышки; по умолчанию 6
 	lightRange: number?, -- по умолчанию 10 + 4·flashSize
 	flashTransparency: number?, -- 0 — плотный шар; >0 — прозрачность (для спрайта — его ImageTransparency)
-	flashCore: { size: number, color: Color3 }?, -- второй, малый шар/спрайт внутри той же плотности
+	-- малое ядро внутри вспышки: свой цвет, при flashLength — та же вытянутая форма своей
+	-- длины (length), и свой малый PointLight (light/lightRange)
+	flashCore: { size: number, color: Color3, length: number?, light: number?, lightRange: number? }?,
 	-- Спрайт вместо неонового шара (дробовик): мягкое свечение без плотного ядра —
 	-- билборд с встроенной текстурой Roblox, всегда полной яркости (LightInfluence 0).
 	flashSprite: string?,
@@ -69,8 +71,11 @@ Weapons.Stats = {
 		-- Свет на сцену — как у соседей (яркость 6): 24 клало плотное красное пятно вокруг;
 		-- мягкое удалённое свечение даёт та же яркость с радиусом побольше. Источник ярче
 		-- цветом (255,60,50).
-		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 0.4, flashLength = 1.1, flashColor = Color3.fromRGB(255, 60, 50), flashLife = 0.08,
+		-- Два света: красное пламя 0.4×2.0 и внутри тёплое ядро 0.16×1.6 цвета пулемётной
+		-- вспышки со своим малым светом (юзер 2026-09-13); оба вытянуты по выстрелу.
+		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 0.4, flashLength = 2.0, flashColor = Color3.fromRGB(255, 60, 50), flashLife = 0.08,
 		lightBrightness = 6, lightRange = 22,
+		flashCore = { size = 0.16, color = Color3.fromRGB(255, 220, 130), length = 1.6, light = 4, lightRange = 12 },
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {

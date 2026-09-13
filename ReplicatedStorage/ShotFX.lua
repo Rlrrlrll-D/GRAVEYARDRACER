@@ -159,7 +159,7 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 		return
 	end
 	local length = stats.flashLength
-	local function ball(size: number, color: Color3): BasePart
+	local function ball(size: number, color: Color3, len: number?): BasePart
 		local b = Instance.new("Part")
 		b.Anchored = true
 		b.CanCollide = false
@@ -167,14 +167,14 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 		b.Material = Enum.Material.Neon
 		b.Color = color
 		b.Transparency = stats.flashTransparency or 0
-		if length then
+		if len then
 			-- эллипсоид: Ball не тянется, SpecialMesh Sphere — тянется по Size
 			b.Shape = Enum.PartType.Block
 			local m = Instance.new("SpecialMesh")
 			m.MeshType = Enum.MeshType.Sphere
 			m.Parent = b
-			b.Size = Vector3.new(size, size, length)
-			b.CFrame = tongueCFrame(source, start0, dir, length)
+			b.Size = Vector3.new(size, size, len)
+			b.CFrame = tongueCFrame(source, start0, dir, len)
 		else
 			b.Shape = Enum.PartType.Ball
 			b.Size = Vector3.new(size, size, size)
@@ -182,27 +182,35 @@ function ShotFX.flash(source: Source, stats: Weapons.Stats, dir: Vector3?)
 		end
 		return b
 	end
-	local flash = ball(stats.flashSize, stats.flashColor)
+	local flash = ball(stats.flashSize, stats.flashColor, length)
 	local light = Instance.new("PointLight")
 	light.Color = stats.flashColor
 	light.Brightness = stats.lightBrightness or 6
 	light.Range = stats.lightRange or (10 + 4 * stats.flashSize) -- радиус свечения растёт со вспышкой
 	light.Parent = flash
 	flash.Parent = workspace
-	-- малое ядро внутри свечения (дробовик): та же плотность, свой цвет
+	-- малое ядро внутри пламени (дробовик): копия формы, свой цвет и свой малый свет —
+	-- «два света»: красный снаружи, тёплый пулемётный внутри (юзер 2026-09-13)
 	local core: BasePart? = nil
 	local c = stats.flashCore
+	local coreLen = c and (c.length or length) or nil
 	if c then
-		core = ball(c.size, c.color)
+		core = ball(c.size, c.color, coreLen)
+		if c.light then
+			local l2 = Instance.new("PointLight")
+			l2.Color = c.color
+			l2.Brightness = c.light
+			l2.Range = c.lightRange or 12
+			l2.Parent = core
+		end
 		core.Parent = workspace
 	end
 	local life = stats.flashLife or FLASH_LIFE
 	followMuzzle(source, life, function(origin)
 		if length then
-			local cf = tongueCFrame(source, origin, dir, length)
-			flash.CFrame = cf
+			flash.CFrame = tongueCFrame(source, origin, dir, length)
 			if core then
-				core.CFrame = cf
+				core.CFrame = tongueCFrame(source, origin, dir, coreLen or length)
 			end
 		else
 			local p = flashPoint(source, origin, dir, stats.flashSize)
