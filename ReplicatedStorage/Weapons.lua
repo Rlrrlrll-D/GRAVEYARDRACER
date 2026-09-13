@@ -53,7 +53,8 @@ local MG_SOUND = "rbxassetid://88311346538102" -- «Machine gun shot», 0.22 с 
 Weapons.Stats = {
 	machinegun = {
 		id = "machinegun", damage = mg.Damage, range = mg.Range, fireRate = mg.FireRate, pellets = 1, spread = 0,
-		tracerColor = Color3.fromRGB(224, 214, 170), tracerWidth = 0.15, flashSize = 1.1, flashColor = Color3.fromRGB(255, 220, 130),
+		-- ЧИСЛА ЮЗЕРА ИЗ ГАРАЖА (SkullTune WEAPON FX, 2026-09-13)
+		tracerColor = Color3.fromRGB(255, 220, 130), tracerWidth = 0.15, flashSize = 1.1, flashColor = Color3.fromRGB(255, 220, 130),
 		soundId = MG_SOUND, soundVolume = 0.55, soundPitch = 1.0,
 	},
 	nailer = {
@@ -73,20 +74,20 @@ Weapons.Stats = {
 		-- цветом (255,60,50).
 		-- Два света: красное пламя 0.4×2.0 и внутри тёплое ядро 0.16×1.6 цвета пулемётной
 		-- вспышки со своим малым светом (юзер 2026-09-13); оба вытянуты по выстрелу.
-		tracerColor = Color3.fromRGB(255, 84, 60), tracerWidth = 0, flashSize = 0.4, flashLength = 2.0, flashColor = Color3.fromRGB(255, 60, 50), flashLife = 0.08,
-		lightBrightness = 6, lightRange = 22,
-		-- пламя полупрозрачное: неон непрозрачен, и ядро внутри было не видно —
-		-- «светлый источник должен быть выше красного» (юзер 2026-09-13)
-		-- пламя заметно прозрачное (0.7): 0.22 визуально не отличалось от плотного (юзер)
-		flashTransparency = 0.7,
+		-- ЧИСЛА ЮЗЕРА ИЗ ГАРАЖА (SkullTune WEAPON FX, 2026-09-13): пламя плотное, свет 4.5/22, ядро оранжевое
+		tracerColor = Color3.fromRGB(255, 60, 50), tracerWidth = 0, flashSize = 0.4, flashLength = 2.0, flashColor = Color3.fromRGB(255, 60, 50), flashLife = 0.08,
+		lightBrightness = 4.5, lightRange = 22,
+		-- пламя плотное (юзер вернул 0 ручками), ядро — над ним, не внутри
+		flashTransparency = 0,
 		-- ядро — над пламенем, не внутри, и крупнее (0.08 на дистанции не читалось)
-		flashCore = { size = 0.16, color = Color3.fromRGB(255, 220, 130), length = 1.2, light = 4, lightRange = 12, up = 0.36 },
+		flashCore = { size = 0.16, color = Color3.fromRGB(255, 186, 0), length = 1.2, light = 4, lightRange = 12, up = 0.36 },
 		soundId = "rbxassetid://85341259642501", soundVolume = 1.6, soundPitch = 0.8, soundRange = 320, -- «HM Alternate Shotgun Shot», 1.28 с
 	},
 	rattle = {
 		id = "rattle", damage = 9, range = 260, fireRate = 15, pellets = 1, spread = 2.2,
 		-- зелёный, могильный
-		tracerColor = Color3.fromRGB(150, 255, 110), tracerWidth = 0.12, flashSize = 1.6, flashColor = Color3.fromRGB(190, 255, 140), -- 0.9→1.6: «увеличить радиус свечения»
+		-- ЧИСЛА ЮЗЕРА ИЗ ГАРАЖА (SkullTune WEAPON FX, 2026-09-13)
+		tracerColor = Color3.fromRGB(150, 255, 100), tracerWidth = 0.12, flashSize = 1.6, flashColor = Color3.fromRGB(150, 255, 100),
 		soundId = MG_SOUND, soundVolume = 0.4, soundPitch = 1.35,
 	},
 } :: { [string]: Stats }
