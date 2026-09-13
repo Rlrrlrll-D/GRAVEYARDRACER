@@ -133,24 +133,45 @@ end
 -- Тип выбирается по весам, рост — из его диапазона; HP, скорость, укус, цена и
 -- иммунитет к тарану уезжают в атрибуты — их читают ZombieAI, VehicleController и
 -- начисление костей ниже. pickScale/BRUTE_* остались как запасной путь без Tiers.
-type Tier = { id: string, weight: number, scaleMin: number, scaleMax: number, hp: number, walkSpeed: number, attackDamage: number, bones: number, ramImmune: boolean? }
+type Tier = { id: string, weight: number, scaleMin: number, scaleMax: number, hp: number, walkSpeed: number, attackDamage: number, bones: number, ramImmune: boolean?, maxGap: number? }
+-- «ЖАЛОСТЬ» К РЕДКИМ ТИПАМ: чистый жребий с долей 8% легко не выдаёт ни одного брута
+-- за заезд (юзер 2026-09-13: «уложил всех с одного выстрела — крутых не заспавнилось?»).
+-- maxGap у типа — сколько спавнов подряд он может не выпадать; на границе выдаём его
+-- принудительно. Средняя доля от этого почти не меняется, зато в каждом заезде есть.
+local sinceTier: { [string]: number } = {}
 local function pickTier(): Tier?
 	local tiers = GameConfig.Zombie.Tiers
 	if not tiers or #tiers == 0 then
 		return nil
 	end
-	local total = 0
+	local chosen: Tier? = nil
 	for _, t in tiers do
-		total += t.weight
-	end
-	local roll = math.random() * total
-	for _, t in tiers do
-		roll -= t.weight
-		if roll <= 0 then
-			return t
+		local gap = sinceTier[t.id] or 0
+		if t.maxGap and gap >= t.maxGap then
+			chosen = t
+			break
 		end
 	end
-	return tiers[#tiers]
+	if not chosen then
+		local total = 0
+		for _, t in tiers do
+			total += t.weight
+		end
+		local roll = math.random() * total
+		for _, t in tiers do
+			roll -= t.weight
+			if roll <= 0 then
+				chosen = t
+				break
+			end
+		end
+		chosen = chosen or tiers[#tiers]
+	end
+	for _, t in tiers do
+		sinceTier[t.id] = (sinceTier[t.id] or 0) + 1
+	end
+	sinceTier[(chosen :: Tier).id] = 0
+	return chosen
 end
 
 -- Красим И объект BodyColors, И сами детали: BodyColors для рига авторитетнее и

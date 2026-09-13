@@ -18,7 +18,7 @@ export type GameConfigType = {
 		-- ТИПЫ ЗОМБИ (2026-09-13): стойкость привязана к росту, который и так случайный.
 		-- weight — доля в спавне; hp/walkSpeed/attackDamage/bones — своё; ramImmune — таран
 		-- не давит (брут): машина получает ramDamageToCar, зомби — RamDamage от максимума.
-		Tiers: { { id: string, weight: number, scaleMin: number, scaleMax: number, hp: number, walkSpeed: number, attackDamage: number, bones: number, ramImmune: boolean? } },
+		Tiers: { { id: string, weight: number, scaleMin: number, scaleMax: number, hp: number, walkSpeed: number, attackDamage: number, bones: number, ramImmune: boolean?, maxGap: number? } },
 		RamDamage: number, -- доля HP, которую тараном снимают с ramImmune-зомби
 		RamDamageToCar: number, -- сколько HP теряет машина, врезавшись в ramImmune-зомби
 		WalkSpeed: number,
@@ -132,15 +132,17 @@ local GameConfig: GameConfigType = {
 		-- то есть 10 секунд на жизнь и 30 на все три. Было — по 3.3 с КАЖДОГО: четырнадцать
 		-- окруживших давали 46 в секунду и съедали машину целиком за две.
 		MaxAttackers = 3,
-		-- ТИПЫ. Средняя выплата ≈ 0.55·4 + 0.30·6 + 0.07·5 + 0.08·20 ≈ 5.2 кости — как и
-		-- BonesPerZombie, экономика магазина не сдвинулась. Стволы: пулемёт 20×6/с,
+		-- ТИПЫ. С «жалостью» (maxGap) брут выпадает ~11%, раннер ~10%; средняя выплата
+		-- ≈ 5.8 кости (симуляция 1000 спавнов) — чуть выше BonesPerZombie, магазин не трогаем. Стволы: пулемёт 20×6/с,
 		-- дробь 8×14 в упор, гатлинг 9×15/с — шамблера дробь кладёт залпом, брут вязнет
 		-- под гатлингом (18 попаданий), пулемёт — универсал. Очки ранга — 1 за любого.
 		Tiers = {
 			{ id = "shambler", weight = 55, scaleMin = 1.275, scaleMax = 1.5, hp = 40, walkSpeed = 10, attackDamage = 5, bones = 4 },
 			{ id = "ghoul", weight = 30, scaleMin = 1.5, scaleMax = 1.8, hp = 65, walkSpeed = 10, attackDamage = 5, bones = 6 },
-			{ id = "runner", weight = 7, scaleMin = 1.1, scaleMax = 1.2, hp = 25, walkSpeed = 15, attackDamage = 4, bones = 5 },
-			{ id = "brute", weight = 8, scaleMin = 2.025, scaleMax = 2.175, hp = 160, walkSpeed = 8, attackDamage = 8, bones = 20, ramImmune = true },
+			{ id = "runner", weight = 7, scaleMin = 1.1, scaleMax = 1.2, hp = 25, walkSpeed = 15, attackDamage = 4, bones = 5, maxGap = 12 },
+			-- maxGap: не реже, чем раз в столько спавнов — чистый жребий 8% мог не дать ни
+			-- одного брута за заезд (юзер 2026-09-13)
+			{ id = "brute", weight = 8, scaleMin = 2.025, scaleMax = 2.175, hp = 160, walkSpeed = 8, attackDamage = 8, bones = 15, ramImmune = true, maxGap = 11 },
 		},
 		RamDamage = 0.25, -- четыре тарана на брута, если не стрелять
 		RamDamageToCar = 15, -- как ловушка (Hazard.Damage)
