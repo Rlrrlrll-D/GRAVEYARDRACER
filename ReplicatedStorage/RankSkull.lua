@@ -42,9 +42,18 @@ export type Zone = {
 	flip: boolean?, -- развернуть на 180°: зубами «вперёд» (к носу) — просьба юзера для капота/крышки
 	-- Отзеркалить по ширине. Roblox при импорте разворачивает меш на 180° вокруг Y (x → −x),
 	-- и ось U капота/крышки на машине идёт справа налево: симметричный череп этого не
-	-- выдавал, лента с именем ранга читалась зеркально (2026-09-12). Корма и борта в
-	-- развёртке уже перевёрнуты (flipU в Blender) и не мирятся.
+	-- выдавал, лента с именем ранга читалась зеркально (2026-09-12). Корма в развёртке
+	-- уже перевёрнута (flipU в Blender) и не мирится; борта — мирятся: надпись без
+	-- mirror читалась справа налево (гараж, 2026-09-13), череп этого не показывал.
 	mirror: boolean?,
+	-- НАДПИСЬ ВМЕСТО ЧЕРЕПА (борта, юзер 2026-09-13: «на капоте имена у черепов читаются
+	-- плохо — продублировать на боковинах»): в зону рисуется имя ранга тем же шрифтом,
+	-- что на ленте (SkullShapes.Text), тем же режимом и цветом. Размер — вписать в
+	-- коробку width × height (studs зоны) как можно крупнее; коробка подобрана так,
+	-- чтобы буквы не перекрывали ни колёса, ни крылья (промер лучами в Blender,
+	-- scratchpad/sidetext/vis.py). Ранг без текста (классический контур) — череп.
+	text: boolean?,
+	width: number?,
 }
 
 export type BodySpec = {
@@ -76,8 +85,14 @@ RankSkull.Bodies = {
 		zones = {
 			top   = { u0 = 0.015, v0 = 0.635, u1 = 0.376, v1 = 0.914, rotated = false, studsW = 4.63, studsH = 3.57, ta = 0.5,  tb = 0.49, height = 3.28, flip = true, mirror = true },
 			rear  = { u0 = 0.406, v0 = 0.635, u1 = 0.802, v1 = 0.846, rotated = false, studsW = 5.07, studsH = 2.70, ta = 0.5,  tb = 0.27, height = 1.25 },
-			left  = { u0 = 0.635, v0 = 0.015, u1 = 0.794, v1 = 0.588, rotated = true,  studsW = 9.77, studsH = 2.71, ta = 0.50, tb = 0.26, height = 1.2 },
-			right = { u0 = 0.824, v0 = 0.015, u1 = 0.982, v1 = 0.586, rotated = true,  studsW = 9.74, studsH = 2.70, ta = 0.50, tb = 0.26, height = 1.2 },
+			-- Борта — НАДПИСЬ (2026-09-13). Свободное окно на нижней панели между колёсами:
+			-- по длине −2.48..2.12 от центра (колёса), по высоте 0..0.78 — ниже кромки крыльев;
+			-- выше между крыльями остаётся ~3.1 (углы крыльев на −1.66 / +1.40 от центра) и
+			-- панель режет раскос каркаса. Надпись дугой: середина выше концов на 0.08 ширины,
+			-- поэтому коробка 3.8 × 0.95 с низом у кромки панели (tb 0.18) — концы проходят под
+			-- углами крыльев, середина поднимается между ними; чуть к носу (ta 0.51).
+			left  = { u0 = 0.635, v0 = 0.015, u1 = 0.794, v1 = 0.588, rotated = true,  studsW = 9.77, studsH = 2.71, ta = 0.51, tb = 0.18, height = 0.95, text = true, width = 3.8, mirror = true },
+			right = { u0 = 0.824, v0 = 0.015, u1 = 0.982, v1 = 0.586, rotated = true,  studsW = 9.74, studsH = 2.70, ta = 0.49, tb = 0.18, height = 0.95, text = true, width = 3.8, mirror = true },
 		},
 	},
 	-- Гроб: атлас 1024 в развёртке, холст берём 512 (текстуры нет, хватит). Крышка —
@@ -92,8 +107,12 @@ RankSkull.Bodies = {
 		zones = {
 			top   = { u0 = 0.015, v0 = 0.585, u1 = 0.366, v1 = 0.942, rotated = false, studsW = 6.00, studsH = 6.10, ta = 0.5,  tb = 0.33, height = 2.83, flip = true, mirror = true },
 			rear  = { u0 = 0.396, v0 = 0.585, u1 = 0.659, v1 = 0.784, rotated = false, studsW = 4.48, studsH = 3.40, ta = 0.5,  tb = 0.42, height = 2.2 },
-			left  = { u0 = 0.585, v0 = 0.015, u1 = 0.758, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.42, tb = 0.45, height = 1.9 }, -- ta 0.30→0.42: «ближе к центру» (юзер 2026-09-12)
-			right = { u0 = 0.788, v0 = 0.015, u1 = 0.960, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.58, tb = 0.45, height = 1.9 },
+			-- Борта — НАДПИСЬ (2026-09-13). Борт из трёх досок с канавками (свои острова
+			-- развёртки — буквы через них рвались бы); верхняя доска z 3.55..4.60 чиста по всей
+			-- длине (колесо закрывает только две нижние) → коробка 7.0 × 0.95 по центру доски
+			-- (высота упирается в доску, ширина выходит ~3.8).
+			left  = { u0 = 0.585, v0 = 0.015, u1 = 0.758, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.50, tb = 0.845, height = 0.95, text = true, width = 7.0, mirror = true },
+			right = { u0 = 0.788, v0 = 0.015, u1 = 0.960, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.50, tb = 0.845, height = 0.95, text = true, width = 7.0, mirror = true },
 		},
 	},
 } :: { [string]: BodySpec }
@@ -123,7 +142,9 @@ local function shapeFor(name: string?): Shape
 	if ready then
 		return ready
 	end
-	local loops = (name and SkullShapes.Shapes[name]) or SkullOutline.Loops
+	-- "<ранг>|text" — буквы ленты без черепа (SkullShapes.Text)
+	local loops = if name and name:sub(-5) == "|text" then SkullShapes.Text[name:sub(1, -6)] else nil
+	loops = loops or (name and SkullShapes.Shapes[name]) or SkullOutline.Loops
 	local minY, maxY = math.huge, -math.huge
 	for _, loop in loops do
 		for _, p in loop do
@@ -309,10 +330,19 @@ local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, m
 	local blend = BLEND[mode] or BLEND.normal
 	-- плотность px/stud одинакова по обеим осям зоны (так собран атлас)
 	local pxPerStud = if zone.rotated then ((zone.u1 - zone.u0) * size) / zone.studsH else ((zone.u1 - zone.u0) * size) / zone.studsW
-	local aspect = shapeFor(shapeName).aspect
-	local sh = math.max(4, math.floor(zone.height * pxPerStud + 0.5)) -- высота черепа, px
-	local sw = math.max(4, math.floor(sh / aspect + 0.5))
-	local w, h, cov = coverage(shapeName, sw, tick)
+	-- надпись вместо черепа: своя форма, размер — вписать в коробку width × height
+	local isText = zone.text == true and shapeName ~= nil and SkullShapes.Text[shapeName :: string] ~= nil
+	local sname = if isText then (shapeName :: string) .. "|text" else shapeName
+	local aspect = shapeFor(sname).aspect
+	local sw
+	if isText then
+		local wpx = (zone.width or math.huge) * pxPerStud
+		sw = math.max(4, math.floor(math.min(wpx, zone.height * pxPerStud / aspect) + 0.5))
+	else
+		local sh = math.max(4, math.floor(zone.height * pxPerStud + 0.5)) -- высота черепа, px
+		sw = math.max(4, math.floor(sh / aspect + 0.5))
+	end
+	local w, h, cov = coverage(sname, sw, tick)
 	-- центр черепа в пикселях атласа
 	local cx, cy
 	if zone.rotated then
@@ -495,7 +525,8 @@ function RankSkull.compose(bodyId: string, zoneNames: { string }, colorName: str
 	local patchKey = if patch then ("%s|%.3f|%.2f|%d|%s|%.2f"):format(patch.color:ToHex(), patch.coverage, patch.scale, patch.seed, patch.mode or "tint", patch.opacity or 1) else "-"
 	-- тон/сила краски/место и размер черепа на капоте — поля спеки, SkullTune крутит их на живую
 	local top, left = spec.zones.top, spec.zones.left
-	local specKey = ("%.2f|%.2f|%.2f|%.2f|%.2f"):format(spec.baseTone or 1, spec.paintStrength or 1, top and top.tb or 0, top and top.height or 0, left and left.ta or 0)
+	local specKey = ("%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f"):format(spec.baseTone or 1, spec.paintStrength or 1, top and top.tb or 0, top and top.height or 0,
+		left and left.ta or 0, left and left.tb or 0, left and left.width or 0, left and left.height or 0)
 	local key = ("%s|%s|%s|%s|%s|%.2f|%.2f|%s|%s|%s"):format(bodyId, table.concat(names, ","), shapeName or "-", color and color:ToHex() or "-", mode, opacity, up, paint:ToHex(), patchKey, specKey)
 	local ready = imageCache[key]
 	if ready then

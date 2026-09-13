@@ -20,7 +20,9 @@
 --   PAINT STR     сила краски: 1 — краска домножает целиком, меньше — текстура
 --                 просвечивает (BLOOD уходит из красного в тёмно-коричневый)
 --   TOP POS/SIZE  место (0 — у кабины, 1 — у носа) и высота черепа на капоте/крышке
---   SIDE POS      место черепа на бортах: доля длины от кормы (0.5 — по центру)
+--   SIDE POS      место надписи на бортах: доля длины от кормы (0.5 — по центру)
+--   SIDE UP/W/H   высота центра надписи (доля высоты борта) и коробка width × height
+--                 (studs зоны), в которую надпись вписывается как можно крупнее
 --   PAINT R G B   краска кузова (общая, как RUST)
 -- ПРАВАЯ КОЛОНКА — GARAGE: гараж-песочница вне заезда — сервер (DevGarage) ставит над
 -- стартом площадку со ВСЕМИ кузовами × ВСЕМИ красками, камера орбитальная (ПКМ —
@@ -81,7 +83,8 @@ type BodyState = {
 	modeIndex: number, opacity: number, lift: number,
 	skull: { number }, -- цвет черепа 0..255
 	tone: number, paintStrength: number, topPos: number, topSize: number,
-	sidePos: number, -- место черепа на бортах: доля длины от кормы (left.ta; right зеркально)
+	sidePos: number, -- место надписи на бортах: доля длины от кормы (left.ta; right зеркально)
+	sideUp: number, sideW: number, sideH: number, -- центр по высоте и коробка надписи (left/right.tb/width/height)
 }
 local function bodyDefaults(bodyId: string): BodyState
 	local cb = GameConfig.Ranks.SkullBody and GameConfig.Ranks.SkullBody[bodyId] or nil
@@ -99,6 +102,9 @@ local function bodyDefaults(bodyId: string): BodyState
 		topPos = top and top.tb or 0.5,
 		topSize = top and top.height or 3,
 		sidePos = left and left.ta or 0.5,
+		sideUp = left and left.tb or 0.5,
+		sideW = left and left.width or 3,
+		sideH = left and left.height or 1,
 	}
 end
 local base = { bodies = {} :: { [string]: BodyState } }
@@ -420,9 +426,24 @@ makeSlider(15, "SIDE POS", 1, function()
 end, function(v)
 	cur().sidePos = v
 end)
-local paintSwatch = makeSwatch(16)
+makeSlider(16, "SIDE UP", 1, function()
+	return cur().sideUp
+end, function(v)
+	cur().sideUp = v
+end)
+makeSlider(17, "SIDE W", 8, function()
+	return cur().sideW
+end, function(v)
+	cur().sideW = math.max(0.5, v)
+end)
+makeSlider(18, "SIDE H", 2, function()
+	return cur().sideH
+end, function(v)
+	cur().sideH = math.max(0.2, v)
+end)
+local paintSwatch = makeSwatch(19)
 for i, ch in { "R", "G", "B" } do
-	makeSlider(16 + i, "PAINT " .. ch, 255, function()
+	makeSlider(19 + i, "PAINT " .. ch, 255, function()
 		return state.paint[i]
 	end, function(v)
 		state.paint[i] = v
@@ -705,8 +726,8 @@ end
 
 local function bodyLine(b: string): string
 	local s = state.bodies[b]
-	return ("%s: mode=%s opacity=%.2f lift=%.2f skull=(%d,%d,%d) tone=%.2f paintStrength=%.2f top tb=%.2f height=%.2f side ta=%.2f"):format(
-		b, MODES[s.modeIndex], s.opacity, s.lift, s.skull[1] + 0.5, s.skull[2] + 0.5, s.skull[3] + 0.5, s.tone, s.paintStrength, s.topPos, s.topSize, s.sidePos)
+	return ("%s: mode=%s opacity=%.2f lift=%.2f skull=(%d,%d,%d) tone=%.2f paintStrength=%.2f top tb=%.2f height=%.2f side ta=%.2f tb=%.2f width=%.2f height=%.2f"):format(
+		b, MODES[s.modeIndex], s.opacity, s.lift, s.skull[1] + 0.5, s.skull[2] + 0.5, s.skull[3] + 0.5, s.tone, s.paintStrength, s.topPos, s.topSize, s.sidePos, s.sideUp, s.sideW, s.sideH)
 end
 
 local function summary(): string
@@ -762,6 +783,11 @@ local function pushSpec(b: string, s: BodyState)
 	if left and right then
 		left.ta = s.sidePos
 		right.ta = 1 - s.sidePos -- у right ta = 0 у носа, зеркально
+		for _, z in { left, right } do
+			z.tb = s.sideUp
+			z.width = s.sideW
+			z.height = s.sideH
+		end
 	end
 end
 
