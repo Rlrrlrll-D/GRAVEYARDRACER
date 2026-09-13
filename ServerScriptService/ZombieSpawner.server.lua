@@ -129,6 +129,30 @@ local function pickScale(): number
 	return SCALE_MIN + math.random() * (SCALE_MAX - SCALE_MIN)
 end
 
+-- ТИПЫ ЗОМБИ (GameConfig.Zombie.Tiers, 2026-09-13): стойкость привязана к росту.
+-- Тип выбирается по весам, рост — из его диапазона; HP, скорость, укус, цена и
+-- иммунитет к тарану уезжают в атрибуты — их читают ZombieAI, VehicleController и
+-- начисление костей ниже. pickScale/BRUTE_* остались как запасной путь без Tiers.
+type Tier = { id: string, weight: number, scaleMin: number, scaleMax: number, hp: number, walkSpeed: number, attackDamage: number, bones: number, ramImmune: boolean? }
+local function pickTier(): Tier?
+	local tiers = GameConfig.Zombie.Tiers
+	if not tiers or #tiers == 0 then
+		return nil
+	end
+	local total = 0
+	for _, t in tiers do
+		total += t.weight
+	end
+	local roll = math.random() * total
+	for _, t in tiers do
+		roll -= t.weight
+		if roll <= 0 then
+			return t
+		end
+	end
+	return tiers[#tiers]
+end
+
 -- Красим И объект BodyColors, И сами детали: BodyColors для рига авторитетнее и
 -- переписал бы цвета деталей, а детали нужны на случай, если объекта в шаблоне не
 -- окажется. Дешевле сделать оба, чем ловить потом «половина зомби не покрасилась».
@@ -359,7 +383,9 @@ local function onZombieDied(zombie: Model, humanoid: Humanoid)
 			-- итогов). Обнуляет второй MatchManager на старте; здесь оба растут вместе.
 			local thisRace = (killer:GetAttribute("RaceZombies") :: number?) or 0
 			killer:SetAttribute("RaceZombies", thisRace + 1)
-			Economy.award(killer, GameConfig.Economy.BonesPerZombie, "зомби")
+			-- цена по типу (BonesValue), без типа — общая
+			local bones = (zombie:GetAttribute("BonesValue") :: number?) or GameConfig.Economy.BonesPerZombie
+			Economy.award(killer, bones, "зомби " .. tostring(zombie:GetAttribute("Tier") or ""))
 			-- Счётчик накопительный (PlayerData сидирует его из записи при входе),
 			-- поэтому сотня набирается за все сессии, а не за одну.
 			if defeated + 1 >= 100 then
@@ -387,10 +413,18 @@ local function spawnZombie()
 
 	-- Рост и окрас — ДО замера габарита ниже: по нему считается, на какой высоте
 	-- стоят ноги, и мерить надо уже готовое тело.
-	local scale = pickScale()
+	local tier = pickTier()
+	local scale = if tier then tier.scaleMin + math.random() * (tier.scaleMax - tier.scaleMin) else pickScale()
 	zombie:ScaleTo(scale) -- ScaleTo двигает и суставы, поэтому замах не разъезжается
 	dressZombie(zombie)
 	zombie:SetAttribute("BodyScale", scale)
+	if tier then
+		zombie:SetAttribute("Tier", tier.id)
+		zombie:SetAttribute("WalkSpeed", tier.walkSpeed)
+		zombie:SetAttribute("AttackDamage", tier.attackDamage)
+		zombie:SetAttribute("BonesValue", tier.bones)
+		zombie:SetAttribute("RamImmune", tier.ramImmune == true)
+	end
 	-- Досягаемость растёт ровно на длину руки, а не пропорционально всей дистанции:
 	-- база `AttackRange` — это зазор от БОРТА КУЗОВА (см. ZombieAI.surfacePoint), в нём
 	-- нет ничего, что стоило бы множить на рост, кроме самой руки.
@@ -437,8 +471,9 @@ local function spawnZombie()
 	CollectionService:AddTag(zombie, "Zombie")
 
 	local humanoid = zombie:FindFirstChildOfClass("Humanoid") :: Humanoid
-	humanoid.MaxHealth = GameConfig.Zombie.MaxHealth
-	humanoid.Health = GameConfig.Zombie.MaxHealth
+	local hp = if tier then tier.hp else GameConfig.Zombie.MaxHealth
+	humanoid.MaxHealth = hp
+	humanoid.Health = hp
 	-- ОБЯЗАТЕЛЬНО до смерти: иначе Humanoid на Died разрывает все Motor6D, риг
 	-- распадается на отдельные детали и анимировать падение уже нечем.
 	humanoid.BreakJointsOnDeath = false

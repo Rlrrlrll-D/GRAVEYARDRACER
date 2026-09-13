@@ -437,7 +437,31 @@ local function setupVehicle(vehicle: Model)
 		-- посреди толпы — это стоять и получать по кузову, ничего не решая. Толпа и так
 		-- тормозит машину физически, массой тел.
 		local speed = (vehicle:GetAttribute("Speed") :: number?) or 0
-		if speed >= GameConfig.Vehicle.CrushSpeedThreshold then
+		if speed >= GameConfig.Vehicle.CrushSpeedThreshold and zombieModel:GetAttribute("RamImmune") == true then
+			-- БРУТА НЕ ТАРАНИМ (GameConfig.Zombie.Tiers, юзер 2026-09-13): здоровяка бампером
+			-- не снести — иначе стойкость обходилась бы колесом. Удар стоит машине
+			-- RamDamageToCar (как ловушка), бруту — RamDamage от максимума; толкает его
+			-- по ходу, чтобы столкновение читалось, но убить тараном нельзя.
+			local ramHp = humanoid.MaxHealth * (GameConfig.Zombie.RamDamage or 0.25)
+			if humanoid.Health > ramHp then
+				humanoid:TakeDamage(ramHp)
+			else
+				humanoid.Health = 1
+			end
+			if not vehicle:GetAttribute("Destroyed") and not vehicle:GetAttribute("Invulnerable") then
+				local health = (vehicle:GetAttribute("Health") :: number?) or GameConfig.Vehicle.MaxHealth
+				health = math.max(0, health - (GameConfig.Zombie.RamDamageToCar or 15))
+				vehicle:SetAttribute("Health", health)
+				if health <= 0 then
+					vehicle:SetAttribute("Destroyed", true)
+				end
+			end
+			local shake = remotes:FindFirstChild("CameraShake")
+			local driver = VehicleRegistry.GetPlayerForVehicle(vehicle)
+			if shake and shake:IsA("RemoteEvent") and driver then
+				shake:FireClient(driver, 0.45, 0.3)
+			end
+		elseif speed >= GameConfig.Vehicle.CrushSpeedThreshold then
 			-- Тот же замок, что и у турели: после решённого заезда сбитый зомби НИКОМУ
 			-- не засчитывается, иначе запрет на стрельбу обходился бы бампером. Гибнуть
 			-- под колёсами он не перестаёт — меняется только то, кому идёт счёт.

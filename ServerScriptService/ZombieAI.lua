@@ -902,7 +902,11 @@ function ZombieAI.Run(zombie: Model)
 		return
 	end
 
-	humanoid.WalkSpeed = GameConfig.Zombie.WalkSpeed
+	-- ТИП ЗОМБИ (GameConfig.Zombie.Tiers): скорость и укус свои, спавнер кладёт их в
+	-- атрибуты; без атрибута — общие числа конфига.
+	local walkSpeed = (zombie:GetAttribute("WalkSpeed") :: number?) or GameConfig.Zombie.WalkSpeed
+	local attackDamage = (zombie:GetAttribute("AttackDamage") :: number?) or GameConfig.Zombie.AttackDamage
+	humanoid.WalkSpeed = walkSpeed
 
 	-- Плечевые сочленения R6 для процедурного замаха. У нестандартного рига
 	-- их может не быть — тогда playSwing ничего не делает и бьём как раньше.
@@ -1013,7 +1017,7 @@ function ZombieAI.Run(zombie: Model)
 						grabOnFoot(preyPlayer, rootPart.Position)
 					end
 				else
-					humanoid.WalkSpeed = GameConfig.Zombie.WalkSpeed
+					humanoid.WalkSpeed = walkSpeed
 					humanoid:MoveTo(preyRoot.Position)
 				end
 				task.wait(0.15)
@@ -1106,7 +1110,7 @@ function ZombieAI.Run(zombie: Model)
 			if inside then
 				-- Влипли в габарит: наружу, и своим ходом тоже.
 				evict(stand)
-				humanoid.WalkSpeed = GameConfig.Zombie.WalkSpeed
+				humanoid.WalkSpeed = walkSpeed
 				humanoid:MoveTo(stand)
 			elseif bodyDistance <= attackRange and atSlot then
 				-- СТОП — СКОРОСТЬЮ, А НЕ `MoveTo` В СЕБЯ. Прежний приём (`MoveTo` в
@@ -1176,7 +1180,7 @@ function ZombieAI.Run(zombie: Model)
 					local protected = os.clock() < ((vehicle:GetAttribute("ProtectedUntil") :: number?) or 0)
 					if dealsDamage and stillClose and not vehicle:GetAttribute("Destroyed") and not vehicle:GetAttribute("Invulnerable") and not protected then
 						local health = (vehicle:GetAttribute("Health") :: number?) or GameConfig.Vehicle.MaxHealth
-						health = math.max(0, health - GameConfig.Zombie.AttackDamage)
+						health = math.max(0, health - attackDamage)
 						vehicle:SetAttribute("Health", health)
 						if health <= 0 then
 							vehicle:SetAttribute("Destroyed", true)
@@ -1196,7 +1200,7 @@ function ZombieAI.Run(zombie: Model)
 					end
 				end
 			else
-				humanoid.WalkSpeed = GameConfig.Zombie.WalkSpeed
+				humanoid.WalkSpeed = walkSpeed
 				-- Идём не в СИДЕНЬЕ, а в точку у борта: цель снаружи машины, и дойдя
 				-- до неё, зомби останавливается сам, а не упирается в кузов.
 				humanoid:MoveTo(stand)
@@ -1206,7 +1210,7 @@ function ZombieAI.Run(zombie: Model)
 				end
 			end
 		else
-			humanoid.WalkSpeed = GameConfig.Zombie.WalkSpeed
+			humanoid.WalkSpeed = walkSpeed
 		end
 
 		-- Шаг мышления. Вдали редкий (25 тел не должны думать каждый кадр), но у самой
