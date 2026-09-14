@@ -120,6 +120,9 @@ RankSkull.Bodies = {
 		},
 	},
 	-- Катафалк (tools/blender/hearse.py, 2026-09-14): атлас 1024, зоны — крыша павильона,
+	-- ЧИСЛА ЗОН — ИЗ UV ГОТОВОГО МЕША (scratchpad/hearse/uvzones.py), а не из печати
+	-- первого прогона: после правки z-fighting панели подросли на 0.08, прямоугольники
+	-- разъехались, и надпись съезжала вниз по панели.
 	-- задняя панель в рамке и боковые панели над колёсами. Числа печатает сам скрипт;
 	-- пересоберёшь меш — перенеси заново. Текстура запечена там же (цвет + AO + волокно).
 	hearse = {
@@ -131,10 +134,10 @@ RankSkull.Bodies = {
 			-- крыша: череп смотрит зубами к носу, как на капоте и крышке гроба
 			top   = { u0 = 0.015, v0 = 0.615, u1 = 0.338, v1 = 0.921, rotated = false, studsW = 5.90, studsH = 5.60, ta = 0.5, tb = 0.5, height = 3.00, flip = true, mirror = true },
 			-- корма: панель обведена молдингом, череп внутри рамки (2.23 studs просвета)
-			rear  = { u0 = 0.368, v0 = 0.615, u1 = 0.641, v1 = 0.771, rotated = false, studsW = 5.00, studsH = 2.93, ta = 0.5, tb = 0.50, height = 2.00 },
+			rear  = { u0 = 0.368, v0 = 0.615, u1 = 0.641, v1 = 0.775, rotated = false, studsW = 5.00, studsH = 2.93, ta = 0.5, tb = 0.50, height = 2.00 },
 			-- борта: имя ранга, полоса над колёсами (низ панели 3.70 — выше верха колеса 3.18)
-			left  = { u0 = 0.630, v0 = 0.605, u1 = 0.693, v1 = 0.887, rotated = true, studsW = 5.16, studsH = 1.23, ta = 0.50, tb = 0.50, height = 1.00, text = true, flatText = true, width = 4.80, mirror = true },
-			right = { u0 = 0.723, v0 = 0.605, u1 = 0.786, v1 = 0.887, rotated = true, studsW = 5.16, studsH = 1.23, ta = 0.50, tb = 0.50, height = 1.00, text = true, flatText = true, width = 4.80, mirror = true },
+			left  = { u0 = 0.630, v0 = 0.605, u1 = 0.697, v1 = 0.887, rotated = true, studsW = 5.16, studsH = 1.23, ta = 0.50, tb = 0.50, height = 1.00, text = true, flatText = true, width = 4.60, mirror = true },
+			right = { u0 = 0.727, v0 = 0.605, u1 = 0.795, v1 = 0.887, rotated = true, studsW = 5.16, studsH = 1.23, ta = 0.50, tb = 0.50, height = 1.00, text = true, flatText = true, width = 4.60, mirror = true },
 		},
 	},
 } :: { [string]: BodySpec }
