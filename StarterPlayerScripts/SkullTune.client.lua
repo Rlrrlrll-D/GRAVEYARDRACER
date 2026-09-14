@@ -10,7 +10,7 @@
 --
 -- ЛЕВАЯ КОЛОНКА — ПО КУЗОВАМ (2026-09-12: багги и гроб просят разного — «на багги
 -- сильнее», «череп цвета ржавчины с наложением», «придави тон на багги»):
---   BODY          кнопка: чьи ручки крутим — buggy / coffin (стартует с той машины,
+--   BODY          кнопка: чьи ручки крутим — buggy / coffin / hearse (стартует с той машины,
 --                 в которой сидишь; вторую можно настроить вслепую и посмотреть потом)
 --   MODE          режим наложения черепа на этом кузове
 --   RANK          какую форму (ленту с именем) показывать на своей машине
@@ -70,7 +70,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local TOGGLE_KEY = Enum.KeyCode.F3
 local FONT = Enum.Font.Code
 local MODES = { "overlay", "multiply", "screen", "softlight", "lineardodge", "normal" }
-local BODIES = { "buggy", "coffin" }
+local BODIES = { "buggy", "coffin", "hearse" }
 -- Ступени рангов: кнопка RANK перебирает их, на машину идёт ФОРМА ступени (SkullShapes).
 local RANKS = {}
 for _, t in GameConfig.Ranks.Tiers do
@@ -747,7 +747,7 @@ local function summary(): string
 	end
 	table.insert(fxLines, ("arrows: color=(%d,%d,%d) tr=%.2f"):format(arrowColor.R * 255 + 0.5, arrowColor.G * 255 + 0.5, arrowColor.B * 255 + 0.5, arrowTr))
 	return ("%s\n%s\nrust=(%d,%d,%d) | moss=(%d,%d,%d) mode=%s opacity=%.2f coverage=%.3f scale=%.1f seed=%d\n%s"):format(
-		bodyLine("buggy"), bodyLine("coffin"), p[1] + 0.5, p[2] + 0.5, p[3] + 0.5,
+		bodyLine("buggy"), bodyLine("coffin") .. "\n" .. bodyLine("hearse"), p[1] + 0.5, p[2] + 0.5, p[3] + 0.5,
 		m[1] + 0.5, m[2] + 0.5, m[3] + 0.5, PATCH_MODES[state.mossModeIndex], state.mossOpacity, state.mossCoverage, state.mossScale, state.mossSeed,
 		table.concat(fxLines, "\n"))
 end

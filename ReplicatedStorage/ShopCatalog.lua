@@ -78,6 +78,12 @@ ShopCatalog.Items = {
 		id = "coffin", name = "COFFIN", blurb = "you will not need it later",
 		kind = "body", bones = 3500, bodyTemplate = "Coffin", minRank = "PALLBEARER",
 	},
+	{
+		-- Долгая цель (PLAN_SHOP §3: 12000 = ~50 заездов). Викторианский катафалк:
+		-- застеклённый павильон с гробом внутри, фонари, урны — tools/blender/hearse.py.
+		id = "hearse", name = "HEARSE", blurb = "seats one, permanently",
+		kind = "body", bones = 12000, bodyTemplate = "Hearse", minRank = "REAPER",
+	},
 
 	-- // Скины кузова -------------------------------------------------------
 	{

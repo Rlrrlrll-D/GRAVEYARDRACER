@@ -54,6 +54,10 @@ export type Zone = {
 	-- scratchpad/sidetext/vis.py). Ранг без текста (классический контур) — череп.
 	text: boolean?,
 	width: number?,
+	-- Разогнуть надпись в прямую строку (катафалк, юзер 2026-09-14: «убери дугу на
+	-- надписи»): на панели в прямой рамке дуга ленты читается кривовато. На багги и
+	-- гробе панель голая, там дуга уместна — флага нет.
+	flatText: boolean?,
 }
 
 export type BodySpec = {
@@ -115,6 +119,24 @@ RankSkull.Bodies = {
 			right = { u0 = 0.788, v0 = 0.015, u1 = 0.960, v1 = 0.435, rotated = true,  studsW = 8.28, studsH = 3.40, ta = 0.50, tb = 0.845, height = 0.95, text = true, width = 7.0, mirror = true },
 		},
 	},
+	-- Катафалк (tools/blender/hearse.py, 2026-09-14): атлас 1024, зоны — крыша павильона,
+	-- задняя панель в рамке и боковые панели над колёсами. Числа печатает сам скрипт;
+	-- пересоберёшь меш — перенеси заново. Текстура запечена там же (цвет + AO + волокно).
+	hearse = {
+		atlas = 1024,
+		texture = "rbxassetid://119411421518771",
+		paintStrength = 0.42,
+		baseTone = 0.95,
+		zones = {
+			-- крыша: череп смотрит зубами к носу, как на капоте и крышке гроба
+			top   = { u0 = 0.015, v0 = 0.615, u1 = 0.338, v1 = 0.921, rotated = false, studsW = 5.90, studsH = 5.60, ta = 0.5, tb = 0.5, height = 3.00, flip = true, mirror = true },
+			-- корма: панель обведена молдингом, череп внутри рамки (2.23 studs просвета)
+			rear  = { u0 = 0.368, v0 = 0.615, u1 = 0.641, v1 = 0.771, rotated = false, studsW = 5.00, studsH = 2.93, ta = 0.5, tb = 0.50, height = 2.00 },
+			-- борта: имя ранга, полоса над колёсами (низ панели 3.70 — выше верха колеса 3.18)
+			left  = { u0 = 0.630, v0 = 0.605, u1 = 0.693, v1 = 0.887, rotated = true, studsW = 5.16, studsH = 1.23, ta = 0.50, tb = 0.50, height = 1.00, text = true, flatText = true, width = 4.80, mirror = true },
+			right = { u0 = 0.723, v0 = 0.605, u1 = 0.786, v1 = 0.887, rotated = true, studsW = 5.16, studsH = 1.23, ta = 0.50, tb = 0.50, height = 1.00, text = true, flatText = true, width = 4.80, mirror = true },
+		},
+	},
 } :: { [string]: BodySpec }
 
 RankSkull.Colors = {
@@ -136,14 +158,23 @@ RankSkull.Colors = {
 type Shape = { loops: { { { number } } }, minY: number, maxY: number, aspect: number }
 local shapeCache: { [string]: Shape } = {}
 
+
 local function shapeFor(name: string?): Shape
 	local key = name or "@outline"
 	local ready = shapeCache[key]
 	if ready then
 		return ready
 	end
-	-- "<ранг>|text" — буквы ленты без черепа (SkullShapes.Text)
-	local loops = if name and name:sub(-5) == "|text" then SkullShapes.Text[name:sub(1, -6)] else nil
+	-- "<ранг>|text" — буквы ленты без черепа (дугой, как на ленте), "<ранг>|flat" — имя
+	-- ранга, НАБРАННОЕ ПРЯМОЙ СТРОКОЙ тем же шрифтом (SkullShapes.TextStraight): юзер
+	-- 2026-09-14 — «не используй надпись из черепов, там она искажена; тот же шрифт, но
+	-- написать обыкновенно, без наклона, по центру».
+	local loops = nil
+	if name and name:sub(-5) == "|flat" then
+		loops = SkullShapes.TextStraight[name:sub(1, -6)]
+	elseif name and name:sub(-5) == "|text" then
+		loops = SkullShapes.Text[name:sub(1, -6)]
+	end
 	loops = loops or (name and SkullShapes.Shapes[name]) or SkullOutline.Loops
 	local minY, maxY = math.huge, -math.huge
 	for _, loop in loops do
@@ -331,8 +362,9 @@ local function paintZone(buf: buffer, size: number, zone: Zone, color: Color3, m
 	-- плотность px/stud одинакова по обеим осям зоны (так собран атлас)
 	local pxPerStud = if zone.rotated then ((zone.u1 - zone.u0) * size) / zone.studsH else ((zone.u1 - zone.u0) * size) / zone.studsW
 	-- надпись вместо черепа: своя форма, размер — вписать в коробку width × height
-	local isText = zone.text == true and shapeName ~= nil and SkullShapes.Text[shapeName :: string] ~= nil
-	local sname = if isText then (shapeName :: string) .. "|text" else shapeName
+	local table_ = if zone.flatText then SkullShapes.TextStraight else SkullShapes.Text
+	local isText = zone.text == true and shapeName ~= nil and table_[shapeName :: string] ~= nil
+	local sname = if isText then (shapeName :: string) .. (if zone.flatText then "|flat" else "|text") else shapeName
 	local aspect = shapeFor(sname).aspect
 	local sw
 	if isText then
