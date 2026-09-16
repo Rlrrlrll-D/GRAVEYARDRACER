@@ -44,7 +44,8 @@ RunService.Heartbeat:Connect(function(dt: number)
 		music:Play()
 	end
 	-- плавный фейд громкости к цели
-	local target = if want then TARGET_VOLUME else 0
+	-- атрибут DevTarget ставит RaceTune (панель полировки, Studio): фейд идёт к нему
+	local target = if want then ((music:GetAttribute("DevTarget") :: number?) or TARGET_VOLUME) else 0
 	music.Volume += (target - music.Volume) * math.clamp(dt / FADE_SECONDS, 0, 1)
 	if not want and music.IsPlaying and music.Volume < 0.005 then
 		music:Stop()

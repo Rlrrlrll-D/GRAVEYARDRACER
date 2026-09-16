@@ -87,16 +87,19 @@ folder.Parent = workspace.CurrentCamera
 -- ГРОМКОСТИ — ЭТО ПРИОРИТЕТ СЛОЁВ, а не «подкрутить на слух». Крик первый, крылья
 -- второй, писк третий: он самый навязчивый по тембру и, стоя вровень, съедал крик.
 local wings = Instance.new("Sound")
+wings.Name = "BatWings" -- имена — для RaceTune (панель полировки)
 wings.SoundId = WINGS_ID
 wings.Volume = 0.6 -- было 1.0: масса рванула, но это фон
 wings.Parent = SoundService
 
 local squeal = Instance.new("Sound")
+squeal.Name = "BatSqueal"
 squeal.SoundId = SQUEAL_ID
 squeal.Volume = 0.35 -- было 0.85: писк уходит ПОД крик (просьба юзера)
 squeal.Parent = SoundService
 
 local scream = Instance.new("Sound")
+scream.Name = "BatScream"
 scream.SoundId = SCREAM_ID
 scream.Volume = 2.4 -- вчетверо над крыльями и всемеро над писком: крик должен ДАВИТЬ
 scream.Parent = SoundService

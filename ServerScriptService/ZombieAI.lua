@@ -109,7 +109,7 @@ local function playSoundAt(soundId: string, position: Vector3, volume: number, m
 
 	local sound = Instance.new("Sound")
 	sound.SoundId = soundId
-	sound.Volume = volume
+	sound.Volume = volume * ZombieAI.GrowlVolume
 	sound.RollOffMode = Enum.RollOffMode.InverseTapered
 	sound.RollOffMinDistance = 8
 	sound.RollOffMaxDistance = 160
@@ -201,6 +201,11 @@ local function grabOnFoot(player: Player, zombiePosition: Vector3)
 end
 
 local ZombieAI = {}
+
+-- Множитель громкости рыка/стона/хрипа (playSoundAt). Крутит DevTune (панель
+-- полировки, только Studio); в живой игре всегда 1. Подобранное — зашивать в volume
+-- у вызовов playSoundAt ниже, а не сюда.
+ZombieAI.GrowlVolume = 1
 
 -- Прокрутить фазу анимации: alpha 0→1 за duration, ease сглаживает. Возвращает
 -- false, если зомби исчез посреди фазы — вызывающий на этом заканчивает.

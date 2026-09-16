@@ -26,11 +26,13 @@ local player = Players.LocalPlayer
 -- есть на скорости они идут раз в ~2.9с — звук длиннее наложился бы сам на себя.
 local SoundService = game:GetService("SoundService")
 local checkpointSound = Instance.new("Sound")
+checkpointSound.Name = "CheckpointSound" -- по имени их находит RaceTune (панель полировки)
 checkpointSound.SoundId = "rbxassetid://9114228524"
 checkpointSound.Volume = 0.6
 checkpointSound.Parent = SoundService
 
 local finishSound = Instance.new("Sound")
+finishSound.Name = "FinishSound"
 finishSound.SoundId = "rbxassetid://4961240438" -- грозовой раскат: драматичный крип-стинг на финиш
 finishSound.Volume = 0.7
 finishSound.Parent = SoundService
