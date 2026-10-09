@@ -179,15 +179,29 @@ local function getTemplate(name: string): Model?
 	return nil
 end
 
+-- КРЕСТ С КОЛЬЦОМ ИЗ ИГРЫ УБРАН (2026-10-09). Кельтский крест — крест с кольцом на
+-- перекрестии — внесён в базу символов ненависти ADL и в Roblox попадает под статью
+-- «Discrimination, Slurs, and Hate Speech»; 27.09.2026 опыт сняли с публикации именно
+-- по ней, и это единственное в игре, что под неё подходит. Надгробия-кресты остаются,
+-- но только латинские (Tombstone_J, GraveMarker) — отличие ровно в кольце.
+-- Список сверяется по ИМЕНИ шаблона: мало вернуть вес 0 в таблице кладбища, варианты
+-- выбираются ещё и по имени "Tombstone" (hazards у дороги, декор) — туда кельтский
+-- крест попадал случайным жребием.
+local BANNED_TEMPLATES: { [string]: boolean } = {
+	Tombstone_B = true, -- каменный крест с кольцом на ступенчатом цоколе
+	Tombstone_H = true, -- он же, второй меш
+}
+
 -- Как getTemplate, но собирает все варианты "Name" и "Name_*"
--- (например Tombstone + Tombstone_B) и выбирает случайный.
+-- (например Tombstone + Tombstone_C) и выбирает случайный.
 local function getTemplateVariant(name: string): Model?
 	if not templates then
 		return nil
 	end
 	local variants = {}
 	for _, child in templates:GetChildren() do
-		if child:IsA("Model") and (child.Name == name or child.Name:sub(1, #name + 1) == name .. "_") then
+		if child:IsA("Model") and not BANNED_TEMPLATES[child.Name]
+			and (child.Name == name or child.Name:sub(1, #name + 1) == name .. "_") then
 			table.insert(variants, child)
 		end
 	end
@@ -885,9 +899,9 @@ local CEM_YAW = 0 -- единый разворот всех камней
 
 -- Веса типов: свои меши по одной детали — основа поля; магазинные крупные
 -- памятники редкими акцентами, они дороже по деталям и заметно больше.
--- Восемь форм, и ни одна не доминирует: юзер сказал «надгробья сплошь одинаковые» —
--- прежние веса отдавали больше половины поля двум своим мешам. Добавлены кресты
--- (кельтский и на плинте) — именно силуэт креста ломает монотонность ряда.
+-- Шесть форм, и ни одна не доминирует: юзер сказал «надгробья сплошь одинаковые» —
+-- прежние веса отдавали больше половины поля двум своим мешам. Силуэт креста ломает
+-- монотонность ряда — после снятия кельтских его держит Tombstone_J (крест на плинте).
 -- `Tombstone_D` выброшен совсем: на нём были авторские подписи из стора
 -- (`SurfaceGui`/`SIGN` — «RIP Dienyans main account»), а детали лежали повёрнутыми
 -- на 90°, отчего памятник выглядел опрокинутым.
@@ -896,7 +910,7 @@ local CEM_YAW = 0 -- единый разворот всех камней
 -- вместо 582, кадр с дороги вырос до 298 480 треугольников. Разбор по типам (прячем
 -- группу, смотрим Opaque с одной точки) показал, что дело НЕ в количестве:
 --     Tombstone_H  -> 133 896 tris     Tombstone_J -> 2 964
---     Tombstone_B  -> 107 084 tris     Tombstone_G -> 2 634
+--     Tombstone_B  -> 107 084 tris     Tombstone_G -> 2 634   (B и H сняты, см. BANNED_TEMPLATES)
 --     Tombstone    ->   7 170 tris     Tombstone_C -> 1 954
 --     Tombstone_E  ->   1 064 tris     Tombstone_F ->   994
 -- Два меша (оба мои, из Blender, с бевелем) стоят по ~730-770 треугольников штука
@@ -906,13 +920,13 @@ local CEM_YAW = 0 -- единый разворот всех камней
 -- рядах остался ровно таким же частым.
 local CEM_KINDS = {
 	{ name = "Tombstone", weight = 22, sMin = 1.0, sMax = 2.4 },
-	{ name = "Tombstone_J", weight = 20, sMin = 1.0, sMax = 1.9 }, -- крест на плинте, дешёвый
-	{ name = "Tombstone_C", weight = 16, sMin = 0.9, sMax = 1.8 },
-	{ name = "Tombstone_G", weight = 14, sMin = 1.2, sMax = 2.6 },
-	{ name = "Tombstone_F", weight = 12, sMin = 0.9, sMax = 1.6 },
+	{ name = "Tombstone_J", weight = 24, sMin = 1.0, sMax = 1.9 }, -- крест на плинте, дешёвый; +4 от снятого Tombstone_B
+	{ name = "Tombstone_C", weight = 18, sMin = 0.9, sMax = 1.8 }, -- +2
+	{ name = "Tombstone_G", weight = 16, sMin = 1.2, sMax = 2.6 }, -- +2
+	{ name = "Tombstone_F", weight = 14, sMin = 0.9, sMax = 1.6 }, -- +2
 	{ name = "Tombstone_E", weight = 6, sMin = 0.6, sMax = 1.0 }, -- обелиск, высокий
-	{ name = "Tombstone_H", weight = 6, sMin = 0.9, sMax = 1.8 }, -- кельтский крест: дорогой, редкий
-	{ name = "Tombstone_B", weight = 4, sMin = 1.0, sMax = 2.2 }, -- тоже дорогой, самый редкий
+	-- Tombstone_B и Tombstone_H (кельтские кресты, вместе 10 из 100) СНЯТЫ 2026-10-09,
+	-- см. BANNED_TEMPLATES выше. Их доля ушла дешёвым вариантам — заодно легче по кадру.
 }
 
 -- Камень одного тона на всё поле тоже читается как копипаста, поэтому у каждого
