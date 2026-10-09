@@ -1575,7 +1575,7 @@ workspace:SetAttribute("MapReady", true)
 
 print(
 	`[MapBuilder] Расставлено: {#MapLayout.Hazards} hazard'ов, {#MapLayout.Graves} могил, {#MapLayout.Lamps} фонарей, {#MapLayout.DeadTrees} деревьев (по карте). `
-		.. `Кладбище рядами: {nCemetery} надгробий (участок по размеру камня, 8 типов). `
+		.. `Кладбище рядами: {nCemetery} надгробий (участок по размеру камня, {#CEM_KINDS} типов). `
 		.. `Деревья: {nTree} по площади + {nAlleyTrees} в аллеях (тени только у {shadowTrees} вдоль трассы). Фонарей у дороги: {nClusterLamps}. `
 		.. `Поле = {MapGen.FieldMaterial.Name} без декорации, трава только у камней: {grassCount} пучков. Ограда по периметру ±335.`
 )
